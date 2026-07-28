@@ -1,0 +1,29 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+sqlalchemy>=2.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+pytest>=8.0.0
+httpx>=0.27.0
+# Starlette 1.x TestClient backend. Plain httpx remains for provider SDKs.
+httpx2>=2.7.0
+openai>=1.0.0
+anthropic>=0.18.0
+google-generativeai>=0.3.0
+fpdf2>=2.7.0
+matplotlib>=3.7.0
+apscheduler>=3.10.0
+cryptography>=42.0.0
+
+# Additional dependencies (missing from requirements)
+thefuzz>=0.22.0
+python-Levenshtein>=0.25.0
+google-auth-oauthlib>=1.0.0
+# ONNX-based local embeddings. The ~90 MB model downloads only when enabled.
+fastembed==0.8.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+pdfplumber>=0.10.0
+xlrd>=2.0.2
+openpyxl>=3.1.5
+python-multipart>=0.0.17

@@ -1,0 +1,89 @@
+# Secrets and local credentials
+.env
+.env.*
+!.env.example
+backend/data/.encryption_key
+backend/data/.machine_id
+backend/data/client_secret.json
+backend/data/gmail_token.json
+backend/data/private/
+backend/data/models/
+*.pem
+*.key
+.claude/
+
+# Local analysis notes that contain real statement/account details
+GODFIN_Statement_Parser_Fix.md
+statement_details_help_parser.md
+report should look .png
+
+# Real financial documents (only explicitly redacted fixtures may be tracked)
+*.xls
+*.xlsx
+*.pdf
+screenshots/
+!website/public/screenshots/
+!website/public/screenshots/**
+
+# Local databases, backups, and logs
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+backups/
+**/backups/
+logs/
+**/logs/
+godfin_startup.log
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# JavaScript and build artifacts
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+desktop/assets/icon.iconset/
+desktop/release/
+
+# Browser-test artifacts
+playwright-tests/reports/
+playwright-tests/test-results/
+test-results/
+playwright-report/
+*.webm
+trace.zip
+
+# Local tool state
+.claude/settings.local.json
+.codex/
+rollback_checkpoints/
+verification_logs/
+
+# IDE and operating system
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

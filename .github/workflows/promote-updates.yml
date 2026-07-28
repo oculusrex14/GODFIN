@@ -1,0 +1,53 @@
+name: Promote signed release to update feed
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Signed draft tag to promote (for example v1.0.0)
+        required: true
+        type: string
+      confirmation:
+        description: Type PUBLISH_SIGNED_RELEASE
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    if: inputs.confirmation == 'PUBLISH_SIGNED_RELEASE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release-production
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      GH_TOKEN: ${{ github.token }}
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_BUCKET: ${{ secrets.R2_RELEASE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download reviewed draft assets
+        run: gh release download "${{ inputs.tag }}" --dir artifacts
+      - name: Reject unsigned or incomplete release sets
+        shell: bash
+        run: |
+          test -n "$(find artifacts -name '*.dmg' -print -quit)"
+          test -n "$(find artifacts -name '*.exe' -print -quit)"
+          test -n "$(find artifacts -name '*.AppImage' -print -quit)"
+          test -n "$(find artifacts -name 'latest*.yml' -print -quit)"
+      - name: Publish immutable version and current update metadata
+        shell: bash
+        run: |
+          version="${{ inputs.tag }}"
+          aws s3 sync artifacts "s3://${R2_BUCKET}/${version}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --no-progress
+          while IFS= read -r -d '' metadata; do
+            aws s3 cp "$metadata" "s3://${R2_BUCKET}/$(basename "$metadata")" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --no-progress
+          done < <(find artifacts -maxdepth 1 -name 'latest*.yml' -print0)

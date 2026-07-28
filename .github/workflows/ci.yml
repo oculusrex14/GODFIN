@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-lock.txt
+      - run: python -m pip install --require-hashes -r backend/requirements-lock.txt
+      - run: python -m pytest backend/tests -q
+        env:
+          GODFIN_TESTING: "1"
+      - run: python -m pip install pip-audit==2.10.1
+      - run: python -m pip_audit -r backend/requirements-lock.txt
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm audit --omit=dev
+        working-directory: frontend
+
+  website:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+        working-directory: website
+      - run: npm run build
+        working-directory: website
+      - run: npm audit --omit=dev
+        working-directory: website
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-lock.txt
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            playwright-tests/package-lock.json
+      - run: python -m pip install --require-hashes -r backend/requirements-lock.txt
+      - run: npm ci
+        working-directory: frontend
+      - run: npm ci
+        working-directory: playwright-tests
+      - run: npx playwright install --with-deps chromium
+        working-directory: playwright-tests
+      - name: Generate redacted statement fixture
+        run: python playwright-tests/fixtures/generate_redacted_statement.py "$RUNNER_TEMP/redacted-statement.pdf"
+      - name: Start local app
+        shell: bash
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 5100 --app-dir backend > "$RUNNER_TEMP/godfin-backend.log" 2>&1 &
+          npm --prefix frontend run dev -- --host 127.0.0.1 --port 5200 > "$RUNNER_TEMP/godfin-frontend.log" 2>&1 &
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:5100/api/v1/health >/dev/null &&
+               curl --fail --silent http://127.0.0.1:5200 >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/godfin-backend.log"
+          cat "$RUNNER_TEMP/godfin-frontend.log"
+          exit 1
+        env:
+          DB_PATH: ${{ runner.temp }}/godfin-e2e.db
+          GODFIN_DISABLE_KEYCHAIN: "1"
+          GODFIN_ENCRYPTION_KEY_FILE: ${{ runner.temp }}/godfin-e2e.key
+      - run: npx playwright test tests/production-smoke.test.js
+        working-directory: playwright-tests
+        env:
+          CI: "true"
+          GODFIN_E2E_STATEMENT: ${{ runner.temp }}/redacted-statement.pdf
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: e2e-diagnostics
+          path: |
+            playwright-tests/reports
+            ${{ runner.temp }}/godfin-backend.log
+            ${{ runner.temp }}/godfin-frontend.log
+          retention-days: 7
+
+  desktop-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run audit:prod
+        working-directory: desktop
+      - run: |
+          node --check main.cjs
+          node --check scripts/after-pack.cjs
+          node --check scripts/build-assets.mjs
+        working-directory: desktop

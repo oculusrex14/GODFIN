@@ -1,0 +1,431 @@
+from __future__ import annotations
+
+import os
+import re
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.core.auth import get_current_user, verify_pin_hash
+from app.core.backup import create_backup, list_backups
+from app.core.config import settings as app_config
+from app.core.database import get_db
+from app.core.encryption import SecretDecryptionError, decrypt, get_encryption_health
+from app.core.license import license_status
+from app.models.app_setting import AppSetting
+from app.models.classification_rule import ClassificationRule
+from app.models.llm_config import LLMConfiguration
+
+router = APIRouter()
+
+DB_PATH = str(app_config.database_path)
+
+
+def _get_backup_dir(db: Session) -> str:
+    setting = db.query(AppSetting).filter_by(key='backup_directory').first()
+    return setting.value if setting else './backups'
+
+
+# --- App Settings ---
+
+@router.get("")
+def get_settings(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    settings = db.query(AppSetting).all()
+    # Exclude sensitive settings from response
+    sensitive_keys = {'pin_hash', 'auth_token', 'license_key'}
+    return {s.key: s.value for s in settings if s.key not in sensitive_keys}
+
+
+class SettingUpdate(BaseModel):
+    value: str
+
+
+@router.get("/health")
+def settings_health(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.gmail_service import CLIENT_SECRETS_FILE, TOKEN_FILE, gmail_service
+
+    encryption = get_encryption_health()
+
+    gmail_connected = gmail_service.is_connected
+    if gmail_connected:
+        gmail_status = "connected"
+        gmail_message = "Gmail credentials are valid."
+    elif TOKEN_FILE.exists():
+        gmail_status = "needs_reauth"
+        gmail_message = "Stored Gmail credentials need to be re-authorized."
+    elif CLIENT_SECRETS_FILE.exists() or (
+        os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET")
+    ):
+        gmail_status = "ready"
+        gmail_message = "Gmail is configured and ready to connect."
+    else:
+        gmail_status = "not_configured"
+        gmail_message = "Add Google OAuth credentials to connect Gmail."
+
+    active_llm = db.query(LLMConfiguration).filter_by(is_active=True).first()
+    llm_status = "not_configured"
+    llm_message = "No LLM provider is active. Rules-only classification is available."
+    if active_llm:
+        llm_status = "ok"
+        llm_message = f"{active_llm.provider} / {active_llm.model} is active."
+        if active_llm.api_key:
+            try:
+                decrypt(active_llm.api_key)
+            except SecretDecryptionError:
+                llm_status = "decrypt_failed"
+                llm_message = "Re-enter the API key for the active LLM provider."
+
+    backup_dir = _get_backup_dir(db)
+    backups = list_backups(backup_dir)
+    latest_backup = backups[0] if backups else None
+
+    last_ingest = db.query(AppSetting).filter_by(key="last_ingestion_run").first()
+    network_setting = db.query(AppSetting).filter_by(key="allow_network_access").first()
+    license_health = license_status(db)
+
+    return {
+        "encryption": encryption,
+        "gmail": {
+            "status": gmail_status,
+            "connected": gmail_connected,
+            "message": gmail_message,
+        },
+        "llm": {
+            "status": llm_status,
+            "provider": active_llm.provider if active_llm else None,
+            "model": active_llm.model if active_llm else None,
+            "message": llm_message,
+        },
+        "backup": {
+            "status": "ok" if latest_backup else "never",
+            "directory": backup_dir,
+            "count": len(backups),
+            "last_backup": latest_backup,
+            "message": (
+                "Backups are available."
+                if latest_backup
+                else "No backup has been created yet."
+            ),
+        },
+        "ingestion": {
+            "status": "ok" if last_ingest and last_ingest.value else "never",
+            "last_run": last_ingest.value if last_ingest else None,
+        },
+        "network": {
+            "allow_network_access": bool(
+                network_setting and network_setting.value == "true"
+            ),
+            "message": "A restart is required after changing network access.",
+        },
+        "license": {
+            "status": "ok" if license_health["valid"] else license_health["status"],
+            "tier": license_health["tier"],
+            "message": license_health["message"],
+        },
+    }
+
+
+@router.put("/{key}")
+def update_setting(
+    key: str,
+    body: SettingUpdate,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    setting = db.query(AppSetting).filter_by(key=key).first()
+    if not setting:
+        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+
+    # Protect sensitive settings
+    if key in ('pin_hash',):
+        raise HTTPException(status_code=403, detail="Cannot update this setting directly")
+    if key == "allow_network_access" and body.value not in {"true", "false"}:
+        raise HTTPException(status_code=400, detail="Network access must be true or false")
+
+    setting.value = body.value
+    db.commit()
+    return {
+        'key': key,
+        'value': body.value,
+        'restart_required': key == "allow_network_access",
+    }
+
+
+# --- Backup ---
+
+@router.post("/backup")
+def trigger_backup(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    backup_dir = _get_backup_dir(db)
+    try:
+        filename = create_backup(DB_PATH, backup_dir)
+        return {'filename': filename, 'status': 'success'}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/backups")
+def get_backups(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    backup_dir = _get_backup_dir(db)
+    return list_backups(backup_dir)
+
+
+# --- Developer Mode ---
+
+@router.get("/developer")
+def developer_mode_status(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from sqlalchemy import func
+    from app.models.transaction import Transaction
+    from app.models.merchant_memory import MerchantMemory
+
+    setting = db.query(AppSetting).filter_by(key='developer_mode').first()
+    enabled = setting.value == 'true' if setting else False
+
+    rules = db.query(ClassificationRule).filter_by(is_active=True).all()
+    rules_list = [
+        {
+            'id': r.id,
+            'rule_type': r.rule_type,
+            'pattern': r.pattern,
+            'category': r.category,
+            'subcategory': r.subcategory,
+            'priority': r.priority,
+            'is_system': r.is_system,
+        }
+        for r in rules
+    ]
+
+    # Classification health metrics
+    source_breakdown = (
+        db.query(Transaction.classification_source, func.count(Transaction.id))
+        .filter(Transaction.status != 'deleted', Transaction.classification_source.isnot(None))
+        .group_by(Transaction.classification_source)
+        .all()
+    )
+    source_counts = {source: count for source, count in source_breakdown}
+
+    avg_confidence_rows = (
+        db.query(Transaction.classification_source, func.avg(Transaction.confidence))
+        .filter(Transaction.status != 'deleted', Transaction.confidence.isnot(None))
+        .group_by(Transaction.classification_source)
+        .all()
+    )
+    avg_confidence = {source: round(float(avg), 3) for source, avg in avg_confidence_rows if avg is not None}
+
+    unclassified = (
+        db.query(func.count(Transaction.id))
+        .filter(Transaction.status != 'deleted', Transaction.category.is_(None))
+        .scalar()
+    )
+
+    merchant_memory_count = db.query(func.count(MerchantMemory.id)).scalar()
+
+    return {
+        'developer_mode': enabled,
+        'rules': rules_list,
+        'classification_health': {
+            'source_counts': source_counts,
+            'avg_confidence': avg_confidence,
+            'unclassified_count': unclassified or 0,
+            'merchant_memory_count': merchant_memory_count or 0,
+            'active_rules_count': len(rules_list),
+        },
+    }
+
+
+class RuleCreate(BaseModel):
+    rule_type: str = Field(..., pattern=r'^(regex|contains|exact)$')
+    pattern: str = Field(..., min_length=1)
+    category: str = Field(..., min_length=1)
+    subcategory: str = None
+    priority: int = 100
+
+
+class RuleUpdate(BaseModel):
+    pattern: str = Field(None, min_length=1)
+    category: str = Field(None, min_length=1)
+    subcategory: str = None
+    priority: int = None
+
+
+@router.post("/developer/rules", status_code=201)
+def create_rule(
+    body: RuleCreate,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    setting = db.query(AppSetting).filter_by(key='developer_mode').first()
+    if not setting or setting.value != 'true':
+        raise HTTPException(status_code=403, detail="Developer mode is not enabled")
+
+    if body.rule_type == 'regex':
+        try:
+            re.compile(body.pattern)
+        except re.error as e:
+            raise HTTPException(status_code=400, detail=f"Invalid regex: {e}")
+
+    import uuid
+    rule = ClassificationRule(
+        id=str(uuid.uuid4()),
+        rule_type=body.rule_type,
+        pattern=body.pattern,
+        category=body.category,
+        subcategory=body.subcategory,
+        priority=body.priority,
+        is_system=False,
+        is_active=True,
+    )
+    db.add(rule)
+    db.commit()
+    return {
+        'id': rule.id,
+        'rule_type': rule.rule_type,
+        'pattern': rule.pattern,
+        'category': rule.category,
+        'subcategory': rule.subcategory,
+        'priority': rule.priority,
+        'is_system': False,
+    }
+
+
+@router.put("/developer/rules/{rule_id}")
+def update_rule(
+    rule_id: str,
+    body: RuleUpdate,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    # Check developer mode is enabled
+    setting = db.query(AppSetting).filter_by(key='developer_mode').first()
+    if not setting or setting.value != 'true':
+        raise HTTPException(status_code=403, detail="Developer mode is not enabled")
+
+    rule = db.query(ClassificationRule).filter_by(id=rule_id).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    if body.pattern is not None:
+        # Validate regex if rule_type is regex
+        if rule.rule_type == 'regex':
+            try:
+                re.compile(body.pattern)
+            except re.error as e:
+                raise HTTPException(status_code=400, detail=f"Invalid regex: {e}")
+        rule.pattern = body.pattern
+
+    if body.category is not None:
+        rule.category = body.category
+    if body.subcategory is not None:
+        rule.subcategory = body.subcategory
+    if body.priority is not None:
+        rule.priority = body.priority
+
+    db.commit()
+    return {'id': rule.id, 'status': 'updated'}
+
+
+@router.delete("/developer/rules/{rule_id}", status_code=204)
+def delete_rule(
+    rule_id: str,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    setting = db.query(AppSetting).filter_by(key='developer_mode').first()
+    if not setting or setting.value != 'true':
+        raise HTTPException(status_code=403, detail="Developer mode is not enabled")
+
+    rule = db.query(ClassificationRule).filter_by(id=rule_id).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    db.delete(rule)
+    db.commit()
+
+
+# --- Reset Data ---
+
+class ResetDataRequest(BaseModel):
+    pin: str = Field(..., min_length=1)
+    create_backup: bool = True
+
+
+@router.post("/reset-data", status_code=200)
+def reset_all_data(
+    body: ResetDataRequest,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Reset all transaction and dynamic data. PIN-protected."""
+    # 1. Verify PIN
+    pin_setting = db.query(AppSetting).filter_by(key='pin_hash').first()
+    if not pin_setting or not pin_setting.value:
+        raise HTTPException(status_code=400, detail='No PIN set')
+    if not verify_pin_hash(body.pin, pin_setting.value):
+        raise HTTPException(status_code=401, detail='Incorrect PIN')
+
+    # 2. Create backup first (safety net)
+    backup_filename = None
+    if body.create_backup:
+        try:
+            backup_dir = _get_backup_dir(db)
+            backup_filename = create_backup(DB_PATH, backup_dir)
+        except Exception:
+            pass  # Don't fail the reset if backup fails
+
+    # 3. Delete all dynamic data (preserve accounts, settings, rules)
+    from app.models.transaction import Transaction
+    from app.models.transaction_split import TransactionSplit
+    from app.models.audit_session import AuditSession
+    from app.models.audit_log import AuditLog
+    from app.models.merchant_memory import MerchantMemory
+    from app.models.monthly_aggregate import MonthlyAggregate
+    from app.models.recurring_pattern import RecurringPattern
+    from app.models.goal import Goal
+    from app.models.income_source import IncomeSource
+    from app.models.subscription import Subscription
+    from app.models.system_log import SystemLog
+
+    # Delete child tables FIRST (FK order matters):
+    # TransactionSplit → Transaction; AuditLog → Transaction
+    # Transaction → AuditSession; MonthlyAggregate → AuditSession
+    db.query(TransactionSplit).delete(synchronize_session=False)
+    db.query(AuditLog).delete(synchronize_session=False)
+    db.query(Transaction).delete(synchronize_session=False)
+    db.query(MonthlyAggregate).delete(synchronize_session=False)
+    db.query(AuditSession).delete(synchronize_session=False)
+    db.query(MerchantMemory).delete(synchronize_session=False)
+    db.query(RecurringPattern).delete(synchronize_session=False)
+    db.query(Goal).delete(synchronize_session=False)
+    db.query(IncomeSource).delete(synchronize_session=False)
+    db.query(Subscription).delete(synchronize_session=False)
+    db.query(SystemLog).delete(synchronize_session=False)
+
+    # 4. Reset ingestion tracking state
+    for key in ['last_ingestion_run', 'last_gmail_history_id', 'ingestion_history']:
+        setting = db.query(AppSetting).filter_by(key=key).first()
+        if setting:
+            setting.value = ''
+
+    db.commit()
+
+    return {
+        'success': True,
+        'backup_created': backup_filename is not None,
+        'backup_filename': backup_filename,
+        'message': 'All data has been reset. Accounts and settings preserved.',
+    }

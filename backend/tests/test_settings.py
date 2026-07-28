@@ -1,0 +1,181 @@
+from __future__ import annotations
+
+import os
+import tempfile
+import uuid
+from datetime import date
+
+from app.models.app_setting import AppSetting
+from app.models.transaction import Transaction
+from app.seed import SAVINGS_ACCOUNT_ID
+
+
+def _add_txn(db, merchant, amount, txn_date, category=None, txn_type='debit'):
+    txn = Transaction(
+        id=str(uuid.uuid4()),
+        date=txn_date,
+        raw_text=f'Test: {merchant} {amount}',
+        merchant_raw=merchant,
+        merchant_normalized=merchant.upper(),
+        amount=amount,
+        type=txn_type,
+        instrument='upi',
+        account_id=SAVINGS_ACCOUNT_ID,
+        source='manual',
+        category=category,
+        is_income=txn_type == 'credit',
+    )
+    db.add(txn)
+    db.flush()
+    return txn
+
+
+# --- Settings Endpoints ---
+
+def test_list_settings(auth_client):
+    resp = auth_client.get('/api/v1/settings')
+    assert resp.status_code == 200
+    data = resp.json()
+    assert 'user_timezone' in data
+    assert 'developer_mode' in data
+    assert 'backup_directory' in data
+
+
+def test_update_setting(auth_client):
+    resp = auth_client.put('/api/v1/settings/user_timezone', json={'value': 'US/Eastern'})
+    assert resp.status_code == 200
+    assert resp.json()['value'] == 'US/Eastern'
+
+
+def test_update_protected_setting(auth_client):
+    resp = auth_client.put('/api/v1/settings/pin_hash', json={'value': 'hacked'})
+    assert resp.status_code == 403
+
+
+def test_update_nonexistent_setting(auth_client):
+    resp = auth_client.put('/api/v1/settings/does_not_exist', json={'value': 'test'})
+    assert resp.status_code == 404
+
+
+def test_settings_health_card_payload(auth_client):
+    resp = auth_client.get('/api/v1/settings/health')
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data) == {
+        'encryption', 'gmail', 'llm', 'backup', 'ingestion', 'network',
+        'license',
+    }
+    assert data['encryption']['status'] == 'ok'
+    assert data['network']['allow_network_access'] is False
+
+
+def test_network_access_toggle_requires_restart(auth_client):
+    resp = auth_client.put(
+        '/api/v1/settings/allow_network_access',
+        json={'value': 'true'},
+    )
+    assert resp.status_code == 200
+    assert resp.json()['restart_required'] is True
+
+    health = auth_client.get('/api/v1/settings/health').json()
+    assert health['network']['allow_network_access'] is True
+
+
+# --- Developer Mode ---
+
+def test_developer_mode_status(auth_client):
+    resp = auth_client.get('/api/v1/settings/developer')
+    assert resp.status_code == 200
+    data = resp.json()
+    assert 'developer_mode' in data
+    assert 'rules' in data
+    assert isinstance(data['rules'], list)
+
+
+# --- CSV Export ---
+
+def test_csv_export_empty(auth_client):
+    resp = auth_client.get('/api/v1/reports/csv?month=2020-01')
+    assert resp.status_code == 200
+    assert resp.headers['content-type'] == 'text/csv; charset=utf-8'
+    content = resp.text
+    lines = content.strip().split('\n')
+    assert len(lines) == 1  # Header only
+    assert 'Date' in lines[0]
+    assert 'Amount' in lines[0]
+
+
+def test_csv_export_with_data(auth_client, db_session):
+    _add_txn(db_session, 'SWIGGY', 500, date(2025, 6, 5), category='FOOD & DINING')
+    _add_txn(db_session, 'SALARY', 75000, date(2025, 6, 1), category='INCOME', txn_type='credit')
+    _add_txn(db_session, 'RENT', 20000, date(2025, 6, 3), category='HOUSING')
+    db_session.commit()
+
+    resp = auth_client.get('/api/v1/reports/csv?month=2025-06')
+    assert resp.status_code == 200
+    content = resp.text.strip()
+    lines = [l for l in content.split('\n') if l.strip()]
+    assert len(lines) >= 3  # Header + at least 2 transactions
+    assert 'SWIGGY' in content
+    assert 'RENT' in content
+
+
+# --- Backup (unit tests) ---
+
+def test_create_and_list_backups():
+    from app.core.backup import create_backup, list_backups
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a dummy source DB
+        import sqlite3
+        src_path = os.path.join(tmpdir, 'test.db')
+        conn = sqlite3.connect(src_path)
+        conn.execute('CREATE TABLE test (id INTEGER)')
+        conn.close()
+
+        backup_dir = os.path.join(tmpdir, 'backups')
+        filename = create_backup(src_path, backup_dir)
+
+        assert filename.startswith('godfin_backup_')
+        assert filename.endswith('.db')
+
+        backups = list_backups(backup_dir)
+        assert len(backups) == 1
+        assert backups[0]['filename'] == filename
+        assert backups[0]['size_bytes'] > 0
+
+
+def test_list_backups_empty():
+    from app.core.backup import list_backups
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        backups = list_backups(os.path.join(tmpdir, 'nonexistent'))
+        assert backups == []
+
+
+# --- Data Reset ---
+
+def test_reset_data_success(auth_client, db_session):
+    # Add some data
+    _add_txn(db_session, 'SWIGGY', 500, date(2025, 6, 5), category='FOOD & DINING')
+    db_session.commit()
+
+    # Backups are covered with a real temporary SQLite file above; this API
+    # fixture uses a shared in-memory database and must not touch the user's DB.
+    resp = auth_client.post('/api/v1/settings/reset-data', json={'pin': '1234', 'create_backup': False})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data['success'] is True
+    assert data['backup_created'] is False
+    assert data['backup_filename'] is None
+    assert 'All data has been reset' in data['message']
+
+    # Verify transactions are gone
+    db_session.expire_all()
+    assert db_session.query(Transaction).count() == 0
+
+
+def test_reset_data_wrong_pin(auth_client):
+    resp = auth_client.post('/api/v1/settings/reset-data', json={'pin': '0000', 'create_backup': False})
+    assert resp.status_code == 401
+    assert resp.json()['detail'] == 'Incorrect PIN'

@@ -1,0 +1,40 @@
+# Sensitive files that should never be committed
+
+# Gmail OAuth secrets
+data/client_secret.json
+
+# Token files
+data/gmail_token.json
+data/.encryption_key
+data/.machine_id
+
+# Database
+*.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

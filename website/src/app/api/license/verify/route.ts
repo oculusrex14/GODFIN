@@ -1,0 +1,64 @@
+import { NextResponse } from "next/server";
+
+import { hashLicenseKey, hashMachineId } from "@/lib/license";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function POST(request: Request) {
+  try {
+    const body = (await request.json()) as {
+      license_key?: unknown;
+      machine_id?: unknown;
+      app_version?: unknown;
+    };
+    if (
+      typeof body.license_key !== "string" ||
+      body.license_key.length < 20 ||
+      body.license_key.length > 120 ||
+      typeof body.machine_id !== "string" ||
+      body.machine_id.length < 8 ||
+      body.machine_id.length > 300
+    ) {
+      return NextResponse.json(
+        { valid: false, code: "INVALID_REQUEST", message: "License key or device ID is invalid." },
+        { status: 400 },
+      );
+    }
+
+    const admin = createAdminClient();
+    const { data, error } = await admin.rpc("verify_license", {
+      p_license_hash: hashLicenseKey(body.license_key),
+      p_machine_hash: hashMachineId(body.machine_id),
+      p_app_version:
+        typeof body.app_version === "string" ? body.app_version.slice(0, 32) : null,
+    });
+    if (error) throw error;
+
+    const result = Array.isArray(data) ? data[0] : data;
+    const status = result?.valid ? 200 : 403;
+    return NextResponse.json(
+      result || {
+        valid: false,
+        code: "LICENSE_NOT_FOUND",
+        message: "License key was not recognized.",
+      },
+      {
+        status,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
+  } catch (error) {
+    console.error("License verification failed", error);
+    return NextResponse.json(
+      {
+        valid: false,
+        code: "VERIFY_UNAVAILABLE",
+        message: "License verification is temporarily unavailable.",
+        retriable: true,
+      },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+}

@@ -1,0 +1,27 @@
+from fastapi import APIRouter
+
+from app.api.v1.endpoints import accounts, advisor, auth, audit, budget, cash_flow, dashboard, gmail, health, income, license, llm, onboarding, reports, review, settings, statement, subscriptions, system, taxonomy, transactions, transfers
+
+router = APIRouter()
+router.include_router(health.router, tags=["system"])
+router.include_router(taxonomy.router, tags=["taxonomy"])
+router.include_router(auth.router, prefix="/auth", tags=["auth"])
+router.include_router(transactions.router, prefix="/transactions", tags=["transactions"])
+router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
+router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+router.include_router(gmail.router, tags=["gmail"])
+router.include_router(review.router, tags=["review"])
+router.include_router(statement.router, tags=["statement"])
+router.include_router(budget.router, tags=["budget"])
+router.include_router(reports.router, prefix="/reports", tags=["reports"])
+router.include_router(audit.router, prefix="/audit", tags=["audit"])
+router.include_router(settings.router, prefix="/settings", tags=["settings"])
+router.include_router(license.router, prefix="/license", tags=["license"])
+router.include_router(income.router, prefix="/income", tags=["income"])
+router.include_router(llm.router, prefix="/llm", tags=["llm"])
+router.include_router(subscriptions.router, prefix="/subscriptions", tags=["subscriptions"])
+router.include_router(advisor.router, prefix="/advisor", tags=["advisor"])
+router.include_router(cash_flow.router, prefix="/cash-flow", tags=["cash-flow"])
+router.include_router(transfers.router, prefix="/transfers", tags=["transfers"])
+router.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
+router.include_router(system.router, prefix="/system", tags=["system"])

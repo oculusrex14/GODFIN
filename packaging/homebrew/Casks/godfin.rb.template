@@ -1,0 +1,28 @@
+cask "godfin" do
+  version "__VERSION__"
+
+  on_arm do
+    sha256 "__SHA256_ARM64__"
+    url "https://releases.godfin.dev/v#{version}/GODFIN-#{version}-mac-arm64.dmg"
+  end
+
+  on_intel do
+    sha256 "__SHA256_X64__"
+    url "https://releases.godfin.dev/v#{version}/GODFIN-#{version}-mac-x64.dmg"
+  end
+
+  name "GODFIN"
+  desc "Local-first personal finance for Indian banks"
+  homepage "https://godfin.dev/"
+
+  depends_on macos: ">= :ventura"
+
+  app "GODFIN.app"
+
+  zap trash: [
+    "~/Library/Application Support/GODFIN",
+    "~/Library/Caches/dev.godfin.desktop",
+    "~/Library/Preferences/dev.godfin.desktop.plist",
+    "~/Library/Saved Application State/dev.godfin.desktop.savedState",
+  ]
+end
