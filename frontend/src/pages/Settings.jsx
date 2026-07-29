@@ -5,23 +5,27 @@ import { AnimatePresence } from 'framer-motion';
 import {
   Settings as SettingsIcon, Shield, Database, Download, Code, Mail, Cpu, Palette,
   Server, AlertTriangle, Plus, Trash2, X, Trash, Activity, CheckCircle2, KeyRound,
-  Landmark,
+  Landmark, BookOpen, PlayCircle, RotateCcw, BrainCircuit,
 } from 'lucide-react';
 import {
   fetchSettings, fetchSettingsHealth, updateSetting, fetchDeveloperMode, triggerBackup, fetchBackups,
   downloadCSV, fetchSystemStatus, restartBackend,
   verifyPin, createRule, deleteRule, resetData,
   fetchEmbeddingStatus, enableEmbeddings,
+  fetchOnboardingStatus, updateOnboardingStatus,
 } from '../api/client';
 import { GlassSection } from '../components/GlassSection';
 import { GlassButton } from '../components/GlassButton';
 import PinInput from '../components/PinInput';
 import GmailSettings from '../components/settings/GmailSettings';
 import LLMSettings from '../components/settings/LLMSettings';
+import LocalAISetup from '../components/settings/LocalAISetup';
+import ClassificationMemorySettings from '../components/settings/ClassificationMemorySettings';
 import LicenseSettings from '../components/settings/LicenseSettings';
 import AccountSettings from '../components/settings/AccountSettings';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
+import { useLocation } from '../router';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -81,6 +85,7 @@ function HealthItem({ label, health }) {
 }
 
 export default function Settings() {
+  const { navigate } = useLocation();
   const queryClient = useQueryClient();
   const { addToast: showToast } = useToast();
   const [csvMonth, setCsvMonth] = useState(() => {
@@ -100,6 +105,11 @@ export default function Settings() {
   const { data: settings } = useQuery({
     queryKey: ['settings'],
     queryFn: fetchSettings,
+  });
+
+  const { data: onboarding } = useQuery({
+    queryKey: ['onboarding'],
+    queryFn: fetchOnboardingStatus,
   });
 
   const { data: health } = useQuery({
@@ -155,6 +165,11 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ['embeddingStatus'] });
       showToast('Embedding model setup started.', 'info');
     },
+  });
+
+  const learningMutation = useMutation({
+    mutationFn: updateOnboardingStatus,
+    onSuccess: data => queryClient.setQueryData(['onboarding'], data),
   });
 
   const backupMutation = useMutation({
@@ -292,6 +307,48 @@ export default function Settings() {
       </motion.div>
 
       {/* Lifetime license */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
+        <GlassSection title="Setup & Learning" icon={BookOpen}>
+          <p className="text-white/35 text-sm leading-relaxed">
+            Resume first-run setup or revisit the beginner tutorial at any time. Tutorial examples are synthetic.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {!onboarding?.completed && (
+              <GlassButton
+                icon={<PlayCircle size={14} />}
+                onClick={async () => {
+                  await learningMutation.mutateAsync({ deferred: false });
+                  navigate('/onboarding');
+                }}
+              >
+                Resume setup
+              </GlassButton>
+            )}
+            <GlassButton
+              variant="secondary"
+              icon={<BookOpen size={14} />}
+              onClick={() => navigate('/learn')}
+            >
+              Learn GODFIN
+            </GlassButton>
+            <GlassButton
+              variant="secondary"
+              icon={<RotateCcw size={14} />}
+              onClick={async () => {
+                await learningMutation.mutateAsync({ restart_tutorial: true });
+                navigate('/learn');
+              }}
+            >
+              Restart tutorial
+            </GlassButton>
+          </div>
+          <p className="mt-3 text-white/25 text-xs">
+            Tutorial v{onboarding?.tutorial_version || 1} · {onboarding?.tutorial_completed ? 'Completed' : `Lesson ${onboarding?.tutorial_step || 1} saved`}
+          </p>
+        </GlassSection>
+      </motion.div>
+
+      {/* Lifetime license */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }}>
         <GlassSection title="License & Plan" icon={KeyRound}>
           <LicenseSettings />
@@ -315,7 +372,10 @@ export default function Settings() {
       {/* AI Model */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
         <GlassSection title="AI Model Configuration" icon={Cpu}>
-          <LLMSettings />
+          <LocalAISetup compact />
+          <div className="mt-5 pt-5 border-t border-white/[0.06]">
+            <LLMSettings />
+          </div>
           <div className="mt-4 pt-4 border-t border-white/[0.06]">
             <div className="flex items-center justify-between">
               <div>
@@ -412,6 +472,15 @@ export default function Settings() {
               </div>
             )}
           </div>
+        </GlassSection>
+      </motion.div>
+
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
+        <GlassSection title="Classification Learning" icon={BrainCircuit}>
+          <p className="mb-4 text-white/35 text-sm leading-relaxed">
+            GODFIN uses supervised learning from your explicit corrections—not reinforcement learning. Exact merchant memory is always the strongest learned match.
+          </p>
+          <ClassificationMemorySettings />
         </GlassSection>
       </motion.div>
 

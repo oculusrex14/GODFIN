@@ -829,6 +829,76 @@ export function updateOnboardingStatus(data) {
   });
 }
 
+// Guided local AI
+export function fetchLocalAIProfile() {
+  return apiFetch('/system/local-ai/profile');
+}
+
+export function chooseLocalAI(choice) {
+  return apiFetch('/system/local-ai/choice', {
+    method: 'PUT',
+    body: JSON.stringify({ choice }),
+  });
+}
+
+export function fetchLocalAIDownload() {
+  return apiFetch('/system/local-ai/download');
+}
+
+export function downloadLocalAIModel(model) {
+  return apiFetch('/system/local-ai/download', {
+    method: 'POST',
+    body: JSON.stringify({ model, confirmed: true }),
+  });
+}
+
+export function cancelLocalAIDownload() {
+  return apiFetch('/system/local-ai/download/cancel', { method: 'POST' });
+}
+
+export function benchmarkLocalAI(model) {
+  return apiFetch('/system/local-ai/benchmark', {
+    method: 'POST',
+    body: JSON.stringify({ model, confirmed: true }),
+  });
+}
+
+export function fetchClassificationMemory(limit = 100) {
+  return apiFetch(`/settings/classification-memory?limit=${limit}`);
+}
+
+export function undoClassificationCorrection(correctionId) {
+  return apiFetch(`/settings/classification-memory/${correctionId}/undo`, {
+    method: 'POST',
+  });
+}
+
+export function updatePersonalClassifier(enabled) {
+  return apiFetch('/settings/classification-memory/personal', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function resetClassificationMemory(pin) {
+  return apiFetch('/settings/classification-memory/reset', {
+    method: 'POST',
+    body: JSON.stringify({ pin }),
+  });
+}
+
+export async function downloadClassificationMemory() {
+  const blob = await apiFetch('/settings/classification-memory/export', {
+    responseType: 'blob',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'godfin-classification-memory.csv';
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export const authApi = {
   status: fetchAuthStatus,
   setPin,
@@ -897,6 +967,20 @@ export const settingsApi = {
   developer: fetchDeveloperMode,
   embeddingStatus: fetchEmbeddingStatus,
   enableEmbeddings,
+  classificationMemory: fetchClassificationMemory,
+  undoClassificationCorrection,
+  updatePersonalClassifier,
+  resetClassificationMemory,
+  downloadClassificationMemory,
+};
+
+export const localAIApi = {
+  profile: fetchLocalAIProfile,
+  choose: chooseLocalAI,
+  downloadStatus: fetchLocalAIDownload,
+  download: downloadLocalAIModel,
+  cancelDownload: cancelLocalAIDownload,
+  benchmark: benchmarkLocalAI,
 };
 
 export const licenseApi = {

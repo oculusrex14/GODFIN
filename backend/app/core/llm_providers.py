@@ -709,12 +709,11 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
             "models": {
                 "manual": True,
                 "suggestions": [
-                    "llama3.1:8b",
-                    "mistral:7b",
-                    "qwen2.5:7b",
-                    "gemma3:4b",
-                    "phi3:mini",
-                    "deepseek-coder:6.7b",
+                    "qwen3:1.7b",
+                    "qwen3:4b",
+                    "qwen3:8b",
+                    "qwen3.6:27b",
+                    "qwen3.6:35b-a3b",
                 ]
             },
             "description": "Run models locally on your machine"

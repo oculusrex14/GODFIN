@@ -220,8 +220,46 @@ def test_first_pin_starts_onboarding(auth_client):
     response = auth_client.get("/api/v1/onboarding")
     assert response.status_code == 200
     assert response.json()["completed"] is False
+    assert response.json()["deferred"] is False
+    assert response.json()["step_count"] == 6
     response = auth_client.put(
-        "/api/v1/onboarding", json={"step": 5, "completed": True}
+        "/api/v1/onboarding", json={"step": 6, "completed": True}
     )
     assert response.status_code == 200
     assert response.json()["completed"] is True
+
+
+def test_finish_later_preserves_setup_and_tutorial_progress(auth_client):
+    response = auth_client.put(
+        "/api/v1/onboarding",
+        json={"step": 4, "deferred": True},
+    )
+    assert response.status_code == 200
+    status = response.json()
+    assert status["completed"] is False
+    assert status["deferred"] is True
+    assert status["step"] == 4
+
+    response = auth_client.put(
+        "/api/v1/onboarding",
+        json={"tutorial_step": 7},
+    )
+    status = response.json()
+    assert status["tutorial_step"] == 7
+    assert status["tutorial_completed"] is False
+
+
+def test_tutorial_completion_is_versioned_and_restartable(auth_client):
+    completed = auth_client.put(
+        "/api/v1/onboarding",
+        json={"tutorial_step": 10, "tutorial_completed": True},
+    ).json()
+    assert completed["tutorial_completed"] is True
+    assert completed["tutorial_completed_version"] == completed["tutorial_version"]
+
+    restarted = auth_client.put(
+        "/api/v1/onboarding",
+        json={"restart_tutorial": True},
+    ).json()
+    assert restarted["tutorial_step"] == 1
+    assert restarted["tutorial_completed"] is False

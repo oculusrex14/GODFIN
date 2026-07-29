@@ -10,6 +10,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.classification_learning import (
+    classification_reason,
+    record_explicit_correction,
+)
 from app.core.classifier import validate_category, validate_subcategory
 from app.core.database import get_db
 from app.core.llm_service import call_llm
@@ -158,6 +162,9 @@ def list_review_queue(
                 "is_income": t.is_income or False,
                 "confidence": t.confidence,
                 "classification_source": t.classification_source,
+                "classification_reason": classification_reason(
+                    t.classification_source
+                ),
             }
             for t in items
         ],
@@ -178,6 +185,11 @@ def resolve_review(
         txn = db.query(Transaction).filter_by(id=transaction_id).first()
         if not txn:
             raise HTTPException(status_code=404, detail="Transaction not found")
+        if txn.is_locked:
+            raise HTTPException(
+                status_code=409,
+                detail="Finalized transactions are read-only. Reopen the month first.",
+            )
 
         if not validate_category(body.category):
             raise HTTPException(status_code=400, detail=f"Invalid category: {body.category}")
@@ -220,9 +232,23 @@ def resolve_review(
         # Update merchant_memory for future exact matches
         if txn.merchant_normalized:
             _update_merchant_memory(db, txn.merchant_normalized, body.category, body.subcategory)
+            record_explicit_correction(
+                db,
+                txn,
+                old_category,
+                old_subcategory,
+                body.category,
+                body.subcategory,
+            )
 
         db.commit()
-        return {"status": "resolved", "id": txn.id, "category": body.category}
+        return {
+            "status": "resolved",
+            "id": txn.id,
+            "category": body.category,
+            "learned": bool(txn.merchant_normalized),
+            "reason": classification_reason("user"),
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -245,12 +271,16 @@ def batch_resolve(
             if not txn:
                 errors.append(f"{item.id}: not found")
                 continue
+            if txn.is_locked:
+                errors.append(f"{item.id}: finalized transaction is read-only")
+                continue
 
             if not validate_category(item.category):
                 errors.append(f"{item.id}: invalid category {item.category}")
                 continue
 
             old_category = txn.category
+            old_subcategory = txn.subcategory
             txn.category = item.category
             txn.subcategory = item.subcategory
             txn.confidence = 1.0
@@ -272,6 +302,14 @@ def batch_resolve(
 
             if txn.merchant_normalized:
                 _update_merchant_memory(db, txn.merchant_normalized, item.category, item.subcategory)
+                record_explicit_correction(
+                    db,
+                    txn,
+                    old_category,
+                    old_subcategory,
+                    item.category,
+                    item.subcategory,
+                )
 
             resolved += 1
 

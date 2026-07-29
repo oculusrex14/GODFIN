@@ -17,11 +17,16 @@ from app.models.session import AuthSession
 from app.models.pin_attempt import PinAttempt
 from app.models.transfer_match import TransferMatch
 from app.models.subscription_suggestion import SubscriptionSuggestion
+from app.models.classification_learning import (
+    ClassificationCorrection,
+    ClassificationPattern,
+)
 
 __all__ = [
     "Account", "Transaction", "TransactionSplit", "MerchantMemory",
     "MonthlyAggregate", "IncomeSource", "ClassificationRule", "Goal",
     "RecurringPattern", "AppSetting", "AuditSession", "AuditLog", "SystemLog",
     "LLMConfiguration", "Subscription", "AuthSession", "PinAttempt",
-    "TransferMatch", "SubscriptionSuggestion",
+    "TransferMatch", "SubscriptionSuggestion", "ClassificationCorrection",
+    "ClassificationPattern",
 ]

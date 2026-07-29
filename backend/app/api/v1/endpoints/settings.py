@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -364,6 +364,118 @@ class ResetDataRequest(BaseModel):
     create_backup: bool = True
 
 
+class ClassificationMemoryReset(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=8)
+
+
+class PersonalClassifierUpdate(BaseModel):
+    enabled: bool
+
+
+@router.get("/classification-memory")
+def classification_memory(
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import list_learning_memory
+
+    return list_learning_memory(db, limit=min(max(limit, 1), 500))
+
+
+@router.get("/classification-memory/export")
+def export_classification_memory(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import export_learning_memory_csv
+
+    return Response(
+        content=export_learning_memory_csv(db),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=godfin-classification-memory.csv"
+        },
+    )
+
+
+@router.post("/classification-memory/{correction_id}/undo")
+def undo_classification_memory(
+    correction_id: str,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import undo_correction
+
+    try:
+        correction = undo_correction(db, correction_id)
+        db.commit()
+        return {
+            "status": "undone",
+            "correction_id": correction.id,
+            "transaction_id": correction.transaction_id,
+        }
+    except ValueError as exc:
+        db.rollback()
+        message = str(exc)
+        status_code = 409 if "Finalized" in message or "already" in message else 404
+        raise HTTPException(status_code=status_code, detail=message) from exc
+
+
+@router.put("/classification-memory/personal")
+def update_personal_classifier(
+    body: PersonalClassifierUpdate,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import personal_classifier_eligibility
+
+    eligibility = personal_classifier_eligibility(db)
+    if body.enabled and not eligibility["eligible"]:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Personal classification requires at least "
+                f"{eligibility['required_corrections']} confirmed corrections "
+                f"across {eligibility['required_categories']} categories."
+            ),
+        )
+    setting = db.query(AppSetting).filter_by(
+        key="personal_classification_enabled"
+    ).first()
+    if setting is None:
+        setting = AppSetting(
+            key="personal_classification_enabled",
+            value="true" if body.enabled else "false",
+        )
+        db.add(setting)
+    else:
+        setting.value = "true" if body.enabled else "false"
+    db.commit()
+    return personal_classifier_eligibility(db)
+
+
+@router.post("/classification-memory/reset")
+def reset_classification_memory(
+    body: ClassificationMemoryReset,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import reset_learning_memory
+
+    pin_setting = db.query(AppSetting).filter_by(key="pin_hash").first()
+    if not pin_setting or not verify_pin_hash(body.pin, pin_setting.value):
+        raise HTTPException(status_code=401, detail="Incorrect PIN")
+    backup_filename = create_backup(DB_PATH, _get_backup_dir(db))
+    result = reset_learning_memory(db)
+    db.commit()
+    return {
+        **result,
+        "backup_filename": backup_filename,
+        "message": "Classification memory reset. Existing transaction labels were preserved.",
+    }
+
+
 @router.post("/reset-data", status_code=200)
 def reset_all_data(
     body: ResetDataRequest,
@@ -399,12 +511,18 @@ def reset_all_data(
     from app.models.income_source import IncomeSource
     from app.models.subscription import Subscription
     from app.models.system_log import SystemLog
+    from app.models.classification_learning import (
+        ClassificationCorrection,
+        ClassificationPattern,
+    )
 
     # Delete child tables FIRST (FK order matters):
     # TransactionSplit → Transaction; AuditLog → Transaction
     # Transaction → AuditSession; MonthlyAggregate → AuditSession
     db.query(TransactionSplit).delete(synchronize_session=False)
     db.query(AuditLog).delete(synchronize_session=False)
+    db.query(ClassificationCorrection).delete(synchronize_session=False)
+    db.query(ClassificationPattern).delete(synchronize_session=False)
     db.query(Transaction).delete(synchronize_session=False)
     db.query(MonthlyAggregate).delete(synchronize_session=False)
     db.query(AuditSession).delete(synchronize_session=False)

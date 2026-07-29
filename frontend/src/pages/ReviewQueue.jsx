@@ -420,11 +420,13 @@ export default function ReviewQueue() {
                           </GlassButton>
                         )}
 
-                        {item.confidence > 0 && (
-                          <p className="text-white/20 text-[0.7rem] mt-3">
-                            AI suggested: {item.classification_source} ({(item.confidence * 100).toFixed(0)}% confidence)
+                        <div className="mt-3 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3">
+                          <p className="text-white/30 text-[0.65rem] uppercase tracking-wide">Why this needs review</p>
+                          <p className="mt-1 text-white/40 text-[0.7rem] leading-relaxed">
+                            {item.classification_reason}
+                            {item.confidence > 0 && ` Confidence: ${(item.confidence * 100).toFixed(0)}%.`}
                           </p>
-                        )}
+                        </div>
                       </div>
                     </motion.div>
                   )}

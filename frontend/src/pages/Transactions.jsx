@@ -22,6 +22,20 @@ function formatINR(amount) {
   }).format(amount);
 }
 
+const CLASSIFICATION_LABELS = {
+  transfer_detect: 'transfer detection',
+  exact_match: 'exact merchant memory',
+  confirmed_pattern: 'confirmed pattern',
+  rule: 'deterministic rule',
+  fuzzy: 'similar merchant memory',
+  embedding: 'local similarity',
+  personal_model: 'personal classifier',
+  llm: 'AI suggestion',
+  user: 'your correction',
+  user_undo: 'restored after undo',
+  narration_hint: 'statement parser',
+};
+
 const SORT_OPTIONS = [
   { value: 'date_desc', label: 'Newest First' },
   { value: 'date_asc', label: 'Oldest First' },
@@ -256,9 +270,16 @@ export default function Transactions() {
                     </td>
                     <td className="px-5 py-3">
                       {txn.category ? (
-                        <span className="inline-block px-2.5 py-0.5 bg-white/[0.06] rounded-[8px] text-white/50 text-[0.7rem] border border-white/[0.06]">
-                          {txn.category}
-                        </span>
+                        <div>
+                          <span className="inline-block px-2.5 py-0.5 bg-white/[0.06] rounded-[8px] text-white/50 text-[0.7rem] border border-white/[0.06]">
+                            {txn.category}
+                          </span>
+                          {txn.classification_source && (
+                            <p className="mt-1 text-white/22 text-[0.6rem]">
+                              Why: {CLASSIFICATION_LABELS[txn.classification_source] || txn.classification_source}
+                            </p>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-amber-400/70 text-[0.7rem]">Uncategorized</span>
                       )}
@@ -334,6 +355,7 @@ export default function Transactions() {
                   <span>{format(new Date(txn.date), 'dd MMM')}</span>
                   {txn.category && <><span>·</span><span className="text-white/40">{txn.category}</span></>}
                   {txn.subcategory && <><span>·</span><span className="text-white/25">{txn.subcategory}</span></>}
+                  {txn.classification_source && <><span>·</span><span className="text-white/20">{CLASSIFICATION_LABELS[txn.classification_source] || txn.classification_source}</span></>}
                 </div>
               </div>
             ))

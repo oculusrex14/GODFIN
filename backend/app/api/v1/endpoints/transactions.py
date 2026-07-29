@@ -49,6 +49,26 @@ def create_transaction(
         tags=body.tags,
     )
     db.add(txn)
+    if body.category:
+        from app.core.classification_learning import record_explicit_correction
+        from app.core.merchant_memory_service import upsert_merchant_memory
+
+        upsert_merchant_memory(
+            db,
+            txn.merchant_normalized,
+            body.category,
+            body.subcategory,
+            confidence=1.0,
+            raw_string=body.merchant_raw,
+        )
+        record_explicit_correction(
+            db,
+            txn,
+            None,
+            None,
+            body.category,
+            body.subcategory,
+        )
     db.commit()
     db.refresh(txn)
     return txn
@@ -143,6 +163,8 @@ def update_transaction(
 
     try:
         update_data = body.model_dump(exclude_unset=True)
+        old_category = txn.category
+        old_subcategory = txn.subcategory
 
         # Track changes for audit logging
         from app.models.audit_log import AuditLog
@@ -165,6 +187,35 @@ def update_transaction(
 
         for field, value in update_data.items():
             setattr(txn, field, value)
+
+        if (
+            "category" in update_data
+            and update_data["category"] is not None
+            and (
+                old_category != txn.category
+                or old_subcategory != txn.subcategory
+            )
+            and txn.merchant_normalized
+        ):
+            from app.core.classification_learning import record_explicit_correction
+            from app.core.merchant_memory_service import upsert_merchant_memory
+
+            upsert_merchant_memory(
+                db,
+                txn.merchant_normalized,
+                txn.category,
+                txn.subcategory,
+                confidence=1.0,
+                raw_string=txn.merchant_raw,
+            )
+            record_explicit_correction(
+                db,
+                txn,
+                old_category,
+                old_subcategory,
+                txn.category,
+                txn.subcategory,
+            )
 
         txn.updated_at = datetime.now(timezone.utc)
         db.commit()

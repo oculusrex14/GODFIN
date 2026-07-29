@@ -11,8 +11,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -33,6 +33,15 @@ class SystemStatus(BaseModel):
 class RestartResponse(BaseModel):
     message: str
     restarting: bool
+
+
+class LocalModelAction(BaseModel):
+    model: str = Field(min_length=3, max_length=129)
+    confirmed: bool = False
+
+
+class LocalAIChoice(BaseModel):
+    choice: str
 
 
 @router.get("/status", response_model=SystemStatus)
@@ -180,6 +189,103 @@ def enable_embeddings(
         "started": started,
         **get_embedding_setup_status(),
     }
+
+
+@router.get("/local-ai/profile")
+def local_ai_profile(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.local_ai import device_profile
+
+    profile = device_profile()
+    choice = db.query(AppSetting).filter_by(key="local_ai_choice").first()
+    profile["choice"] = choice.value if choice else None
+    return profile
+
+
+@router.put("/local-ai/choice")
+def choose_local_ai(
+    body: LocalAIChoice,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    if body.choice not in {"local", "provider", "none"}:
+        raise HTTPException(status_code=422, detail="Unknown AI setup choice")
+    setting = db.query(AppSetting).filter_by(key="local_ai_choice").first()
+    if setting is None:
+        setting = AppSetting(key="local_ai_choice", value=body.choice)
+        db.add(setting)
+    else:
+        setting.value = body.choice
+    db.commit()
+    return {"choice": body.choice}
+
+
+@router.get("/local-ai/download")
+def local_ai_download_status(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.local_ai import get_download_status
+
+    status = get_download_status()
+    if status.get("status") == "complete" and status.get("model") and status.get("digest"):
+        key = f"local_ai_digest:{status['model']}"[:100]
+        setting = db.query(AppSetting).filter_by(key=key).first()
+        if setting is None:
+            db.add(AppSetting(key=key, value=status["digest"]))
+        else:
+            setting.value = status["digest"]
+        db.commit()
+    return status
+
+
+@router.post("/local-ai/download", status_code=202)
+def local_ai_download(
+    body: LocalModelAction,
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.local_ai import start_model_pull
+
+    try:
+        return start_model_pull(body.model, body.confirmed)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/local-ai/download/cancel")
+def cancel_local_ai_download(
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.local_ai import cancel_model_pull
+
+    return cancel_model_pull()
+
+
+@router.post("/local-ai/benchmark")
+def local_ai_benchmark(
+    body: LocalModelAction,
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.local_ai import benchmark_model
+
+    if not body.confirmed:
+        raise HTTPException(
+            status_code=422,
+            detail="Explicit benchmark approval is required",
+        )
+    try:
+        return benchmark_model(body.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Local benchmark failed: {exc}",
+        ) from exc
 
 
 @router.post("/apply-confidence-decay")

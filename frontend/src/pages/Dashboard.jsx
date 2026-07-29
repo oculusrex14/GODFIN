@@ -24,6 +24,7 @@ import {
 } from '../api/client';
 import { StatCard } from '../components/StatCard';
 import { GlassSelect } from '../components/GlassSelect';
+import CalculationInfo from '../components/CalculationInfo';
 
 function formatINR(amount) {
   if (amount == null) return '--';
@@ -251,6 +252,16 @@ export default function Dashboard() {
           icon={PiggyBank}
           color="text-emerald-400"
           delay={0.15}
+          calculationInfo={(
+            <CalculationInfo
+              title="Savings rate"
+              meaning="The share of verified income left after included expenses."
+              formula="(income − expenses) ÷ income × 100"
+              inputs="Income and non-transfer expenses included by the selected month and period filters."
+              period={`${effectiveMonth} · ${PERIOD_OPTIONS.find(item => item.value === period)?.label || period}`}
+              caveat="If income is missing or zero, the rate is unavailable. This ratio is descriptive, not financial advice."
+            />
+          )}
         />
         <StatCard
           title="Review Queue"

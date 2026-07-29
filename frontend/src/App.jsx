@@ -24,6 +24,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const CashFlow = lazy(() => import('./pages/CashFlow'));
 const Transfers = lazy(() => import('./pages/Transfers'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
+const LearnGodfin = lazy(() => import('./pages/LearnGodfin'));
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -70,6 +71,7 @@ const ROUTES = {
   '/settings': Settings,
   '/cash-flow': CashFlow,
   '/transfers': Transfers,
+  '/learn': LearnGodfin,
 };
 
 function AppRoutes() {
@@ -95,6 +97,7 @@ function AppRoutes() {
     isAuthenticated
     && !onboardingLoading
     && onboarding?.completed === false
+    && onboarding?.deferred !== true
     && !onboardingTaskRoutes.has(pathname)
   ) {
     return <Navigate to="/onboarding" replace />;

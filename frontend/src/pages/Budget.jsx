@@ -13,6 +13,7 @@ import {
 } from '../api/client';
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
+import CalculationInfo from '../components/CalculationInfo';
 
 const MIN_GOAL_DATE = format(addDays(new Date(), 1), 'yyyy-MM-dd');
 
@@ -26,7 +27,7 @@ function formatINR(amount) {
   }).format(amount);
 }
 
-function HealthGauge({ label, value, max = 1, invert = false, icon: Icon }) {
+function HealthGauge({ label, value, max = 100, invert = false, icon: Icon, calculation }) {
   const safeValue = value != null && !isNaN(value) ? value : 0;
   const pct = max > 0 ? Math.min(safeValue / max, 1) * 100 : 0;
   const good = invert ? pct < 40 : pct > 60;
@@ -40,9 +41,10 @@ function HealthGauge({ label, value, max = 1, invert = false, icon: Icon }) {
         <div className="flex items-center gap-2">
           <Icon size={13} className="text-white/30" aria-hidden="true" />
           <span className="text-white/40 text-[0.7rem]">{label}</span>
+          {calculation && <CalculationInfo title={label} {...calculation} />}
         </div>
         <span className={`text-[0.8rem] tabular-nums ${textColor}`} style={{ fontWeight: 500 }}>
-          {value != null && !isNaN(value) ? `${(value * 100).toFixed(1)}%` : '--'}
+          {value != null && !isNaN(value) ? `${value.toFixed(1)}%` : '--'}
         </span>
       </div>
       <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
@@ -128,12 +130,84 @@ export default function Budget() {
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
           <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Financial Health</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <HealthGauge label="Savings Rate" value={profile.savings_rate} icon={PiggyBank} />
-            <HealthGauge label="Impulse Index" value={profile.impulse_index} invert icon={Gauge} />
-            <HealthGauge label="Fixed Expense Ratio" value={profile.fixed_expense_ratio} invert icon={Wallet} />
-            <HealthGauge label="Recurring Burden" value={profile.recurring_burden} invert icon={Repeat} />
-            <HealthGauge label="Subscription Dependency" value={profile.subscription_dependency} invert icon={CreditCard} />
-            <HealthGauge label="Lifestyle Inflation" value={profile.lifestyle_inflation} max={2} invert icon={TrendingUp} />
+            <HealthGauge
+              label="Savings Rate"
+              value={profile.savings_rate}
+              icon={PiggyBank}
+              calculation={{
+                meaning: 'The portion of income left after included expenses.',
+                formula: '(income − expenses) ÷ income',
+                inputs: 'Verified income and non-transfer expenses.',
+                period: 'Current financial-profile window.',
+                caveat: 'Unavailable when verified income is zero.',
+              }}
+            />
+            <HealthGauge
+              label="Impulse Index"
+              value={profile.impulse_index}
+              invert
+              icon={Gauge}
+              calculation={{
+                meaning: 'The share of debit transactions that are small flexible-category purchases.',
+                formula: 'small flexible debit count ÷ total debit count × 100',
+                inputs: 'Debits below ₹500 in flexible categories and all included debits.',
+                period: 'Current financial-profile window.',
+                caveat: 'Category quality affects this estimate; it is not a psychological diagnosis.',
+              }}
+            />
+            <HealthGauge
+              label="Fixed Expense Ratio"
+              value={profile.fixed_expense_ratio}
+              invert
+              icon={Wallet}
+              calculation={{
+                meaning: 'How much verified income is committed to fixed expenses.',
+                formula: 'fixed expenses ÷ income',
+                inputs: 'Fixed-category expenses and verified income.',
+                period: 'Current financial-profile window.',
+                caveat: 'Review categories and income completeness before interpreting this ratio.',
+              }}
+            />
+            <HealthGauge
+              label="Recurring Burden"
+              value={profile.recurring_burden}
+              invert
+              icon={Repeat}
+              calculation={{
+                meaning: 'The portion of income used by detected recurring payments.',
+                formula: 'recurring expenses ÷ income',
+                inputs: 'Confirmed recurring transactions and verified income.',
+                period: 'Current financial-profile window.',
+                caveat: 'New or irregular recurring payments may not be detected yet.',
+              }}
+            />
+            <HealthGauge
+              label="Subscription Dependency"
+              value={profile.subscription_dependency}
+              invert
+              icon={CreditCard}
+              calculation={{
+                meaning: 'The portion of expenses attributed to confirmed subscriptions.',
+                formula: 'subscription expenses ÷ total expenses',
+                inputs: 'Confirmed subscriptions and non-transfer expenses.',
+                period: 'Current financial-profile window.',
+                caveat: 'Unconfirmed subscription suggestions are excluded.',
+              }}
+            />
+            <HealthGauge
+              label="Lifestyle Inflation"
+              value={profile.lifestyle_inflation}
+              max={200}
+              invert
+              icon={TrendingUp}
+              calculation={{
+                meaning: 'How discretionary spending changed relative to the comparison period.',
+                formula: '(current flexible spend − prior flexible spend) ÷ prior flexible spend × 100',
+                inputs: 'Discretionary-category expenses in comparable periods.',
+                period: 'Current window versus the previous comparable window.',
+                caveat: 'Short or incomplete periods can create large swings.',
+              }}
+            />
           </div>
         </motion.div>
       )}
