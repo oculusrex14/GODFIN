@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 
 from app.core.classification_learning import build_pattern_key
 from app.core.classifier import classify_transaction
@@ -9,6 +9,7 @@ from app.models.classification_learning import (
     ClassificationCorrection,
     ClassificationPattern,
 )
+from app.models.app_setting import AppSetting
 from app.models.transaction import Transaction
 from app.seed import SAVINGS_ACCOUNT_ID
 
@@ -114,7 +115,15 @@ def test_finalized_transaction_learning_cannot_be_undone(
     assert response.status_code == 409
 
 
-def test_personal_classifier_cannot_enable_early(auth_client):
+def test_personal_classifier_cannot_enable_early(auth_client, db_session):
+    for key, value in {
+        "license_tier": "max",
+        "license_status": "active",
+        "license_verified_at": datetime.now(UTC).isoformat(),
+    }.items():
+        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    db_session.commit()
+
     response = auth_client.put(
         "/api/v1/settings/classification-memory/personal",
         json={"enabled": True},

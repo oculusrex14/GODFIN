@@ -63,3 +63,9 @@ export function stripePriceId(code: ProductCode): string {
   if (!value) throw new Error(`Missing required environment variable: ${envName}`);
   return value;
 }
+
+export function stripePriceIdForEnvironment(envName: string): string {
+  const value = process.env[envName]?.trim();
+  if (!value) throw new Error(`Missing required environment variable: ${envName}`);
+  return value;
+}

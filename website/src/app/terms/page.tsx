@@ -11,7 +11,7 @@ export default function TermsPage() {
       <section className="page-hero">
         <div className="shell">
           <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
-            Effective 28 July 2026
+            Effective 29 July 2026
           </div>
           <h1>Terms of service</h1>
           <p>
@@ -49,9 +49,9 @@ export default function TermsPage() {
           <h2>4. AI credits</h2>
           <p>
             AI credit packs are one-time purchases for eligible hosted
-            operations. Included allowances and operation costs are shown in the
-            product. Your own supported provider key can bypass the hosted
-            credit system. Purchased credits have no cash value.
+            operations. Lifetime licenses include zero recurring hosted AI
+            credits. Local AI and your own supported provider key bypass the
+            hosted credit system. Purchased credits have no cash value.
           </p>
 
           <h2>5. Payments and refunds</h2>
@@ -67,9 +67,10 @@ export default function TermsPage() {
           <h2>6. Accounts and keys</h2>
           <p>
             Keep your website account and license key secure. You may not sell,
-            publish, or share a key outside the devices or profiles permitted by
-            its tier. We may suspend keys involved in fraud, chargebacks, abuse,
-            or material violation of these terms.
+            publish, or share a key outside its three active installations.
+            Devices can be reviewed and deactivated from the website account.
+            We may suspend keys involved in fraud, chargebacks, abuse, or
+            material violation of these terms.
           </p>
 
           <h2>7. Availability</h2>

@@ -9,6 +9,7 @@ import {
   type LicenseTier,
 } from "@/lib/license";
 import { isProductCode, PRODUCTS } from "@/lib/products";
+import { isLicenseProduct, regionalPrice } from "@/lib/regional-pricing";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe";
 
@@ -21,7 +22,13 @@ async function provision(session: Stripe.Checkout.Session) {
     throw new Error("Checkout metadata is incomplete.");
   }
   const product = PRODUCTS[productCode];
-  if (session.currency !== "inr" || session.amount_total !== product.amount) {
+  const expected = isLicenseProduct(productCode)
+    ? regionalPrice(productCode, session.metadata?.pricing_country, false)
+    : { currency: "inr", amount: product.amount };
+  if (
+    session.currency !== expected.currency ||
+    session.amount_total !== expected.amount
+  ) {
     throw new Error("Checkout amount does not match the configured product.");
   }
 

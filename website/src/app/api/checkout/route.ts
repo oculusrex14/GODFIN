@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { siteUrl } from "@/lib/env";
-import { isProductCode, PRODUCTS, stripePriceId } from "@/lib/products";
+import {
+  isProductCode,
+  PRODUCTS,
+  stripePriceId,
+  stripePriceIdForEnvironment,
+} from "@/lib/products";
+import { isLicenseProduct, regionalPrice } from "@/lib/regional-pricing";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe";
 
@@ -26,15 +32,24 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as { product?: unknown };
+    const body = (await request.json()) as {
+      product?: unknown;
+      country?: unknown;
+    };
     if (!isProductCode(body.product)) {
       return NextResponse.json({ message: "Unknown product." }, { status: 400 });
     }
     const product = PRODUCTS[body.product];
+    const licensePrice = isLicenseProduct(body.product)
+      ? regionalPrice(body.product, body.country)
+      : null;
+    const priceId = licensePrice
+      ? stripePriceIdForEnvironment(licensePrice.priceEnv)
+      : stripePriceId(body.product);
 
     const session = await stripe().checkout.sessions.create({
       mode: "payment",
-      line_items: [{ price: stripePriceId(body.product), quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       customer_email: user.email,
       customer_creation: "always",
       client_reference_id: user.id,
@@ -45,6 +60,8 @@ export async function POST(request: Request) {
       metadata: {
         product_code: product.code,
         user_id: user.id,
+        pricing_country: licensePrice?.country || "IN",
+        pricing_version: licensePrice?.priceVersion || "india-credit-packs-v1",
       },
       success_url: `${siteUrl()}/account?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl()}/pricing?checkout=cancelled`,

@@ -11,6 +11,7 @@ import {
 import {
   downloadClassificationMemory,
   fetchClassificationMemory,
+  fetchLicenseStatus,
   resetClassificationMemory,
   undoClassificationCorrection,
   updatePersonalClassifier,
@@ -28,6 +29,10 @@ export default function ClassificationMemorySettings() {
   const { data } = useQuery({
     queryKey: ['classificationMemory'],
     queryFn: () => fetchClassificationMemory(100),
+  });
+  const { data: license } = useQuery({
+    queryKey: ['license'],
+    queryFn: fetchLicenseStatus,
   });
   const undoMutation = useMutation({
     mutationFn: undoClassificationCorrection,
@@ -78,18 +83,24 @@ export default function ClassificationMemorySettings() {
             Optional personal classifier
           </p>
           <p className="mt-1 text-white/30 text-xs">
-            {eligibility?.eligible
+            {!license?.features?.includes('personal_classifier')
+              ? 'Available with GODFIN Max after the evidence threshold is met.'
+              : eligibility?.eligible
               ? 'Evidence threshold met. This local classifier can now be enabled.'
               : `${eligibility?.confirmed_corrections || 0}/${eligibility?.required_corrections || 200} corrections · ${eligibility?.category_count || 0}/${eligibility?.required_categories || 5} categories`}
           </p>
         </div>
         <button
           type="button"
-          disabled={!eligibility?.eligible || personalMutation.isPending}
+          disabled={!license?.features?.includes('personal_classifier') || !eligibility?.eligible || personalMutation.isPending}
           onClick={() => personalMutation.mutate(!eligibility?.enabled)}
           className="min-h-11 px-4 rounded-xl border border-white/[0.1] bg-white/[0.05] text-white/55 disabled:opacity-35 text-sm"
         >
-          {eligibility?.enabled ? 'Disable' : 'Enable when eligible'}
+          {eligibility?.enabled
+            ? 'Disable'
+            : license?.features?.includes('personal_classifier')
+              ? 'Enable when eligible'
+              : 'Max feature'}
         </button>
       </div>
 

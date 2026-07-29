@@ -62,10 +62,12 @@ def test_activate_encrypts_key_and_unlocks_server_features(
     payload = response.json()
     assert payload["tier"] == "pro"
     assert payload["features"] == LICENSE_FEATURES["pro"]
-    assert payload["monthly_credits"] == 500
+    assert payload["monthly_credits"] == 0
+    assert payload["hosted_credits_included"] == 0
     assert payload["topup_credits"] == 1200
     assert TEST_KEY not in str(payload)
     assert request_payload["machine_id"]
+    assert request_payload["device_label"]
     assert "transactions" not in request_payload
 
     db_session.expire_all()

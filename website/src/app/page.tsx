@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { Suspense } from "react";
+
+import { WaitlistForm } from "@/components/waitlist-form";
 
 const features = [
   {
@@ -27,7 +30,7 @@ const features = [
   {
     icon: FileChartColumn,
     title: "Reports built for India",
-    body: "Understand cash flow, recurring spend, budget pressure, and financial-year exports without spreadsheet surgery.",
+    body: "Understand cash flow, recurring spend, budget pressure, and reviewed category trends without spreadsheet surgery.",
   },
   {
     icon: Database,
@@ -47,6 +50,7 @@ const features = [
 ];
 
 export default function HomePage() {
+  const waitlistEnabled = Boolean(process.env.RESEND_API_KEY);
   return (
     <>
       <section className="hero">
@@ -86,8 +90,8 @@ export default function HomePage() {
           <div className="app-frame">
             <Image
               src="/screenshots/dashboard.png"
-              width={1365}
-              height={768}
+              width={1244}
+              height={716}
               priority
               alt="GODFIN desktop dashboard showing local financial summaries and charts"
             />
@@ -119,6 +123,45 @@ export default function HomePage() {
                 <p>{body}</p>
               </article>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="section section-soft">
+        <div className="shell">
+          <div className="section-head">
+            <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+              Real product, real screens
+            </div>
+            <h2>See where the numbers came from—and learn at your pace.</h2>
+            <p>
+              These screens were captured from GODFIN using privacy-safe
+              synthetic transactions. They are not generated product mockups.
+            </p>
+          </div>
+          <div className="screenshot-grid">
+            <figure className="screenshot-card">
+              <Image
+                src="/screenshots/transactions.png"
+                width={1244}
+                height={716}
+                alt="GODFIN transaction list showing merchant, category, amount, and why each classification was chosen"
+              />
+              <figcaption>
+                Searchable transactions with visible classification provenance.
+              </figcaption>
+            </figure>
+            <figure className="screenshot-card">
+              <Image
+                src="/screenshots/tutorial.png"
+                width={1244}
+                height={716}
+                alt="GODFIN beginner tutorial with ten local-first finance lessons"
+              />
+              <figcaption>
+                A resumable ten-lesson guide made for finance beginners.
+              </figcaption>
+            </figure>
           </div>
         </div>
       </section>
@@ -178,6 +221,25 @@ export default function HomePage() {
               Read the setup guide
             </Link>
           </div>
+        </div>
+      </section>
+
+      <section className="section" id="waitlist">
+        <div className="shell waitlist-shell">
+          <div className="section-head">
+            <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+              Private launch
+            </div>
+            <h2>Help shape a finance app that starts with trust.</h2>
+            <p>
+              Join the double-opt-in waitlist for release updates. Tell us your
+              operating system and intended use so we can prioritize real demand.
+              Waitlist details never include desktop financial data.
+            </p>
+          </div>
+          <Suspense fallback={<p className="lead">Loading waitlist form…</p>}>
+            <WaitlistForm enabled={waitlistEnabled} />
+          </Suspense>
         </div>
       </section>
     </>

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, time, datetime
+from datetime import date, datetime, time as datetime_time
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -12,7 +12,7 @@ VALID_CATEGORIES = set(TAXONOMY.keys())
 
 class TransactionCreate(BaseModel):
     date: date
-    time: Optional[time] = None
+    time: Optional[datetime_time] = None
     merchant_raw: str = Field(..., min_length=1, max_length=255)
     amount: float = Field(..., gt=0)
     type: str = Field(..., pattern=r"^(debit|credit)$")
@@ -52,7 +52,7 @@ class TransactionResponse(BaseModel):
 
     id: str
     date: date
-    time: Optional[time] = None
+    time: Optional[datetime_time] = None
     merchant_raw: Optional[str] = None
     merchant_normalized: Optional[str] = None
     amount: float

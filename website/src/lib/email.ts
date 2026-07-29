@@ -45,3 +45,40 @@ export async function sendLicenseEmail({
   );
   if (error) throw new Error(error.message);
 }
+
+export async function sendWaitlistConfirmationEmail({
+  to,
+  confirmationUrl,
+  idempotencyKey,
+}: {
+  to: string;
+  confirmationUrl: string;
+  idempotencyKey: string;
+}) {
+  const resend = new Resend(serverEnv.resendApiKey());
+  const { error } = await resend.emails.send(
+    {
+      from: serverEnv.resendFromEmail(),
+      to,
+      subject: "Confirm your GODFIN waitlist place",
+      text: [
+        "Confirm that you want product and launch updates from GODFIN:",
+        "",
+        confirmationUrl,
+        "",
+        "If you did not request this, ignore the email. Joining the waitlist does not create a desktop-data account.",
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#07131f">
+          <p style="color:#087b6d;font-weight:700">GODFIN WAITLIST</p>
+          <h1>Confirm your place</h1>
+          <p>One click confirms that you want product and launch updates from GODFIN.</p>
+          <p style="margin:28px 0"><a href="${confirmationUrl}" style="display:inline-block;padding:13px 20px;border-radius:10px;background:#087b6d;color:white;text-decoration:none;font-weight:700">Confirm waitlist</a></p>
+          <p style="color:#667987;font-size:13px">If you did not request this, ignore the email. Joining the waitlist does not create a desktop-data account.</p>
+        </div>
+      `,
+    },
+    { idempotencyKey },
+  );
+  if (error) throw new Error(error.message);
+}

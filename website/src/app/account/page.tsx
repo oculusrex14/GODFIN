@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { SignInButton, SignOutButton } from "@/components/auth-controls";
 import { CopyLicenseKey } from "@/components/copy-license-key";
 import { CheckoutAnalytics } from "@/components/privacy-analytics";
+import { DeviceActivations } from "@/components/device-activations";
 import { ResendLicenseButton } from "@/components/resend-license-button";
 import { serverEnv, supabasePublicConfig } from "@/lib/env";
 import { licenseKeyForSession, type LicenseTier } from "@/lib/license";
@@ -51,11 +52,19 @@ export default async function AccountPage({
     created_at: string;
   }> = [];
   let balance = 0;
+  let activations: Array<{
+    id: string;
+    license_id: string;
+    device_label: string | null;
+    app_version: string | null;
+    activated_at: string;
+    last_seen_at: string;
+  }> = [];
   let checkoutLicenseKey: string | null = null;
   let checkoutProductCode: string | null = null;
 
   if (supabase && user) {
-    const [licenseResult, purchaseResult, creditResult] = await Promise.all([
+    const [licenseResult, purchaseResult, creditResult, activationResult] = await Promise.all([
       supabase
         .from("licenses")
         .select("id,tier,key_last4,status,issued_at")
@@ -69,10 +78,16 @@ export default async function AccountPage({
         .from("credit_balances")
         .select("balance")
         .maybeSingle(),
+      supabase
+        .from("license_activations")
+        .select("id,license_id,device_label,app_version,activated_at,last_seen_at")
+        .is("deactivated_at", null)
+        .order("last_seen_at", { ascending: false }),
     ]);
     licenses = licenseResult.data || [];
     purchases = purchaseResult.data || [];
     balance = creditResult.data?.balance || 0;
+    activations = activationResult.data || [];
 
     if (
       params.checkout === "success" &&
@@ -213,6 +228,15 @@ export default async function AccountPage({
                   )}
                 </section>
               </div>
+              <DeviceActivations
+                activations={activations}
+                licenseNames={Object.fromEntries(
+                  licenses.map((license) => [
+                    license.id,
+                    `GODFIN ${license.tier.toUpperCase()}`,
+                  ]),
+                )}
+              />
             </>
           )}
         </div>

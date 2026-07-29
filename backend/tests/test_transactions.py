@@ -74,6 +74,19 @@ def test_list_transactions_with_data(auth_client):
     assert len(data["items"]) == 3
 
 
+def test_transaction_time_round_trips_without_list_failure(auth_client):
+    created = auth_client.post(
+        "/api/v1/transactions",
+        json=_make_txn(time="10:30:00"),
+    )
+    assert created.status_code == 201
+    assert created.json()["time"] == "10:30:00"
+
+    listed = auth_client.get("/api/v1/transactions")
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["time"] == "10:30:00"
+
+
 def test_list_transactions_filter_date(auth_client):
     auth_client.post("/api/v1/transactions", json=_make_txn(date="2026-01-10"))
     auth_client.post("/api/v1/transactions", json=_make_txn(date="2026-02-15"))

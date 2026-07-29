@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
+import subprocess
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,33 +15,21 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.encryption import SecretDecryptionError, decrypt, encrypt
+from app.core.entitlements import (
+    features_for_tier,
+    included_hosted_ai_credits,
+)
 from app.models.app_setting import AppSetting
 
 LICENSE_KEY_PATTERN = re.compile(
     r"^GODFIN-(PRO|MAX)-[A-Z0-9]{5}(?:-[A-Z0-9]{5}){4}$"
 )
 LICENSE_FEATURES = {
-    "free": [],
-    "pro": [
-        "multi_bank",
-        "ai_classification",
-        "advanced_reports",
-        "encrypted_backup",
-        "multi_device_sync",
-    ],
-    "max": [
-        "multi_bank",
-        "ai_classification",
-        "advanced_reports",
-        "encrypted_backup",
-        "multi_device_sync",
-        "family_profiles",
-        "white_label_reports",
-        "local_api",
-        "early_access",
-    ],
+    tier: features_for_tier(tier) for tier in ("free", "pro", "max")
 }
 _SENSITIVE_KEYS = {"license_key"}
+_INSTALLATION_KEYCHAIN_SERVICE = "com.godfin.desktop"
+_INSTALLATION_KEYCHAIN_ACCOUNT = "installation-id"
 
 
 class LicenseError(RuntimeError):
@@ -64,19 +54,66 @@ def _machine_id_path() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / ".machine_id"
 
 
-def get_machine_id() -> str:
-    """Return an anonymous, installation-scoped identifier.
+def _installation_keychain_enabled() -> bool:
+    return (
+        platform.system() == "Darwin"
+        and os.environ.get("GODFIN_DISABLE_KEYCHAIN", "").lower()
+        not in {"1", "true", "yes"}
+    )
 
-    A random token is used instead of hardware identifiers so license checks
-    never disclose a serial number, hostname, username, or financial data.
-    """
-    path = _machine_id_path()
-    if path.exists():
-        value = path.read_text(encoding="utf-8").strip()
-        if value:
-            return value
 
-    value = str(uuid.uuid4())
+def _read_installation_id_from_keychain() -> str | None:
+    if not _installation_keychain_enabled():
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "security",
+                "find-generic-password",
+                "-a",
+                _INSTALLATION_KEYCHAIN_ACCOUNT,
+                "-s",
+                _INSTALLATION_KEYCHAIN_SERVICE,
+                "-w",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = result.stdout.strip()
+    return value if value else None
+
+
+def _store_installation_id_in_keychain(value: str) -> bool:
+    if not _installation_keychain_enabled():
+        return False
+    try:
+        subprocess.run(
+            [
+                "security",
+                "add-generic-password",
+                "-U",
+                "-a",
+                _INSTALLATION_KEYCHAIN_ACCOUNT,
+                "-s",
+                _INSTALLATION_KEYCHAIN_SERVICE,
+                "-w",
+                value,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
+def _store_installation_id_in_file(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
@@ -85,7 +122,44 @@ def get_machine_id() -> str:
     finally:
         os.close(descriptor)
     os.chmod(path, 0o600)
+
+
+def get_machine_id() -> str:
+    """Return an anonymous, installation-scoped identifier.
+
+    A random token is used instead of hardware identifiers so license checks
+    never disclose a serial number, hostname, username, or financial data.
+    """
+    configured_path = bool(os.environ.get("GODFIN_MACHINE_ID_FILE"))
+    path = _machine_id_path()
+    if not configured_path:
+        keychain_value = _read_installation_id_from_keychain()
+        if keychain_value:
+            return keychain_value
+
+    if path.exists():
+        value = path.read_text(encoding="utf-8").strip()
+        if value:
+            if not configured_path and _store_installation_id_in_keychain(value):
+                return value
+            return value
+
+    value = str(uuid.uuid4())
+    if not configured_path and _store_installation_id_in_keychain(value):
+        return value
+    _store_installation_id_in_file(path, value)
     return value
+
+
+def get_device_label() -> str:
+    system = platform.system() or "Unknown OS"
+    system_labels = {
+        "Darwin": "macOS",
+        "Windows": "Windows",
+        "Linux": "Linux",
+    }
+    architecture = platform.machine() or "unknown architecture"
+    return f"{system_labels.get(system, system)} {architecture}"[:80]
 
 
 def _get(db: Session, key: str, default: str = "") -> str:
@@ -169,9 +243,8 @@ def license_status(db: Session, *, now: datetime | None = None) -> dict[str, Any
         "features": LICENSE_FEATURES[effective_tier],
         "verified_at": verified_at.isoformat() if verified_at else None,
         "offline_grace_until": grace_deadline.isoformat() if grace_deadline else None,
-        "monthly_credits": int(_get(db, "license_monthly_credits", "0") or 0)
-        if active
-        else 0,
+        "monthly_credits": included_hosted_ai_credits(),
+        "hosted_credits_included": included_hosted_ai_credits(),
         "topup_credits": int(_get(db, "license_topup_credits", "0") or 0)
         if active
         else 0,
@@ -219,7 +292,7 @@ def _validate_server_response(payload: Any) -> dict[str, Any]:
         )
     return {
         "tier": tier,
-        "monthly_credits": max(0, int(payload.get("monthly_credits") or 0)),
+        "monthly_credits": included_hosted_ai_credits(),
         "topup_credits": max(0, int(payload.get("topup_credits") or 0)),
     }
 
@@ -238,6 +311,7 @@ def verify_with_server(license_key: str) -> dict[str, Any]:
             json={
                 "license_key": key,
                 "machine_id": get_machine_id(),
+                "device_label": get_device_label(),
                 "app_version": settings.VERSION,
             },
             headers={"User-Agent": f"GODFIN/{settings.VERSION}"},

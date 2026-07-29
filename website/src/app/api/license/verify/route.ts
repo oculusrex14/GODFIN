@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 
+import {
+  activationLimit,
+  ENTITLEMENTS,
+  releasedFeatures,
+  type PaidLicenseTier,
+} from "@/lib/entitlements";
 import { hashLicenseKey, hashMachineId } from "@/lib/license";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -11,6 +17,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       license_key?: unknown;
       machine_id?: unknown;
+      device_label?: unknown;
       app_version?: unknown;
     };
     if (
@@ -28,15 +35,43 @@ export async function POST(request: Request) {
     }
 
     const admin = createAdminClient();
+    const deviceLabel =
+      typeof body.device_label === "string"
+        ? body.device_label.trim().slice(0, 80)
+        : "GODFIN device";
+
+    const licenseHash = hashLicenseKey(body.license_key);
+    const { data: license, error: licenseError } = await admin
+      .from("licenses")
+      .select("tier")
+      .eq("key_hash", licenseHash)
+      .maybeSingle();
+    if (licenseError) throw licenseError;
+    const tier = license?.tier as PaidLicenseTier | undefined;
+    const limit = tier === "pro" || tier === "max" ? activationLimit(tier) : 3;
+
     const { data, error } = await admin.rpc("verify_license", {
-      p_license_hash: hashLicenseKey(body.license_key),
+      p_license_hash: licenseHash,
       p_machine_hash: hashMachineId(body.machine_id),
+      p_device_label: deviceLabel,
       p_app_version:
         typeof body.app_version === "string" ? body.app_version.slice(0, 32) : null,
+      p_activation_limit: limit,
     });
     if (error) throw error;
 
-    const result = Array.isArray(data) ? data[0] : data;
+    const rawResult = Array.isArray(data) ? data[0] : data;
+    const verifiedTier = rawResult?.tier as PaidLicenseTier | undefined;
+    const result =
+      rawResult?.valid && (verifiedTier === "pro" || verifiedTier === "max")
+        ? {
+            ...rawResult,
+            features: releasedFeatures(verifiedTier),
+            monthly_credits: ENTITLEMENTS.included_hosted_ai_credits,
+            hosted_credits_included: ENTITLEMENTS.included_hosted_ai_credits,
+            activation_limit: activationLimit(verifiedTier),
+          }
+        : rawResult;
     const status = result?.valid ? 200 : 403;
     return NextResponse.json(
       result || {

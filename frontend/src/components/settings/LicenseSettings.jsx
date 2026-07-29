@@ -120,10 +120,11 @@ export default function LicenseSettings() {
               <div className="mt-1 text-white/55 text-[0.72rem]">{formatDate(license.verified_at)}</div>
             </div>
             <div className="rounded-[12px] bg-white/[0.03] p-3">
-              <div className="text-white/25 text-[0.63rem] uppercase">AI credits</div>
+              <div className="text-white/25 text-[0.63rem] uppercase">Hosted AI</div>
               <div className="mt-1 text-white/55 text-[0.72rem]">
-                {license.monthly_credits.toLocaleString('en-IN')} included · {license.topup_credits.toLocaleString('en-IN')} top-up
+                No recurring credits included · {license.topup_credits.toLocaleString('en-IN')} purchased
               </div>
+              <div className="mt-1 text-white/25 text-[0.65rem]">Local AI and your own provider key use no GODFIN credits.</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

@@ -13,7 +13,7 @@ export default function PrivacyPage() {
       <section className="page-hero">
         <div className="shell">
           <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
-            Effective 28 July 2026
+            Effective 29 July 2026
           </div>
           <h1>Privacy policy</h1>
           <p>
@@ -35,7 +35,8 @@ export default function PrivacyPage() {
           <p>
             The GODFIN website processes account identifiers, email address,
             purchase records, license status, device activation hashes, download
-            access, and optional AI credit balances.
+            access, optional AI credit balances, and separately submitted
+            waitlist details.
           </p>
 
           <h2>2. Website services</h2>
@@ -56,10 +57,12 @@ export default function PrivacyPage() {
 
           <h2>4. License verification</h2>
           <p>
-            The app can send a license key, an anonymous device hash, app
-            version, and verification timestamp to the website license API. The
-            raw device identifier is not stored. Financial records are not part
-            of this request.
+            The app can send a license key, a random installation identifier,
+            generic operating-system/architecture label, app version, and
+            verification timestamp to the website license API. The identifier
+            is hashed before storage. We do not collect hardware serials,
+            payment details, or persistent IP fingerprints for activation.
+            Financial records are not part of this request.
           </p>
 
           <h2>5. Logs and security</h2>
@@ -80,7 +83,16 @@ export default function PrivacyPage() {
           </p>
           <AnalyticsPreferences />
 
-          <h2>7. Retention and deletion</h2>
+          <h2>7. Waitlist</h2>
+          <p>
+            The waitlist stores email, country, operating system, intended use,
+            consent version, and campaign attribution. A confirmation email is
+            required before the entry is treated as subscribed. Waitlist consent
+            is separate from product analytics and any future compensated-data
+            program.
+          </p>
+
+          <h2>8. Retention and deletion</h2>
           <p>
             Purchase and license records are retained as needed to provide your
             lifetime license, prevent fraud, and satisfy tax or legal duties.
@@ -89,14 +101,14 @@ export default function PrivacyPage() {
             local app database.
           </p>
 
-          <h2>8. Your choices</h2>
+          <h2>9. Your choices</h2>
           <p>
             Core requires no website account. Gmail, AI providers, embeddings,
             network access, and managed services are optional. You can export or
             delete local app data from the app.
           </p>
 
-          <h2>9. Contact</h2>
+          <h2>10. Contact</h2>
           <p>
             Privacy requests can be sent to privacy@godfin.dev. Replace this
             address in your records if the production support address changes.

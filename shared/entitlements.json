@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-29",
+  "license_model": "lifetime",
+  "included_hosted_ai_credits": 0,
+  "tiers": {
+    "free": {
+      "name": "GODFIN Core",
+      "activation_limit": 0,
+      "price": {
+        "IN": { "currency": "inr", "amount_minor": 0 },
+        "US": { "currency": "usd", "amount_minor": 0 }
+      },
+      "released_features": [
+        "local_sqlite",
+        "manual_import",
+        "deterministic_classification",
+        "dashboard_budgets",
+        "basic_reports",
+        "csv_export"
+      ]
+    },
+    "pro": {
+      "name": "GODFIN Pro",
+      "activation_limit": 3,
+      "price": {
+        "IN": { "currency": "inr", "amount_minor": 499900 },
+        "US": { "currency": "usd", "amount_minor": 9900 }
+      },
+      "released_features": [
+        "local_sqlite",
+        "manual_import",
+        "deterministic_classification",
+        "dashboard_budgets",
+        "basic_reports",
+        "csv_export",
+        "multi_bank",
+        "ai_classification",
+        "advanced_reports"
+      ]
+    },
+    "max": {
+      "name": "GODFIN Max",
+      "activation_limit": 3,
+      "price": {
+        "IN": { "currency": "inr", "amount_minor": 999900 },
+        "US": { "currency": "usd", "amount_minor": 19900 }
+      },
+      "released_features": [
+        "local_sqlite",
+        "manual_import",
+        "deterministic_classification",
+        "dashboard_budgets",
+        "basic_reports",
+        "csv_export",
+        "multi_bank",
+        "ai_classification",
+        "advanced_reports",
+        "personal_classifier"
+      ]
+    }
+  },
+  "features": {
+    "local_sqlite": {
+      "status": "released",
+      "label": "Local SQLite storage",
+      "description": "Ordinary application data stays in SQLite on the user's device."
+    },
+    "manual_import": {
+      "status": "released",
+      "label": "Manual statement import",
+      "description": "Import supported statement formats without a cloud data pipeline."
+    },
+    "deterministic_classification": {
+      "status": "released",
+      "label": "Deterministic classification",
+      "description": "Rules, exact merchant memory, fuzzy matching, and confirmed patterns run locally."
+    },
+    "dashboard_budgets": {
+      "status": "released",
+      "label": "Dashboard and budgets",
+      "description": "Track spending, income, savings, and budget pressure from local calculations."
+    },
+    "basic_reports": {
+      "status": "released",
+      "label": "Local reports",
+      "description": "Generate core reports from verified local calculations."
+    },
+    "csv_export": {
+      "status": "released",
+      "label": "CSV export",
+      "description": "Export transaction data without an account or paid license."
+    },
+    "multi_bank": {
+      "status": "released",
+      "label": "Multiple supported accounts",
+      "description": "Add supported accounts beyond the free HDFC account."
+    },
+    "ai_classification": {
+      "status": "released",
+      "label": "Optional AI assistance",
+      "description": "Use a validated local model or a bring-your-own provider key. No hosted credits are included."
+    },
+    "advanced_reports": {
+      "status": "released",
+      "label": "Advanced reports and explanations",
+      "description": "Unlock advanced locally calculated reports and optional explanatory assistance."
+    },
+    "personal_classifier": {
+      "status": "released",
+      "label": "Personal classifier",
+      "description": "After 200 confirmed corrections across at least five categories, enable a private personal classifier."
+    },
+    "net_worth": {
+      "status": "planned",
+      "label": "Net-worth tracking",
+      "description": "Not sold or advertised as included until Phase 4 acceptance tests pass."
+    },
+    "behavior_insights": {
+      "status": "planned",
+      "label": "Financial behavior insights",
+      "description": "Not sold or advertised as included until Phase 4 acceptance tests pass."
+    }
+  }
+}

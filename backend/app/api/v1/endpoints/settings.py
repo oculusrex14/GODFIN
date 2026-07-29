@@ -431,6 +431,11 @@ def update_personal_classifier(
     from app.core.classification_learning import personal_classifier_eligibility
 
     eligibility = personal_classifier_eligibility(db)
+    if body.enabled and "personal_classifier" not in license_status(db)["features"]:
+        raise HTTPException(
+            status_code=403,
+            detail="The personal classifier is a GODFIN Max feature.",
+        )
     if body.enabled and not eligibility["eligible"]:
         raise HTTPException(
             status_code=409,

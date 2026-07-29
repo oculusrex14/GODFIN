@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/sync-entitlements.mjs",
     "dev": "next dev --turbopack -p 5300",
+    "prebuild": "node scripts/sync-entitlements.mjs",
     "build": "next build",
     "start": "next start -p 5300",
     "lint": "next lint"

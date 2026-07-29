@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { PurchaseButton } from "@/components/purchase-button";
+import { ENTITLEMENTS } from "@/lib/entitlements";
 import type { ProductCode } from "@/lib/products";
+import { formattedLicensePrice } from "@/lib/regional-pricing";
 
 export const metadata: Metadata = {
   title: "Lifetime Pricing",
@@ -16,40 +18,37 @@ const plans = [
     price: "Free",
     suffix: "forever",
     features: [
-      "One HDFC account",
-      "Manual statement upload",
-      "Local rules + fuzzy classification",
-      "Dashboard, budgets, and basic reports",
-      "CSV export",
+      ...ENTITLEMENTS.tiers.free.released_features.map(
+        (code) => ENTITLEMENTS.features[code].label,
+      ),
       "No account or telemetry required",
     ],
   },
   {
     name: "Pro",
-    price: "₹4,999",
+    price: formattedLicensePrice("pro", "IN"),
+    globalPrice: formattedLicensePrice("pro", "US"),
     suffix: "one time",
     featured: true,
     features: [
-      "Everything in Core",
-      "Multi-account transfer matching",
-      "Verified bank parsers as they are released",
-      "AI classification and advanced reports",
-      "500 included AI credits each month",
-      "Optional encrypted backup and sync",
-      "Priority email support",
+      "Everything released in Core",
+      ...ENTITLEMENTS.tiers.pro.released_features
+        .filter((code) => !ENTITLEMENTS.tiers.free.released_features.includes(code))
+        .map((code) => ENTITLEMENTS.features[code].label),
+      "Three active installations",
+      "Zero recurring hosted AI credits",
     ],
   },
   {
     name: "Max",
-    price: "₹9,999",
+    price: formattedLicensePrice("max", "IN"),
+    globalPrice: formattedLicensePrice("max", "US"),
     suffix: "one time",
     features: [
-      "Everything in Pro",
-      "2,500 included AI credits each month",
-      "Up to five family profiles",
-      "White-label reports",
-      "Local REST API access",
-      "Early parser access",
+      "Everything released in Pro",
+      ENTITLEMENTS.features.personal_classifier.label,
+      "Three active installations",
+      "Zero recurring hosted AI credits",
     ],
   },
 ];
@@ -66,6 +65,7 @@ const creditPacks: Array<{
 ];
 
 export default function PricingPage() {
+  const checkoutEnabled = process.env.CHECKOUT_ENABLED === "true";
   return (
     <>
       <section className="page-hero">
@@ -96,6 +96,12 @@ export default function PricingPage() {
                 <div className="price">
                   {plan.price} <small>{plan.suffix}</small>
                 </div>
+                {"globalPrice" in plan ? (
+                  <p className="regional-anchor">
+                    {plan.globalPrice} US anchor · regional checkout uses a
+                    manually reviewed PPP table
+                  </p>
+                ) : null}
                 <ul className="check-list">
                   {plan.features.map((feature) => (
                     <li key={feature}>
@@ -112,6 +118,7 @@ export default function PricingPage() {
                   <PurchaseButton
                     product={plan.name === "Pro" ? "pro" : "max"}
                     secondary={plan.name === "Max"}
+                    enabled={checkoutEnabled}
                   >
                     Get {plan.name} — {plan.price}
                   </PurchaseButton>
@@ -142,16 +149,16 @@ export default function PricingPage() {
                 <p className="lead" style={{ fontSize: 14 }}>
                   {price} · one time
                 </p>
-                <PurchaseButton product={product}>
+                <PurchaseButton product={product} enabled={checkoutEnabled}>
                   Buy {name}
                 </PurchaseButton>
               </article>
             ))}
           </div>
           <div className="callout">
-            AI credits are not a subscription. Included monthly allowances
-            refresh by license tier; purchased top-ups remain available until
-            used.
+            AI credits are not a subscription and are never bundled into a
+            lifetime plan. Purchased top-ups remain available until used.
+            Local AI and bring-your-own provider keys use no GODFIN credits.
           </div>
         </div>
       </section>
