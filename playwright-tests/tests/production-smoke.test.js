@@ -16,6 +16,45 @@ function effectivePerformanceLimit(name) {
   );
 }
 
+async function measureNavigationPaint(page, target) {
+  const duration = await page.evaluate(({ link, heading }) => new Promise((resolve, reject) => {
+    const targetLink = [...document.querySelectorAll('a')]
+      .find(element => element.textContent?.trim() === link);
+    if (!targetLink) {
+      reject(new Error(`Navigation link "${link}" was not found.`));
+      return;
+    }
+
+    const started = performance.now();
+    const deadline = started + 5_000;
+
+    const waitForPaint = () => {
+      const targetHeading = [...document.querySelectorAll('h1, h2, h3')]
+        .find(element => (
+          element.textContent?.trim() === heading
+          && element.getClientRects().length > 0
+        ));
+      if (targetHeading) {
+        requestAnimationFrame(() => resolve(performance.now() - started));
+        return;
+      }
+      if (performance.now() >= deadline) {
+        reject(new Error(`Heading "${heading}" was not painted within 5 seconds.`));
+        return;
+      }
+      requestAnimationFrame(waitForPaint);
+    };
+
+    targetLink.click();
+    requestAnimationFrame(waitForPaint);
+  }), target);
+
+  await expect(
+    page.getByRole('heading', { name: target.heading, exact: true }),
+  ).toBeVisible();
+  return duration;
+}
+
 test('login → upload → classify → generate report', async ({ page }) => {
   const statementPath = process.env.GODFIN_E2E_STATEMENT;
   if (!statementPath) throw new Error('GODFIN_E2E_STATEMENT is required');
@@ -103,12 +142,7 @@ test('common navigation stays within the accepted p95 budget', async ({ page }) 
   const measurements = [];
   for (let iteration = 0; iteration < 4; iteration += 1) {
     for (const target of targets) {
-      const started = performance.now();
-      await page.getByRole('link', { name: target.link, exact: true }).click();
-      await expect(
-        page.getByRole('heading', { name: target.heading, exact: true }),
-      ).toBeVisible();
-      measurements.push(performance.now() - started);
+      measurements.push(await measureNavigationPaint(page, target));
     }
   }
 
