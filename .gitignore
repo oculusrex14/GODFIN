@@ -62,7 +62,6 @@ build/
 out/
 coverage/
 *.tsbuildinfo
-website/src/generated/entitlements.json
 desktop/assets/icon.iconset/
 desktop/release/
 

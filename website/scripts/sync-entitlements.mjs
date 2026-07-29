@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,4 +12,10 @@ const destination = resolve(
 );
 
 mkdirSync(dirname(destination), { recursive: true });
-copyFileSync(source, destination);
+if (existsSync(source)) {
+  copyFileSync(source, destination);
+} else if (!existsSync(destination)) {
+  throw new Error(
+    "Entitlement manifest is unavailable: build from the repository root or include the generated snapshot.",
+  );
+}
