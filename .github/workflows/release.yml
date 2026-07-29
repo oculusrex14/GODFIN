@@ -94,6 +94,17 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Verify package startup, storage, memory, signature, and fuses
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            xvfb-run --auto-servernum npm run verify:package
+          else
+            npm run verify:package
+          fi
+        working-directory: desktop
+        env:
+          GODFIN_REQUIRE_SIGNING: ${{ matrix.require_signing }}
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
@@ -120,6 +131,8 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
+      - name: Stage uniquely named release assets
+        run: node packaging/stage-release-assets.mjs --input artifacts --output release-assets
       - name: Generate Homebrew cask
         shell: bash
         run: |
@@ -129,18 +142,21 @@ jobs:
             --version "${RELEASE_TAG#v}" \
             --arm "$arm_dmg" \
             --intel "$intel_dmg" \
-            --output artifacts/godfin.rb
+            --output release-assets/godfin.rb
       - name: Generate SHA-256 checksums
         shell: bash
         run: |
-          find artifacts -type f ! -name 'SHA256SUMS.txt' -print0 \
-            | sort -z \
-            | xargs -0 sha256sum \
-            > artifacts/SHA256SUMS.txt
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              > SHA256SUMS.txt
+          )
       - name: Create private draft release with all assets
         shell: bash
         run: |
-          mapfile -d '' files < <(find artifacts -type f -print0)
+          mapfile -d '' files < <(find release-assets -maxdepth 1 -type f -print0)
           gh release delete "$RELEASE_TAG" --yes --cleanup-tag=false 2>/dev/null || true
           gh release create "$RELEASE_TAG" \
             --draft \

@@ -1,0 +1,48 @@
+name: Roll back signed update metadata
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Previously reviewed signed release tag (for example v1.0.0)
+        required: true
+        type: string
+      confirmation:
+        description: Type ROLLBACK_SIGNED_RELEASE
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    if: inputs.confirmation == 'ROLLBACK_SIGNED_RELEASE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release-production
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      GH_TOKEN: ${{ github.token }}
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_BUCKET: ${{ secrets.R2_RELEASE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download previously reviewed signed assets
+        run: gh release download "${{ inputs.tag }}" --dir artifacts
+      - name: Verify immutable release checksums
+        shell: bash
+        run: (cd artifacts && sha256sum --check SHA256SUMS.txt)
+      - name: Prepare rollback metadata
+        run: |
+          node packaging/prepare-update-feed.mjs \
+            --input artifacts \
+            --output update-feed \
+            --version "${{ inputs.tag }}"
+      - name: Point update channels to the reviewed rollback release
+        run: |
+          aws s3 sync update-feed "s3://${R2_BUCKET}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --no-progress

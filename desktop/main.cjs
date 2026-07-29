@@ -10,6 +10,7 @@ const { spawn } = require("node:child_process");
 const BACKEND_PORT = 5100;
 const BACKEND_ORIGIN = `http://127.0.0.1:${BACKEND_PORT}`;
 const APP_ORIGIN = "godfin://app";
+const UPDATE_ORIGIN = "https://releases.godfin.dev";
 const WEBSITE_ORIGINS = new Set([
   "https://godfin.dev",
   "https://accounts.google.com",
@@ -104,7 +105,9 @@ function backendCommand() {
         executable,
       ),
       args: [],
-      cwd: path.join(process.resourcesPath, "backend", "godfin-backend"),
+      // All relative writes (including logs and seeded backup settings) must
+      // remain outside the signed application bundle.
+      cwd: app.getPath("userData"),
     };
   }
   const projectRoot = path.join(__dirname, "..");
@@ -123,6 +126,7 @@ function backendEnvironment() {
   return {
     ...process.env,
     DB_PATH: path.join(userData, "godfin.db"),
+    GODFIN_BACKUP_DIR: path.join(userData, "backups"),
     GODFIN_BACKEND_PORT: String(BACKEND_PORT),
     GODFIN_ENCRYPTION_KEY_FILE: path.join(userData, ".encryption_key"),
     GODFIN_MACHINE_ID_FILE: path.join(userData, ".machine_id"),
@@ -237,9 +241,18 @@ function createWindow() {
 
 function configureUpdater() {
   if (!app.isPackaged || process.env.GODFIN_DISABLE_UPDATES === "1") return;
+  const updateOrigin = process.env.GODFIN_UPDATE_ORIGIN || UPDATE_ORIGIN;
+  const updateChannel = `${process.platform}-${process.arch}`;
+  autoUpdater.setFeedURL({
+    provider: "generic",
+    url: `${updateOrigin.replace(/\/+$/, "")}/${updateChannel}`,
+  });
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowDowngrade = false;
+  // Release metadata can point to a previously signed immutable version only
+  // through the owner-confirmed rollback workflow. Code signing remains the
+  // authenticity boundary for every downloaded application.
+  autoUpdater.allowDowngrade = true;
   autoUpdater.on("error", (error) => {
     console.error("Auto-update failed", error);
   });

@@ -21,7 +21,17 @@ function run(command, args, cwd) {
     stdio: "inherit",
     shell: false,
   });
-  if (result.status !== 0) process.exit(result.status || 1);
+  if (result.error) {
+    throw new Error(
+      `Could not start ${command}: ${result.error.message}. ` +
+      "Create backend/venv with Python 3.12 and install requirements-build-lock.txt.",
+    );
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}.`,
+    );
+  }
 }
 
 run(npm, ["run", "build"], frontendRoot);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,8 @@ class EntitlementManifestError(RuntimeError):
 
 
 def _manifest_path() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "shared" / "entitlements.json"
     return Path(__file__).resolve().parents[3] / "shared" / "entitlements.json"
 
 

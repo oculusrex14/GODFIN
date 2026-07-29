@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from app.core.entitlements import (
+    _manifest_path,
     activation_limit_for_tier,
     entitlement_manifest,
     features_for_tier,
@@ -24,3 +27,14 @@ def test_paid_tiers_have_three_activations_and_no_included_hosted_credits():
 def test_max_personal_classifier_is_not_granted_to_pro():
     assert "personal_classifier" not in features_for_tier("pro")
     assert "personal_classifier" in features_for_tier("max")
+
+
+def test_manifest_path_uses_pyinstaller_bundle_root(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.core.entitlements.sys.frozen", True, raising=False)
+    monkeypatch.setattr(
+        "app.core.entitlements.sys._MEIPASS",
+        str(tmp_path),
+        raising=False,
+    )
+
+    assert _manifest_path() == Path(tmp_path) / "shared" / "entitlements.json"

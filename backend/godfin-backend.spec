@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 hiddenimports = collect_submodules("app")
@@ -11,7 +13,12 @@ hiddenimports += [
     "googleapiclient.errors",
 ]
 
-datas = []
+datas = [
+    (
+        str(Path(SPECPATH).resolve().parent / "shared" / "entitlements.json"),
+        "shared",
+    )
+]
 for package in ("matplotlib", "fastembed"):
     try:
         datas += collect_data_files(package)

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "regression_margin": 0.15,
+  "budgets": {
+    "cold_start_ms": {
+      "absolute_max": 8000,
+      "accepted_baseline": 6900
+    },
+    "navigation_p95_ms": {
+      "absolute_max": 250,
+      "accepted_baseline": 215
+    },
+    "transaction_filter_10000_ms": {
+      "absolute_max": 750,
+      "accepted_baseline": 650
+    },
+    "structured_import_1000_ms": {
+      "absolute_max": 15000,
+      "accepted_baseline": 13000
+    },
+    "idle_combined_memory_mb": {
+      "absolute_max": 700,
+      "accepted_baseline": 600
+    }
+  }
+}
