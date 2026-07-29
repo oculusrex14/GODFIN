@@ -60,6 +60,8 @@ jobs:
           cache-dependency-path: website/package-lock.json
       - run: npm ci
         working-directory: website
+      - run: npm run verify:contracts
+        working-directory: website
       - run: npm run build
         working-directory: website
       - run: npm audit --omit=dev
@@ -85,6 +87,8 @@ jobs:
       - run: python -m pip install --require-hashes -r backend/requirements-lock.txt
       - run: npm ci
         working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
       - run: npm ci
         working-directory: playwright-tests
       - run: npx playwright install --with-deps chromium
@@ -95,7 +99,7 @@ jobs:
         shell: bash
         run: |
           python -m uvicorn app.main:app --host 127.0.0.1 --port 5100 --app-dir backend > "$RUNNER_TEMP/godfin-backend.log" 2>&1 &
-          npm --prefix frontend run dev -- --host 127.0.0.1 --port 5200 > "$RUNNER_TEMP/godfin-frontend.log" 2>&1 &
+          npm --prefix frontend run preview -- --host 127.0.0.1 --port 5200 > "$RUNNER_TEMP/godfin-frontend.log" 2>&1 &
           for attempt in {1..60}; do
             if curl --fail --silent http://127.0.0.1:5100/api/v1/health >/dev/null &&
                curl --fail --silent http://127.0.0.1:5200 >/dev/null; then
@@ -115,6 +119,11 @@ jobs:
         env:
           CI: "true"
           GODFIN_E2E_STATEMENT: ${{ runner.temp }}/redacted-statement.pdf
+      - name: Run mobile accessibility smoke
+        run: npx playwright test --config=playwright.legacy.config.js tests/accessibility-smoke.test.js
+        working-directory: playwright-tests
+        env:
+          CI: "true"
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

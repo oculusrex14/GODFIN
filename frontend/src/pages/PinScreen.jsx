@@ -146,7 +146,7 @@ export default function PinScreen() {
             <button
               type="submit"
               disabled={loading || retryAfter > 0 || !backendOnline || pin.length < 4}
-              className="w-full h-11 rounded-[14px] bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 text-[0.82rem] font-medium transition-colors hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full h-12 min-h-12 touch-manipulation rounded-[14px] bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 text-[0.82rem] font-medium transition-colors hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {loading ? (isFirstRun ? 'Securing...' : 'Unlocking...') : (isFirstRun ? 'Set PIN' : 'Unlock')}
             </button>

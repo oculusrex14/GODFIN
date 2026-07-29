@@ -8,7 +8,8 @@
     "prebuild": "node scripts/sync-entitlements.mjs",
     "build": "next build",
     "start": "next start -p 5300",
-    "lint": "next lint"
+    "lint": "next lint",
+    "verify:contracts": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.3",

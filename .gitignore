@@ -72,6 +72,9 @@ test-results/
 playwright-report/
 *.webm
 trace.zip
+!docs/launch-artifacts/
+!docs/launch-artifacts/*.png
+!docs/launch-artifacts/GODFIN_PRIVATE_DEMO.webm
 
 # Local tool state
 .claude/settings.local.json

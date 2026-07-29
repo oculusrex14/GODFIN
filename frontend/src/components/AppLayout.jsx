@@ -214,6 +214,7 @@ export default function AppLayout({ children }) {
           </h1>
           <button
             onClick={() => setMobileOpen(true)}
+            aria-label="Open navigation menu"
             className="p-2 rounded-[12px] bg-white/[0.08] border border-white/[0.12] text-white/60"
           >
             <Menu size={18} />
@@ -240,6 +241,7 @@ export default function AppLayout({ children }) {
               >
                 <button
                   onClick={() => setMobileOpen(false)}
+                  aria-label="Close navigation menu"
                   className="absolute top-4 right-4 p-1.5 rounded-full text-white/40 hover:text-white/70"
                 >
                   <X size={18} />
