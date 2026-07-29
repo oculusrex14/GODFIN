@@ -23,6 +23,7 @@ import LocalAISetup from '../components/settings/LocalAISetup';
 import ClassificationMemorySettings from '../components/settings/ClassificationMemorySettings';
 import LicenseSettings from '../components/settings/LicenseSettings';
 import AccountSettings from '../components/settings/AccountSettings';
+import DataContributionSettings from '../components/settings/DataContributionSettings';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useLocation } from '../router';
@@ -266,7 +267,7 @@ export default function Settings() {
   const handleResetClick = async () => {
     const confirmed = await confirm({
       title: 'Reset All Data?',
-      message: 'This will permanently delete all transactions, audit sessions, merchant memories, goals, and income sources. A backup will be created first. Accounts and settings will be preserved. This action cannot be undone.',
+      message: 'This will permanently delete transactions, audit sessions, merchant memories, goals, income sources, net-worth items, insight corrections, and prepared pilot bundles. A backup will be created first. Accounts and settings will be preserved. This action cannot be undone.',
       confirmLabel: 'Reset Everything',
       cancelLabel: 'Cancel',
       danger: true,
@@ -481,6 +482,12 @@ export default function Settings() {
             GODFIN uses supervised learning from your explicit corrections—not reinforcement learning. Exact merchant memory is always the strongest learned match.
           </p>
           <ClassificationMemorySettings />
+        </GlassSection>
+      </motion.div>
+
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.19 }}>
+        <GlassSection title="Optional Data Contribution" icon={Shield}>
+          <DataContributionSettings />
         </GlassSection>
       </motion.div>
 
@@ -727,7 +734,7 @@ export default function Settings() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-white/70 text-[0.85rem]">Reset All Data</div>
-                <div className="text-white/25 text-[0.7rem]">Delete all transactions, audits, goals, and income. Accounts &amp; settings preserved.</div>
+                <div className="text-white/25 text-[0.7rem]">Delete dynamic finance data, including net-worth items and prepared pilot bundles. Accounts &amp; settings preserved.</div>
               </div>
               <GlassButton
                 variant="secondary"

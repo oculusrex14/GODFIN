@@ -781,6 +781,105 @@ export function enableEmbeddings() {
   return apiFetch('/system/embeddings/enable', { method: 'POST' });
 }
 
+export function fetchFeatureFlags() {
+  return apiFetch('/system/feature-flags');
+}
+
+// Max net worth
+export function fetchNetWorth() {
+  return apiFetch('/net-worth');
+}
+
+export function createNetWorthItem(data) {
+  return apiFetch('/net-worth', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateNetWorthItem({ id, ...data }) {
+  return apiFetch(`/net-worth/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteNetWorthItem(id) {
+  return apiFetch(`/net-worth/${id}`, { method: 'DELETE' });
+}
+
+export function refreshNetWorthQuote(id) {
+  return apiFetch(`/net-worth/${id}/refresh`, { method: 'POST' });
+}
+
+export function fetchMarketDataStatus() {
+  return apiFetch('/net-worth/market-data/config/status');
+}
+
+export function configureMarketData(data) {
+  return apiFetch('/net-worth/market-data/config', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+// Transparent behavior insights
+export function fetchBehaviorInsights() {
+  return apiFetch('/behavior-insights');
+}
+
+export function updateBehaviorConfig(monthlyBudget) {
+  return apiFetch('/behavior-insights/config', {
+    method: 'PUT',
+    body: JSON.stringify({ monthly_budget: monthlyBudget }),
+  });
+}
+
+export function updateBehaviorPreference(metricKey, data) {
+  return apiFetch(`/behavior-insights/${metricKey}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function resetBehaviorInsights() {
+  return apiFetch('/behavior-insights/reset', { method: 'POST' });
+}
+
+export function fetchSponsorCard() {
+  return apiFetch('/behavior-insights/sponsor/card');
+}
+
+export async function downloadBehaviorInsights() {
+  const blob = await apiFetch('/behavior-insights/export', { responseType: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'godfin-behavior-insights.csv';
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+// Separately consented compensated-data pilot
+export function fetchRewardPilotStatus() {
+  return apiFetch('/reward-pilot/status');
+}
+
+export function updateRewardPilotConsent(consented) {
+  return apiFetch('/reward-pilot/consent', {
+    method: 'PUT',
+    body: JSON.stringify({ consented }),
+  });
+}
+
+export function fetchRewardPilotPreview() {
+  return apiFetch('/reward-pilot/preview');
+}
+
+export function submitRewardPilotBundle() {
+  return apiFetch('/reward-pilot/submit', { method: 'POST' });
+}
+
 // CSV Export
 export async function downloadCSV(month) {
   const qs = month ? `?month=${month}` : '';

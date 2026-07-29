@@ -25,6 +25,8 @@ const CashFlow = lazy(() => import('./pages/CashFlow'));
 const Transfers = lazy(() => import('./pages/Transfers'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
 const LearnGodfin = lazy(() => import('./pages/LearnGodfin'));
+const NetWorth = lazy(() => import('./pages/NetWorth'));
+const BehaviorInsights = lazy(() => import('./pages/BehaviorInsights'));
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -72,6 +74,8 @@ const ROUTES = {
   '/cash-flow': CashFlow,
   '/transfers': Transfers,
   '/learn': LearnGodfin,
+  '/net-worth': NetWorth,
+  '/behavior-insights': BehaviorInsights,
 };
 
 function AppRoutes() {

@@ -29,6 +29,13 @@ def test_max_personal_classifier_is_not_granted_to_pro():
     assert "personal_classifier" in features_for_tier("max")
 
 
+def test_phase4_premium_features_are_max_only():
+    assert "net_worth" not in features_for_tier("pro")
+    assert "behavior_insights" not in features_for_tier("pro")
+    assert "net_worth" in features_for_tier("max")
+    assert "behavior_insights" in features_for_tier("max")
+
+
 def test_manifest_path_uses_pyinstaller_bundle_root(monkeypatch, tmp_path):
     monkeypatch.setattr("app.core.entitlements.sys.frozen", True, raising=False)
     monkeypatch.setattr(

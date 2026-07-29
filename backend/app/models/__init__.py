@@ -21,6 +21,9 @@ from app.models.classification_learning import (
     ClassificationCorrection,
     ClassificationPattern,
 )
+from app.models.net_worth import NetWorthItem, NetWorthQuote
+from app.models.behavior_insight import BehaviorInsightPreference
+from app.models.reward_pilot import RewardPilotSubmission
 
 __all__ = [
     "Account", "Transaction", "TransactionSplit", "MerchantMemory",
@@ -28,5 +31,6 @@ __all__ = [
     "RecurringPattern", "AppSetting", "AuditSession", "AuditLog", "SystemLog",
     "LLMConfiguration", "Subscription", "AuthSession", "PinAttempt",
     "TransferMatch", "SubscriptionSuggestion", "ClassificationCorrection",
-    "ClassificationPattern",
+    "ClassificationPattern", "NetWorthItem", "NetWorthQuote",
+    "BehaviorInsightPreference", "RewardPilotSubmission",
 ]

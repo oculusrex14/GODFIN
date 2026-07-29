@@ -11,7 +11,7 @@ from app.core.backup import create_backup
 from app.models.app_setting import AppSetting
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 2
+CURRENT_SCHEMA_REVISION = 3
 
 
 def read_schema_revision(db_path: str) -> int:

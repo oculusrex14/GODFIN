@@ -203,11 +203,15 @@ def _encrypted_values() -> list[str]:
                     "WHERE type='table' AND name='app_settings'"
                 ).fetchone()
                 if app_settings_exists:
-                    license_row = connection.execute(
-                        "SELECT value FROM app_settings WHERE key='license_key'"
-                    ).fetchone()
-                    if license_row and isinstance(license_row[0], str) and license_row[0]:
-                        values.append(license_row[0])
+                    secret_rows = connection.execute(
+                        "SELECT value FROM app_settings "
+                        "WHERE key IN ('license_key', 'twelve_data_api_key')"
+                    ).fetchall()
+                    values.extend(
+                        row[0]
+                        for row in secret_rows
+                        if isinstance(row[0], str) and row[0]
+                    )
             finally:
                 connection.close()
         except sqlite3.Error:

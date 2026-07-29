@@ -46,7 +46,9 @@ const plans = [
     suffix: "one time",
     features: [
       "Everything released in Pro",
-      ENTITLEMENTS.features.personal_classifier.label,
+      ...ENTITLEMENTS.tiers.max.released_features
+        .filter((code) => !ENTITLEMENTS.tiers.pro.released_features.includes(code))
+        .map((code) => ENTITLEMENTS.features[code].label),
       "Three active installations",
       "Zero recurring hosted AI credits",
     ],

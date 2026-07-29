@@ -20,6 +20,8 @@ import {
   CalendarDays,
   ScanSearch,
   MoreHorizontal,
+  Scale,
+  Sparkles,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
@@ -51,6 +53,8 @@ const NAV_GROUPS = [
     items: [
       { to: '/reports', icon: FileText, label: 'Reports' },
       { to: '/cash-flow', icon: CalendarDays, label: 'Cash Flow' },
+      { to: '/net-worth', icon: Scale, label: 'Net Worth' },
+      { to: '/behavior-insights', icon: Sparkles, label: 'Behavior Insights' },
       { to: '/advisor', icon: Bot, label: 'Advisor' },
     ],
   },

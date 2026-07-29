@@ -520,12 +520,19 @@ def reset_all_data(
         ClassificationCorrection,
         ClassificationPattern,
     )
+    from app.models.behavior_insight import BehaviorInsightPreference
+    from app.models.net_worth import NetWorthItem, NetWorthQuote
+    from app.models.reward_pilot import RewardPilotSubmission
 
     # Delete child tables FIRST (FK order matters):
     # TransactionSplit → Transaction; AuditLog → Transaction
     # Transaction → AuditSession; MonthlyAggregate → AuditSession
     db.query(TransactionSplit).delete(synchronize_session=False)
     db.query(AuditLog).delete(synchronize_session=False)
+    db.query(NetWorthQuote).delete(synchronize_session=False)
+    db.query(NetWorthItem).delete(synchronize_session=False)
+    db.query(BehaviorInsightPreference).delete(synchronize_session=False)
+    db.query(RewardPilotSubmission).delete(synchronize_session=False)
     db.query(ClassificationCorrection).delete(synchronize_session=False)
     db.query(ClassificationPattern).delete(synchronize_session=False)
     db.query(Transaction).delete(synchronize_session=False)

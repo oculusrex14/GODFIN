@@ -56,7 +56,9 @@
         "multi_bank",
         "ai_classification",
         "advanced_reports",
-        "personal_classifier"
+        "personal_classifier",
+        "net_worth",
+        "behavior_insights"
       ]
     }
   },
@@ -112,14 +114,14 @@
       "description": "After 200 confirmed corrections across at least five categories, enable a private personal classifier."
     },
     "net_worth": {
-      "status": "planned",
+      "status": "released",
       "label": "Net-worth tracking",
-      "description": "Not sold or advertised as included until Phase 4 acceptance tests pass."
+      "description": "Track local assets, liabilities, quote history, freshness, and calculation provenance. Live liquid-asset quotes use the user's own Twelve Data key."
     },
     "behavior_insights": {
-      "status": "planned",
+      "status": "released",
       "label": "Financial behavior insights",
-      "description": "Not sold or advertised as included until Phase 4 acceptance tests pass."
+      "description": "Explain deterministic savings, cash-flow, budget, subscription, buffer, and routine metrics with evidence, confidence, correction, hide, reset, and export controls."
     }
   }
 }
