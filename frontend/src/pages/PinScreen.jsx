@@ -10,6 +10,8 @@ export default function PinScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [backendOnline, setBackendOnline] = useState(true);
+  const [pin, setPinValue] = useState('');
+  const [retryAfter, setRetryAfter] = useState(0);
 
   // Poll backend health every 3 seconds
   useEffect(() => {
@@ -35,15 +37,36 @@ export default function PinScreen() {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  async function onPinComplete(pin) {
+  useEffect(() => {
+    if (retryAfter <= 0) return undefined;
+    const timer = setInterval(() => {
+      setRetryAfter((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [retryAfter]);
+
+  async function onPinSubmit(event) {
+    event.preventDefault();
+    const maxLength = isFirstRun ? 6 : 8;
+    if (!new RegExp(`^\\d{4,${maxLength}}$`).test(pin)) {
+      setError(isFirstRun ? 'Choose a PIN containing 4–6 digits.' : 'Enter your 4–8 digit PIN.');
+      return;
+    }
+
     setError('');
     setLoading(true);
     try {
       const fn = isFirstRun ? setPin : verifyPin;
       const data = await fn(pin);
       handleAuth(data.token);
-    } catch {
-      setError(isFirstRun ? 'Failed to set PIN' : 'Incorrect PIN');
+    } catch (err) {
+      if (err?.status === 429) {
+        setRetryAfter(300);
+        setError('Too many attempts. Unlocking will be available again shortly.');
+      } else {
+        setError(err?.message || (isFirstRun ? 'Failed to set PIN' : 'Incorrect PIN'));
+      }
+      setPinValue('');
       setLoading(false);
     }
   }
@@ -104,11 +127,30 @@ export default function PinScreen() {
           <h2 className="text-white/80 text-[1.1rem] text-center mb-2" style={{ fontWeight: 400 }}>
             {isFirstRun ? 'Set Your PIN' : 'Enter Your PIN'}
           </h2>
-          <p className="text-white/30 text-[0.8rem] text-center mb-8">
-            {isFirstRun ? 'Choose a 4-digit PIN to secure your data' : 'Enter your PIN to continue'}
+          <p id="pin-length-hint" className="text-white/30 text-[0.8rem] text-center mb-8">
+            {isFirstRun
+              ? 'Choose 4–6 digits to secure your local data'
+              : 'Enter your 4–6 digit PIN. Legacy 7–8 digit PINs still work.'}
           </p>
 
-          <PinInput length={4} onComplete={onPinComplete} />
+          <form onSubmit={onPinSubmit} className="space-y-4">
+            <PinInput
+              minLength={4}
+              maxLength={isFirstRun ? 6 : 8}
+              value={pin}
+              onChange={setPinValue}
+              autoSubmit={false}
+              disabled={loading || retryAfter > 0 || !backendOnline}
+              label={isFirstRun ? 'Choose a 4 to 6 digit PIN' : 'Enter your PIN'}
+            />
+            <button
+              type="submit"
+              disabled={loading || retryAfter > 0 || !backendOnline || pin.length < 4}
+              className="w-full h-11 rounded-[14px] bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 text-[0.82rem] font-medium transition-colors hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {loading ? (isFirstRun ? 'Securing...' : 'Unlocking...') : (isFirstRun ? 'Set PIN' : 'Unlock')}
+            </button>
+          </form>
 
           {error && (
             <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-rose-400/80 text-[0.8rem] text-center mt-4">
@@ -116,8 +158,10 @@ export default function PinScreen() {
             </motion.p>
           )}
 
-          {loading && (
-            <p className="text-white/30 text-[0.8rem] text-center mt-4">Verifying...</p>
+          {retryAfter > 0 && (
+            <p className="text-amber-300/70 text-[0.75rem] text-center mt-3" role="status">
+              Try again in {Math.floor(retryAfter / 60)}:{String(retryAfter % 60).padStart(2, '0')}
+            </p>
           )}
         </motion.div>
       </motion.div>

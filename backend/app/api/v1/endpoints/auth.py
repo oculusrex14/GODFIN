@@ -28,19 +28,21 @@ RATE_LIMIT_WINDOW_SECONDS = 300  # 5 minute window
 
 # PIN validation constants
 MIN_PIN_LENGTH = 4
-MAX_PIN_LENGTH = 8
+MAX_NEW_PIN_LENGTH = 6
+MAX_LEGACY_PIN_LENGTH = 8
 
 
-def _validate_pin_format(pin: str) -> None:
+def _validate_pin_format(pin: str, *, allow_legacy_length: bool = False) -> None:
     """Validate PIN format. Raises HTTPException if invalid."""
+    max_length = MAX_LEGACY_PIN_LENGTH if allow_legacy_length else MAX_NEW_PIN_LENGTH
     if not pin:
         raise HTTPException(status_code=400, detail="PIN cannot be empty")
     if not re.match(r'^\d+$', pin):
         raise HTTPException(status_code=400, detail="PIN must contain only digits")
     if len(pin) < MIN_PIN_LENGTH:
         raise HTTPException(status_code=400, detail=f"PIN must be at least {MIN_PIN_LENGTH} digits")
-    if len(pin) > MAX_PIN_LENGTH:
-        raise HTTPException(status_code=400, detail=f"PIN cannot exceed {MAX_PIN_LENGTH} digits")
+    if len(pin) > max_length:
+        raise HTTPException(status_code=400, detail=f"PIN cannot exceed {max_length} digits")
     # Reject weak PINs (sequential or repeated digits)
     weak_pins = ['2345', '3456', '4567', '5678', '6789', '7890',
                  '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '0000']
@@ -239,7 +241,7 @@ def verify_pin(body: PinVerify, request: Request, db: Session = Depends(get_db))
     _check_rate_limit(db, client_ip)
 
     # Validate PIN format
-    _validate_pin_format(body.pin)
+    _validate_pin_format(body.pin, allow_legacy_length=True)
 
     pin_setting = db.query(AppSetting).filter_by(key="pin_hash").first()
     if not pin_setting or not pin_setting.value:

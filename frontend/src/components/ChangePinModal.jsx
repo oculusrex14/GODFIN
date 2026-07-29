@@ -93,7 +93,7 @@ export default function ChangePinModal({ open, onClose }) {
                   <input
                     type="password"
                     inputMode="numeric"
-                    maxLength={6}
+                    maxLength={8}
                     value={currentPin}
                     onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ''))}
                     placeholder="Enter current PIN"

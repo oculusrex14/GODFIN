@@ -10,7 +10,9 @@ class PinSet(BaseModel):
 
 
 class PinVerify(BaseModel):
-    pin: str = Field(..., min_length=4, max_length=6)
+    # Verification remains compatible with PINs created before new PINs were
+    # restricted to six digits.
+    pin: str = Field(..., min_length=4, max_length=8, pattern=r"^\d{4,8}$")
 
 
 class AuthStatusResponse(BaseModel):
@@ -18,7 +20,7 @@ class AuthStatusResponse(BaseModel):
 
 
 class PinChange(BaseModel):
-    current_pin: str = Field(..., min_length=4, max_length=6, pattern=r"^\d{4,6}$")
+    current_pin: str = Field(..., min_length=4, max_length=8, pattern=r"^\d{4,8}$")
     new_pin: str = Field(..., min_length=4, max_length=6, pattern=r"^\d{4,6}$")
 
 
