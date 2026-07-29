@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { format, subMonths } from 'date-fns';
@@ -115,6 +115,7 @@ function MarkdownCard({ children, className = '' }) {
 
 export default function Reports() {
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
+  const [contentReady, setContentReady] = useState(false);
   const now = new Date();
   const [fyStart, setFyStart] = useState(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1);
   const d = new Date(month + '-01');
@@ -149,6 +150,11 @@ export default function Reports() {
   const insights = insightsData?.insights;
   const comparison = detailed?.category_comparison || [];
 
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setContentReady(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
   return (
     <div>
       {/* Header */}
@@ -164,6 +170,21 @@ export default function Reports() {
         </div>
       </motion.div>
 
+      {!contentReady ? (
+        <div
+          className="rounded-[20px] bg-white/[0.06] border border-white/[0.12] p-5"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="text-white/45 text-sm">Preparing report details…</p>
+          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4" aria-hidden="true">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="h-24 rounded-2xl bg-white/[0.05] animate-pulse" />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <StatCard title="Total Spend" value={summaryLoading ? '--' : formatINR(summary?.total_spend)} icon={TrendingDown} color="text-rose-400" delay={0} />
@@ -465,6 +486,8 @@ export default function Reports() {
           )}
         </div>
       </motion.div>
+        </>
+      )}
     </div>
   );
 }

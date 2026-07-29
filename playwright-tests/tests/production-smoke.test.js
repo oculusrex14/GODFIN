@@ -94,6 +94,7 @@ test('login → upload → classify → generate report', async ({ page }) => {
 
   await page.getByRole('link', { name: 'Reports' }).click();
   await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Export Reports' })).toBeVisible();
 
   const pdfResult = await page.evaluate(async () => {
     const token = localStorage.getItem('godfin_auth_token');
@@ -146,6 +147,9 @@ test('common navigation stays within the accepted p95 budget', async ({ page }) 
     }
   }
 
+  console.log(`Navigation paint samples: ${measurements.map(
+    (duration, index) => `${targets[index % targets.length].link}=${duration.toFixed(1)}ms`,
+  ).join(', ')}`);
   measurements.sort((left, right) => left - right);
   const p95 = measurements[Math.ceil(measurements.length * 0.95) - 1];
   expect(
