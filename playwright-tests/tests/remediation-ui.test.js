@@ -40,6 +40,7 @@ async function mockAuthenticatedApp(page) {
       '/review/stats': { queue_size: 0 },
       '/ingest/gmail/sync-status': { status: 'idle', percent: 0 },
       '/goals': [],
+      '/goal-contribution-suggestions': { enabled: false, items: [] },
       '/profile': profile,
       '/recurring': [],
       '/settings': { theme: 'dark', allow_network_access: 'false' },
@@ -181,4 +182,20 @@ test('locked report insights link to current lifetime pricing', async ({ page })
   const pricing = page.getByRole('link', { name: 'View license options' });
   await expect(pricing).toHaveAttribute('href', 'https://godfin.vercel.app/pricing');
   await expect(pricing).toHaveAttribute('target', '_blank');
+});
+
+test('goal creation explains opening savings and expected return', async ({ page }) => {
+  await mockAuthenticatedApp(page);
+  await page.goto('/pin');
+  await page.getByLabel('Enter your PIN').fill('4826');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByRole('link', { name: 'Budget', exact: true }).click();
+  await page.getByRole('button', { name: 'New Goal' }).click();
+
+  await expect(page.getByLabel('Already Saved (optional)')).toHaveValue('0');
+  await expect(page.getByLabel('Expected Annual Return % (optional)')).toHaveValue('0');
+  await page.getByLabel('Already Saved (optional)').fill('25000');
+  await page.getByLabel('Expected Annual Return % (optional)').fill('6.5');
+  await expect(page.getByLabel('Already Saved (optional)')).toHaveValue('25000');
+  await expect(page.getByLabel('Expected Annual Return % (optional)')).toHaveValue('6.5');
 });

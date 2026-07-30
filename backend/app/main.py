@@ -46,11 +46,15 @@ async def lifespan(app: FastAPI):
     initialize_encryption()
 
     backup_dir = os.environ.get("GODFIN_BACKUP_DIR", "./backups")
-    from app.core.startup_migrations import backup_before_schema_update
+    from app.core.startup_migrations import (
+        apply_additive_schema_updates,
+        backup_before_schema_update,
+    )
 
     migration_backup = backup_before_schema_update(DB_PATH, backup_dir)
     if migration_backup:
         logger.info("Created pre-migration backup: %s", migration_backup)
+    apply_additive_schema_updates(DB_PATH)
 
     # GODFIN intentionally uses create_all + idempotent seed migrations for its
     # local SQLite lifecycle. This makes a first launch work with an empty path
@@ -61,8 +65,12 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         run_seeds(db)
-        from app.core.startup_migrations import record_schema_revision
+        from app.core.startup_migrations import (
+            record_schema_revision,
+            run_post_create_migrations,
+        )
 
+        run_post_create_migrations(db)
         record_schema_revision(db)
 
         # Load persistent auth token from database

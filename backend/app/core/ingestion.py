@@ -37,6 +37,7 @@ class IngestionResult:
         self.skipped_duplicate = 0
         self.errors = 0
         self.error_details = []
+        self.merchant_keys: set[tuple[str, str | None]] = set()
 
     def to_dict(self):
         return {
@@ -48,6 +49,39 @@ class IngestionResult:
             'errors': self.errors,
             'error_details': self.error_details[:10],
         }
+
+
+def _run_post_ingestion_detection(
+    db: Session,
+    result: IngestionResult,
+) -> None:
+    if not result.merchant_keys:
+        return
+    from app.core.goal_contributions import (
+        detect_goal_contribution_suggestions,
+    )
+    from app.core.license import has_feature
+    from app.core.product_depth import sync_subscription_suggestions
+    from app.core.recurring import detect_recurring_patterns
+
+    try:
+        detect_recurring_patterns(db, merchant_keys=result.merchant_keys)
+        sync_subscription_suggestions(db, run_detection=False)
+        if has_feature(db, "fd_rd_goal_detection"):
+            transactions = (
+                db.query(Transaction)
+                .filter(
+                    Transaction.merchant_normalized.in_(
+                        {key[0] for key in result.merchant_keys}
+                    )
+                )
+                .all()
+            )
+            detect_goal_contribution_suggestions(
+                db, transactions=transactions
+            )
+    except Exception as exc:
+        logger.warning("Post-ingestion detection could not complete: %s", exc)
 
 
 def run_ingestion(db: Session, mock_messages: Optional[list] = None) -> IngestionResult:
@@ -74,6 +108,7 @@ def run_ingestion(db: Session, mock_messages: Optional[list] = None) -> Ingestio
     if new_history_id and mock_messages is None:
         _update_setting(db, 'last_gmail_history_id', new_history_id)
 
+    _run_post_ingestion_detection(db, result)
     _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
     db.commit()
 
@@ -192,6 +227,7 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
         classification_source=classification.source,
         is_transfer=classification.is_transfer,
         is_income=(parsed.txn_type == 'credit'),
+        reconciled=True,
     )
     # Sync is_income with INCOME category classification
     if classification.category == 'INCOME':
@@ -217,6 +253,8 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
             classification.confidence,
             raw_string=parsed.merchant_raw,
         )
+    if txn.merchant_normalized:
+        result.merchant_keys.add((txn.merchant_normalized, txn.account_id))
     result.created += 1
 
 
@@ -305,6 +343,8 @@ def run_initial_sync_background() -> None:
                 _update_setting(db, 'sync_progress_processed', str(i + 1))
                 db.commit()
 
+        _run_post_ingestion_detection(db, result)
+
         # Finalize
         date_range = f"{after_date} to {before_date}"
         _update_setting(db, 'initial_sync_date_range', date_range)
@@ -392,6 +432,8 @@ def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) 
             _update_setting(db, 'ingest_now_processed', str(batch_idx + 1))
             db.commit()
 
+        _run_post_ingestion_detection(db, result)
+
         # Finalize
         _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
         date_range = f"{start_date_str} to {end_date_str}"
@@ -447,6 +489,8 @@ def run_ingestion_with_dates(
             result.errors += 1
             result.error_details.append(f"Message {msg.get('id', '?')}: {str(e)}")
             logger.error(f"Error processing message {msg.get('id')}: {e}")
+
+    _run_post_ingestion_detection(db, result)
 
     # Update settings
     if is_manual:

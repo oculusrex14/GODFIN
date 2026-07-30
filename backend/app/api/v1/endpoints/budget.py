@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,9 +14,24 @@ from app.core.budget import (
     simulate_goal,
 )
 from app.core.database import get_db
+from app.core.goal_contributions import (
+    add_goal_contribution,
+    assign_goal_contribution_suggestion,
+    contribution_to_dict,
+    recompute_goal_balance,
+    suggestion_to_dict,
+    void_goal_contribution,
+)
+from app.core.license import has_feature
+from app.core.product_depth import sync_subscription_suggestions
 from app.core.recurring import detect_recurring_patterns
 from app.models.goal import Goal
+from app.models.goal_contribution import (
+    GoalContribution,
+    GoalContributionSuggestion,
+)
 from app.models.recurring_pattern import RecurringPattern
+from app.models.transaction import Transaction
 
 router = APIRouter()
 
@@ -28,7 +43,8 @@ class GoalCreate(BaseModel):
     target_amount: float = Field(..., gt=0)
     deadline_date: str = Field(..., pattern=r'^\d{4}-\d{2}-\d{2}$')
     pressure_level: str = Field(default='moderate', pattern=r'^(minimal|moderate|aggressive)$')
-    annual_return_rate: float = Field(default=0.035, ge=0, le=0.5)
+    current_saved: float = Field(default=0, ge=0)
+    annual_return_rate: float = Field(default=0, ge=0, le=0.5)
     minimum_flexible_floor: float = Field(default=5000, ge=0)
 
 
@@ -38,7 +54,27 @@ class GoalUpdate(BaseModel):
     current_saved: Optional[float] = Field(None, ge=0)
     deadline_date: Optional[str] = Field(None, pattern=r'^\d{4}-\d{2}-\d{2}$')
     pressure_level: Optional[str] = Field(None, pattern=r'^(minimal|moderate|aggressive)$')
+    annual_return_rate: Optional[float] = Field(None, ge=0, le=0.5)
+    minimum_flexible_floor: Optional[float] = Field(None, ge=0)
     is_active: Optional[bool] = None
+
+
+class GoalContributionCreate(BaseModel):
+    amount: float = Field(..., gt=0)
+    entry_type: str = Field(..., pattern=r"^(deposit|withdrawal)$")
+    contribution_date: Optional[str] = Field(
+        None, pattern=r"^\d{4}-\d{2}-\d{2}$"
+    )
+    note: Optional[str] = Field(None, max_length=255)
+    idempotency_key: Optional[str] = Field(None, min_length=1, max_length=100)
+
+
+class GoalContributionVoid(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=255)
+
+
+class GoalSuggestionDecision(BaseModel):
+    goal_id: Optional[str] = None
 
 
 # --- Goals ---
@@ -49,8 +85,10 @@ def list_goals(
     _user: bool = Depends(get_current_user),
 ):
     goals = db.query(Goal).filter_by(is_active=True).all()
-    return [
-        {
+    response = []
+    for g in goals:
+        recompute_goal_balance(db, g)
+        response.append({
             "id": g.id,
             "name": g.name,
             "target_amount": g.target_amount,
@@ -60,9 +98,19 @@ def list_goals(
             "annual_return_rate": g.annual_return_rate,
             "minimum_flexible_floor": g.minimum_flexible_floor,
             "is_active": g.is_active,
-        }
-        for g in goals
-    ]
+            "contribution_count": (
+                db.query(GoalContribution)
+                .filter_by(goal_id=g.id, is_voided=False)
+                .count()
+            ),
+            "pending_suggestion_count": (
+                db.query(GoalContributionSuggestion)
+                .filter_by(goal_id=g.id, status="pending")
+                .count()
+            ),
+        })
+    db.flush()
+    return response
 
 
 @router.post("/goals", status_code=201)
@@ -78,12 +126,25 @@ def create_goal(
     goal = Goal(
         name=body.name,
         target_amount=body.target_amount,
+        current_saved=0,
         deadline_date=deadline,
         pressure_level=body.pressure_level,
         annual_return_rate=body.annual_return_rate,
         minimum_flexible_floor=body.minimum_flexible_floor,
     )
     db.add(goal)
+    db.flush()
+    if body.current_saved > 0:
+        add_goal_contribution(
+            db,
+            goal,
+            amount=body.current_saved,
+            entry_type="deposit",
+            contribution_date=date.today(),
+            source_type="opening_balance",
+            idempotency_key=f"opening:{goal.id}",
+            note="Opening balance entered when the goal was created.",
+        )
     db.commit()
     db.refresh(goal)
 
@@ -91,6 +152,7 @@ def create_goal(
         "id": goal.id,
         "name": goal.name,
         "target_amount": goal.target_amount,
+        "current_saved": goal.current_saved,
         "deadline_date": str(goal.deadline_date),
     }
 
@@ -111,16 +173,192 @@ def update_goal(
     if body.target_amount is not None:
         goal.target_amount = body.target_amount
     if body.current_saved is not None:
-        goal.current_saved = body.current_saved
+        current = recompute_goal_balance(db, goal)
+        difference = round(body.current_saved - current, 2)
+        if abs(difference) >= 0.01:
+            try:
+                add_goal_contribution(
+                    db,
+                    goal,
+                    amount=abs(difference),
+                    entry_type="deposit" if difference > 0 else "withdrawal",
+                    contribution_date=date.today(),
+                    source_type="compatibility_adjustment",
+                    note="Balance adjustment from goal edit.",
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
     if body.deadline_date is not None:
         goal.deadline_date = date.fromisoformat(body.deadline_date)
     if body.pressure_level is not None:
         goal.pressure_level = body.pressure_level
+    if body.annual_return_rate is not None:
+        goal.annual_return_rate = body.annual_return_rate
+    if body.minimum_flexible_floor is not None:
+        goal.minimum_flexible_floor = body.minimum_flexible_floor
     if body.is_active is not None:
         goal.is_active = body.is_active
 
     db.commit()
     return {"id": goal.id, "status": "updated"}
+
+
+@router.get("/goals/{goal_id}/contributions")
+def list_goal_contributions(
+    goal_id: str,
+    include_voided: bool = False,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    goal = db.query(Goal).filter_by(id=goal_id).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    query = db.query(GoalContribution).filter_by(goal_id=goal_id)
+    if not include_voided:
+        query = query.filter_by(is_voided=False)
+    entries = query.order_by(
+        GoalContribution.contribution_date.desc(),
+        GoalContribution.created_at.desc(),
+    ).all()
+    return [contribution_to_dict(entry) for entry in entries]
+
+
+@router.post("/goals/{goal_id}/contributions", status_code=201)
+def create_goal_contribution(
+    goal_id: str,
+    body: GoalContributionCreate,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    goal = db.query(Goal).filter_by(id=goal_id, is_active=True).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Active goal not found")
+    try:
+        entry = add_goal_contribution(
+            db,
+            goal,
+            amount=body.amount,
+            entry_type=body.entry_type,
+            contribution_date=(
+                date.fromisoformat(body.contribution_date)
+                if body.contribution_date
+                else date.today()
+            ),
+            note=body.note,
+            idempotency_key=body.idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(entry)
+    return {
+        "contribution": contribution_to_dict(entry),
+        "current_saved": goal.current_saved,
+    }
+
+
+@router.post(
+    "/goals/{goal_id}/contributions/{contribution_id}/void"
+)
+def void_contribution(
+    goal_id: str,
+    contribution_id: str,
+    body: GoalContributionVoid,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    entry = (
+        db.query(GoalContribution)
+        .filter_by(id=contribution_id, goal_id=goal_id)
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Contribution not found")
+    void_goal_contribution(db, entry, reason=body.reason)
+    goal = db.query(Goal).filter_by(id=goal_id).one()
+    db.commit()
+    return {
+        "contribution": contribution_to_dict(entry),
+        "current_saved": goal.current_saved,
+    }
+
+
+@router.get("/goal-contribution-suggestions")
+def list_goal_contribution_suggestions(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    enabled = has_feature(db, "fd_rd_goal_detection")
+    if not enabled:
+        return {"enabled": False, "items": []}
+    suggestions = (
+        db.query(GoalContributionSuggestion)
+        .filter_by(status="pending")
+        .order_by(GoalContributionSuggestion.created_at.desc())
+        .all()
+    )
+    transactions = {
+        transaction.id: transaction
+        for transaction in db.query(Transaction)
+        .filter(
+            Transaction.id.in_(
+                [suggestion.transaction_id for suggestion in suggestions]
+            )
+        )
+        .all()
+    } if suggestions else {}
+    return {
+        "enabled": True,
+        "items": [
+            suggestion_to_dict(
+                suggestion,
+                transactions.get(suggestion.transaction_id),
+            )
+            for suggestion in suggestions
+        ],
+    }
+
+
+@router.post("/goal-contribution-suggestions/{suggestion_id}/decision")
+def decide_goal_contribution_suggestion(
+    suggestion_id: str,
+    body: GoalSuggestionDecision,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    if not has_feature(db, "fd_rd_goal_detection"):
+        raise HTTPException(
+            status_code=403,
+            detail="FD/RD goal detection requires GODFIN Pro or Max.",
+        )
+    suggestion = (
+        db.query(GoalContributionSuggestion).filter_by(id=suggestion_id).first()
+    )
+    if not suggestion:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    goal = None
+    if body.goal_id:
+        goal = (
+            db.query(Goal)
+            .filter_by(id=body.goal_id, is_active=True)
+            .first()
+        )
+        if not goal:
+            raise HTTPException(status_code=404, detail="Active goal not found")
+    try:
+        contribution = assign_goal_contribution_suggestion(
+            db, suggestion, goal=goal
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    return {
+        "suggestion": suggestion_to_dict(suggestion),
+        "contribution": (
+            contribution_to_dict(contribution) if contribution else None
+        ),
+        "current_saved": goal.current_saved if goal else None,
+    }
 
 
 @router.delete("/goals/{goal_id}", status_code=204)
@@ -164,6 +402,15 @@ def simulate(
         "months_remaining": result.months_remaining,
         "extended_deadline_months": result.extended_deadline_months,
         "pressure_savings": result.pressure_savings,
+        "baseline_surplus": result.baseline_surplus,
+        "reducible_flexible_spend": result.reducible_flexible_spend,
+        "coverage_months": result.coverage_months,
+        "coverage_start": result.coverage_start,
+        "coverage_end": result.coverage_end,
+        "capacity_status": result.capacity_status,
+        "calculation_version": result.calculation_version,
+        "assumptions": result.assumptions,
+        "caveat": result.caveat,
     }
 
 
@@ -174,7 +421,13 @@ def list_recurring(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    patterns = db.query(RecurringPattern).filter_by(is_active=True).all()
+    patterns = (
+        db.query(RecurringPattern)
+        .filter(
+            RecurringPattern.detection_status.in_(["active", "candidate"])
+        )
+        .all()
+    )
     return [
         {
             "id": p.id,
@@ -185,6 +438,10 @@ def list_recurring(
             "last_occurrence": str(p.last_occurrence) if p.last_occurrence else None,
             "next_expected": str(p.next_expected) if p.next_expected else None,
             "times_detected": p.times_detected,
+            "confidence": p.confidence,
+            "evidence_count": p.evidence_count,
+            "detection_status": p.detection_status,
+            "review_required": p.detection_status == "candidate",
         }
         for p in patterns
     ]
@@ -195,9 +452,15 @@ def trigger_detection(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    detected = detect_recurring_patterns(db)
+    summary = detect_recurring_patterns(db)
+    suggestions_created = sync_subscription_suggestions(
+        db, run_detection=False
+    )
     db.commit()
-    return {"detected": detected}
+    return {
+        **summary.to_dict(),
+        "subscription_suggestions_created": suggestions_created,
+    }
 
 
 # --- Financial Profile ---

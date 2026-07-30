@@ -254,6 +254,9 @@ def delete_transaction(
     for split in splits:
         split.status = "deleted"
 
+    from app.core.goal_contributions import reconcile_goal_source_transactions
+    reconcile_goal_source_transactions(db)
+
     # Create audit log entry for the deletion
     from app.models.audit_log import AuditLog
     db.add(AuditLog(

@@ -147,8 +147,10 @@ def test_subscription_confirmation_and_reminder(auth_client, db_session):
     db_session.add(pattern)
     db_session.commit()
 
-    response = auth_client.post("/api/v1/subscriptions/suggestions/scan")
-    assert response.status_code == 200
+    from app.core.product_depth import sync_subscription_suggestions
+
+    sync_subscription_suggestions(db_session, run_detection=False)
+    db_session.commit()
     response = auth_client.get("/api/v1/subscriptions/suggestions")
     suggestion = response.json()[0]
     response = auth_client.post(

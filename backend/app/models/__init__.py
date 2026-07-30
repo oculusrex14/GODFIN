@@ -6,6 +6,10 @@ from app.models.monthly_aggregate import MonthlyAggregate
 from app.models.income_source import IncomeSource
 from app.models.classification_rule import ClassificationRule
 from app.models.goal import Goal
+from app.models.goal_contribution import (
+    GoalContribution,
+    GoalContributionSuggestion,
+)
 from app.models.recurring_pattern import RecurringPattern
 from app.models.app_setting import AppSetting
 from app.models.audit_session import AuditSession
@@ -28,6 +32,7 @@ from app.models.reward_pilot import RewardPilotSubmission
 __all__ = [
     "Account", "Transaction", "TransactionSplit", "MerchantMemory",
     "MonthlyAggregate", "IncomeSource", "ClassificationRule", "Goal",
+    "GoalContribution", "GoalContributionSuggestion",
     "RecurringPattern", "AppSetting", "AuditSession", "AuditLog", "SystemLog",
     "LLMConfiguration", "Subscription", "AuthSession", "PinAttempt",
     "TransferMatch", "SubscriptionSuggestion", "ClassificationCorrection",

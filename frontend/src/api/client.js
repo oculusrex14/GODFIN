@@ -513,6 +513,40 @@ export function simulateGoal(id) {
   return apiFetch(`/goals/${id}/simulate`, { method: 'POST' });
 }
 
+export function fetchGoalContributions(id, includeVoided = false) {
+  return apiFetch(
+    `/goals/${id}/contributions?include_voided=${includeVoided}`
+  );
+}
+
+export function createGoalContribution(id, data) {
+  return apiFetch(`/goals/${id}/contributions`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function voidGoalContribution(goalId, contributionId, reason) {
+  return apiFetch(`/goals/${goalId}/contributions/${contributionId}/void`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function fetchGoalContributionSuggestions() {
+  return apiFetch('/goal-contribution-suggestions');
+}
+
+export function decideGoalContributionSuggestion(suggestionId, goalId) {
+  return apiFetch(
+    `/goal-contribution-suggestions/${suggestionId}/decision`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ goal_id: goalId || null }),
+    }
+  );
+}
+
 // Recurring
 export function fetchRecurring() {
   return apiFetch('/recurring');

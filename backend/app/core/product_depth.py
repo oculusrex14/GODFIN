@@ -266,15 +266,34 @@ def decide_transfer_match(
         raise ValueError("Unsupported decision")
 
 
-def sync_subscription_suggestions(db: Session) -> int:
+def sync_subscription_suggestions(
+    db: Session,
+    *,
+    run_detection: bool = True,
+) -> int:
     from app.core.recurring import detect_recurring_patterns
     from app.models.recurring_pattern import RecurringPattern
 
-    detect_recurring_patterns(db)
+    if run_detection:
+        detect_recurring_patterns(db)
+    suggestions = db.query(SubscriptionSuggestion).all()
     existing = {
         suggestion.recurring_pattern_id
-        for suggestion in db.query(SubscriptionSuggestion).all()
+        for suggestion in suggestions
     }
+    active_pattern_ids = {
+        row[0]
+        for row in db.query(RecurringPattern.id)
+        .filter_by(is_active=True)
+        .all()
+    }
+    for suggestion in suggestions:
+        if (
+            suggestion.recurring_pattern_id not in active_pattern_ids
+            and suggestion.status in {"pending", "snoozed"}
+        ):
+            suggestion.status = "ignored"
+            suggestion.snoozed_until = None
     created = 0
     patterns = db.query(RecurringPattern).filter_by(is_active=True).all()
     for pattern in patterns:

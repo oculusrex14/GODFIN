@@ -346,6 +346,7 @@ class ReconciliationService:
             confidence=0.8,
             classification_source='statement',
             checksum_source=checksum,
+            reconciled=True,
         )
 
     @staticmethod

@@ -70,9 +70,10 @@ def test_simulate_goal(db_session):
     )
     assert result.required_monthly > 0
     assert result.months_remaining > 0
-    assert 'minimal' in result.pressure_savings
-    assert 'moderate' in result.pressure_savings
-    assert 'aggressive' in result.pressure_savings
+    assert result.is_feasible is None
+    assert result.capacity_status == "insufficient_data"
+    assert result.coverage_months == 0
+    assert result.pressure_savings == {}
 
 
 # --- Recurring Detection ---
@@ -87,16 +88,16 @@ def test_detect_monthly_recurring(db_session):
         )
     db_session.flush()
 
-    detected = detect_recurring_patterns(db_session)
-    assert detected >= 1
+    summary = detect_recurring_patterns(db_session)
+    assert summary.created >= 1
 
 
 def test_no_recurring_single_txn(db_session):
     _add_txn(db_session, 'ONE TIME SHOP', 500.0, date.today())
     db_session.flush()
 
-    detected = detect_recurring_patterns(db_session)
-    assert detected == 0
+    summary = detect_recurring_patterns(db_session)
+    assert summary.detected == 0
 
 
 # --- Financial Profile ---

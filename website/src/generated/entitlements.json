@@ -37,6 +37,7 @@
         "multi_bank",
         "ai_classification",
         "advanced_reports"
+        ,"fd_rd_goal_detection"
       ]
     },
     "max": {
@@ -56,6 +57,7 @@
         "multi_bank",
         "ai_classification",
         "advanced_reports",
+        "fd_rd_goal_detection",
         "personal_classifier",
         "net_worth",
         "behavior_insights"
@@ -107,6 +109,11 @@
       "status": "released",
       "label": "Advanced reports and explanations",
       "description": "Unlock advanced locally calculated reports and optional explanatory assistance."
+    },
+    "fd_rd_goal_detection": {
+      "status": "released",
+      "label": "FD and RD goal contribution review",
+      "description": "Review reconciled fixed-deposit and recurring-deposit debits before assigning them to a goal."
     },
     "personal_classifier": {
       "status": "released",

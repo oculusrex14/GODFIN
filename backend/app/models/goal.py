@@ -19,7 +19,7 @@ class Goal(Base):
     current_saved: Mapped[float] = mapped_column(Float, default=0)
     deadline_date: Mapped[date] = mapped_column(Date, nullable=False)
     pressure_level: Mapped[str] = mapped_column(String(20), default="moderate")
-    annual_return_rate: Mapped[float] = mapped_column(Float, default=0.035)
+    annual_return_rate: Mapped[float] = mapped_column(Float, default=0.0)
     minimum_flexible_floor: Mapped[float] = mapped_column(Float, default=5000)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow_naive)

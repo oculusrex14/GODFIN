@@ -273,6 +273,7 @@ async def import_statement(
         imported_count = 0
         classified_count = 0
         review_queue_count = 0
+        imported_txns = []
 
         if import_new and recon_result.new_transactions:
             imported_txns = import_new_transactions(
@@ -323,6 +324,26 @@ async def import_statement(
                 except Exception as e:
                     logger.warning(f"Classification failed for {txn.merchant_raw}: {e}")
                     review_queue_count += 1
+
+            merchant_keys = {
+                (txn.merchant_normalized, txn.account_id)
+                for txn in imported_txns
+                if txn.merchant_normalized
+            }
+            if merchant_keys:
+                from app.core.goal_contributions import (
+                    detect_goal_contribution_suggestions,
+                )
+                from app.core.license import has_feature
+                from app.core.product_depth import sync_subscription_suggestions
+                from app.core.recurring import detect_recurring_patterns
+
+                detect_recurring_patterns(db, merchant_keys=merchant_keys)
+                sync_subscription_suggestions(db, run_detection=False)
+                if has_feature(db, "fd_rd_goal_detection"):
+                    detect_goal_contribution_suggestions(
+                        db, transactions=imported_txns
+                    )
 
         # Detect income
         income_items = []
