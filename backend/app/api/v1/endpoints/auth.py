@@ -30,6 +30,7 @@ RATE_LIMIT_WINDOW_SECONDS = 300  # 5 minute window
 MIN_PIN_LENGTH = 4
 MAX_NEW_PIN_LENGTH = 6
 MAX_LEGACY_PIN_LENGTH = 8
+PIN_LENGTH_SETTING_KEY = "pin_length"
 
 
 def _validate_pin_format(pin: str, *, allow_legacy_length: bool = False) -> None:
@@ -48,6 +49,25 @@ def _validate_pin_format(pin: str, *, allow_legacy_length: bool = False) -> None
                  '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '0000']
     if pin in weak_pins:
         raise HTTPException(status_code=400, detail="PIN is too simple. Avoid sequential or repeated digits.")
+
+
+def _store_pin_length(db: Session, length: int) -> None:
+    setting = db.query(AppSetting).filter_by(key=PIN_LENGTH_SETTING_KEY).first()
+    if setting:
+        setting.value = str(length)
+    else:
+        db.add(AppSetting(key=PIN_LENGTH_SETTING_KEY, value=str(length)))
+
+
+def _stored_pin_length(db: Session) -> int | None:
+    setting = db.query(AppSetting).filter_by(key=PIN_LENGTH_SETTING_KEY).first()
+    if not setting:
+        return None
+    try:
+        length = int(setting.value)
+    except (TypeError, ValueError):
+        return None
+    return length if MIN_PIN_LENGTH <= length <= MAX_LEGACY_PIN_LENGTH else None
 
 
 def _utcnow() -> datetime:
@@ -124,7 +144,10 @@ def _clear_failed_attempts(db: Session, client_ip: str) -> None:
 def auth_status(db: Session = Depends(get_db)):
     setting = db.query(AppSetting).filter_by(key="is_first_run").first()
     is_first_run = setting.value == "true" if setting else True
-    return AuthStatusResponse(is_first_run=is_first_run)
+    return AuthStatusResponse(
+        is_first_run=is_first_run,
+        pin_length=None if is_first_run else _stored_pin_length(db),
+    )
 
 
 @router.post("/set-pin", response_model=AuthResponse)
@@ -141,6 +164,7 @@ def set_pin(body: PinSet, request: Request, db: Session = Depends(get_db)):
         pin_setting.value = hash_pin(body.pin)
     else:
         db.add(AppSetting(key="pin_hash", value=hash_pin(body.pin)))
+    _store_pin_length(db, len(body.pin))
 
     first_run.value = "false"
     onboarding_completed = (
@@ -221,6 +245,7 @@ def change_pin(
         db.add(AppSetting(key=PIN_HISTORY_KEY, value=json.dumps([current_pin_hash])))
 
     pin_setting.value = hash_pin(body.new_pin)
+    _store_pin_length(db, len(body.new_pin))
     db.commit()
 
     # Changing the PIN rotates the session identity and revokes every other
@@ -252,6 +277,8 @@ def verify_pin(body: PinVerify, request: Request, db: Session = Depends(get_db))
         raise HTTPException(status_code=401, detail="Incorrect PIN")
 
     _clear_failed_attempts(db, client_ip)
+    if _stored_pin_length(db) != len(body.pin):
+        _store_pin_length(db, len(body.pin))
     token = create_session(
         db,
         user_agent=request.headers.get("user-agent"),

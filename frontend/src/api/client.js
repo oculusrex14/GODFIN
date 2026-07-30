@@ -5,13 +5,21 @@ const API_BASE = window.location.protocol === 'godfin:'
 const TOKEN_KEY = 'godfin_auth_token';
 
 export class ApiError extends Error {
-  constructor({ code, message, hint = null, retriable = false, status = 0 }) {
+  constructor({
+    code,
+    message,
+    hint = null,
+    retriable = false,
+    status = 0,
+    retryAfter = 0,
+  }) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
     this.hint = hint;
     this.retriable = retriable;
     this.status = status;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -79,12 +87,14 @@ export async function apiFetch(path, options = {}) {
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    const retryAfter = Number.parseInt(response.headers.get('Retry-After') || '0', 10);
     throw new ApiError({
       code: body.code || `HTTP_${response.status}`,
       message: body.message || body.detail || `Request failed (${response.status})`,
       hint: body.hint || null,
       retriable: body.retriable ?? response.status >= 500,
       status: response.status,
+      retryAfter: Number.isFinite(retryAfter) ? Math.max(0, retryAfter) : 0,
     });
   }
 

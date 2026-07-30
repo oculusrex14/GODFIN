@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { fetchHealth, setPin, verifyPin } from '../api/client';
 
 export default function PinScreen() {
-  const { isFirstRun, handleAuth } = useAuth();
+  const { isFirstRun, pinLength, handleAuth } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [backendOnline, setBackendOnline] = useState(true);
@@ -47,9 +47,18 @@ export default function PinScreen() {
 
   async function onPinSubmit(event) {
     event.preventDefault();
-    const maxLength = isFirstRun ? 6 : 8;
-    if (!new RegExp(`^\\d{4,${maxLength}}$`).test(pin)) {
-      setError(isFirstRun ? 'Choose a PIN containing 4–6 digits.' : 'Enter your 4–8 digit PIN.');
+    const maxLength = isFirstRun ? 6 : (pinLength || 8);
+    const validLength = isFirstRun
+      ? pin.length >= 4 && pin.length <= 6
+      : pin.length >= 4 && pin.length <= maxLength && (!pinLength || pin.length === pinLength);
+    if (!/^\d+$/.test(pin) || !validLength) {
+      setError(
+        isFirstRun
+          ? 'Choose a PIN containing 4–6 digits.'
+          : pinLength
+            ? `Enter your ${pinLength}-digit PIN.`
+            : 'Enter your PIN to continue.',
+      );
       return;
     }
 
@@ -58,10 +67,10 @@ export default function PinScreen() {
     try {
       const fn = isFirstRun ? setPin : verifyPin;
       const data = await fn(pin);
-      handleAuth(data.token);
+      handleAuth(data.token, pin.length);
     } catch (err) {
       if (err?.status === 429) {
-        setRetryAfter(300);
+        setRetryAfter(Math.max(1, err.retryAfter || 1));
         setError('Too many attempts. Unlocking will be available again shortly.');
       } else {
         setError(err?.message || (isFirstRun ? 'Failed to set PIN' : 'Incorrect PIN'));
@@ -130,13 +139,14 @@ export default function PinScreen() {
           <p id="pin-length-hint" className="text-white/30 text-[0.8rem] text-center mb-8">
             {isFirstRun
               ? 'Choose 4–6 digits to secure your local data'
-              : 'Enter your 4–6 digit PIN. Legacy 7–8 digit PINs still work.'}
+              : 'Enter your PIN to continue'}
           </p>
 
           <form onSubmit={onPinSubmit} className="space-y-4">
             <PinInput
               minLength={4}
-              maxLength={isFirstRun ? 6 : 8}
+              maxLength={isFirstRun ? 6 : (pinLength || 8)}
+              displayLength={isFirstRun ? null : pinLength}
               value={pin}
               onChange={setPinValue}
               autoSubmit={false}
@@ -145,7 +155,13 @@ export default function PinScreen() {
             />
             <button
               type="submit"
-              disabled={loading || retryAfter > 0 || !backendOnline || pin.length < 4}
+              disabled={
+                loading ||
+                retryAfter > 0 ||
+                !backendOnline ||
+                pin.length < 4 ||
+                (!isFirstRun && pinLength && pin.length !== pinLength)
+              }
               className="w-full h-12 min-h-12 touch-manipulation rounded-[14px] bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 text-[0.82rem] font-medium transition-colors hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {loading ? (isFirstRun ? 'Securing...' : 'Unlocking...') : (isFirstRun ? 'Set PIN' : 'Unlock')}

@@ -17,6 +17,7 @@ import {
   fetchReportSummary, fetchReportDetailed, fetchReportInsights,
   downloadMonthlyReportPDF, downloadCSV, fetchLicenseStatus, downloadFinancialYear
 } from '../api/client';
+import { websiteUrl } from '../config/website';
 import { StatCard } from '../components/StatCard';
 import { GlassButton } from '../components/GlassButton';
 
@@ -219,7 +220,9 @@ export default function Reports() {
             <p className="text-white/55 text-sm">Advanced insights are available with GODFIN Pro or Max.</p>
             <p className="text-white/30 text-xs mt-1">Your standard reports and local exports remain available.</p>
             <a
-              href="/settings"
+              href={websiteUrl('/pricing')}
+              target="_blank"
+              rel="noreferrer"
               className="inline-flex mt-3 text-xs text-amber-300/80 hover:text-amber-200 transition-colors"
             >
               View license options

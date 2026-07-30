@@ -12,6 +12,7 @@ const BACKEND_ORIGIN = `http://127.0.0.1:${BACKEND_PORT}`;
 const APP_ORIGIN = "godfin://app";
 const UPDATE_ORIGIN = "https://releases.godfin.dev";
 const WEBSITE_ORIGINS = new Set([
+  "https://godfin.vercel.app",
   "https://godfin.dev",
   "https://accounts.google.com",
 ]);

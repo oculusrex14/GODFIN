@@ -17,6 +17,7 @@ class PinVerify(BaseModel):
 
 class AuthStatusResponse(BaseModel):
     is_first_run: bool
+    pin_length: Optional[int] = None
 
 
 class PinChange(BaseModel):

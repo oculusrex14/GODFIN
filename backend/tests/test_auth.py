@@ -12,6 +12,7 @@ def test_auth_status_first_run(client):
     resp = client.get("/api/v1/auth/status")
     assert resp.status_code == 200
     assert resp.json()["is_first_run"] is True
+    assert resp.json()["pin_length"] is None
 
 
 def test_set_pin(client):

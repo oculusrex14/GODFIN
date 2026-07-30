@@ -638,7 +638,13 @@ export default function Settings() {
 
       {/* App Settings */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-        <GlassSection title="App Settings" icon={SettingsIcon}>
+        <GlassSection
+          title="App Settings"
+          icon={SettingsIcon}
+          collapsible
+          defaultExpanded={false}
+          storageKey="godfin:settings:app-settings-expanded"
+        >
           <div className="space-y-3">
             {settings && Object.entries(settings)
               .filter(([key]) => !['pin_hash', 'developer_mode', 'backup_directory'].includes(key))

@@ -11,8 +11,7 @@ import {
 import { GlassButton } from '../GlassButton';
 import { useConfirm } from '../ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
-
-const WEBSITE_URL = (import.meta.env.VITE_GODFIN_WEBSITE_URL || 'https://godfin.dev').replace(/\/$/, '');
+import { openWebsite } from '../../config/website';
 
 function formatDate(value) {
   if (!value) return 'Not verified';
@@ -171,7 +170,7 @@ export default function LicenseSettings() {
       <button
         type="button"
         className="mt-4 inline-flex items-center gap-1.5 text-cyan-300/65 hover:text-cyan-200 text-[0.7rem] transition-colors"
-        onClick={() => window.open(`${WEBSITE_URL}/${active ? 'account' : 'pricing'}`, '_blank', 'noopener,noreferrer')}
+        onClick={() => openWebsite(active ? '/account' : '/pricing')}
       >
         {active ? 'Manage license' : 'View lifetime pricing'} <ExternalLink size={12} />
       </button>

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.encryption import decrypt
 from app.core.license import LICENSE_FEATURES, license_status
+from app.core.config import settings
 from app.models.app_setting import AppSetting
 
 TEST_KEY = "GODFIN-PRO-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE"
@@ -100,6 +101,58 @@ def test_failed_activation_does_not_replace_current_license(
         db_session.query(AppSetting).filter_by(key="license_tier").one().value
         == "pro"
     )
+
+
+def test_license_verification_falls_back_only_for_server_failure(
+    auth_client, monkeypatch
+):
+    primary = "https://godfin.vercel.app/api/license/verify"
+    fallback = "https://godfin.dev/api/license/verify"
+    calls = []
+
+    def fake_post(url, **_kwargs):
+        calls.append(url)
+        if url == primary:
+            return FakeResponse({"message": "Temporary failure"}, 503)
+        return FakeResponse({"valid": True, "tier": "max"})
+
+    monkeypatch.setattr(settings, "LICENSE_API_URL", primary)
+    monkeypatch.setattr(settings, "LICENSE_API_FALLBACK_URL", fallback)
+    monkeypatch.setattr("app.core.license.httpx.post", fake_post)
+
+    response = auth_client.post(
+        "/api/v1/license/activate",
+        json={"license_key": TEST_KEY},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["tier"] == "max"
+    assert calls == [primary, fallback]
+
+
+def test_invalid_license_response_never_uses_fallback(auth_client, monkeypatch):
+    primary = "https://godfin.vercel.app/api/license/verify"
+    fallback = "https://godfin.dev/api/license/verify"
+    calls = []
+
+    def fake_post(url, **_kwargs):
+        calls.append(url)
+        return FakeResponse(
+            {"valid": False, "code": "LICENSE_NOT_FOUND", "message": "Not found."},
+            403,
+        )
+
+    monkeypatch.setattr(settings, "LICENSE_API_URL", primary)
+    monkeypatch.setattr(settings, "LICENSE_API_FALLBACK_URL", fallback)
+    monkeypatch.setattr("app.core.license.httpx.post", fake_post)
+
+    response = auth_client.post(
+        "/api/v1/license/activate",
+        json={"license_key": TEST_KEY},
+    )
+
+    assert response.status_code == 403
+    assert calls == [primary]
 
 
 def test_paid_features_expire_after_offline_grace(db_session):

@@ -8,6 +8,8 @@ from app.models.app_setting import AppSetting
 def test_new_pin_accepts_four_to_six_digits(client, pin):
     response = client.post("/api/v1/auth/set-pin", json={"pin": pin})
     assert response.status_code == 200
+    status = client.get("/api/v1/auth/status")
+    assert status.json()["pin_length"] == len(pin)
 
 
 def test_new_pin_rejects_more_than_six_digits(client):
@@ -22,10 +24,14 @@ def test_legacy_eight_digit_pin_can_unlock(client, db_session):
     pin_setting.value = hash_pin("48265073")
     db_session.commit()
 
+    unknown_status = client.get("/api/v1/auth/status")
+    assert unknown_status.json()["pin_length"] is None
     response = client.post("/api/v1/auth/verify-pin", json={"pin": "48265073"})
 
     assert response.status_code == 200
     assert response.json()["authenticated"] is True
+    migrated_status = client.get("/api/v1/auth/status")
+    assert migrated_status.json()["pin_length"] == 8
 
 
 def test_legacy_eight_digit_pin_can_be_changed(auth_client, db_session):
@@ -39,5 +45,7 @@ def test_legacy_eight_digit_pin_can_be_changed(auth_client, db_session):
     )
 
     assert response.status_code == 200
+    status = auth_client.get("/api/v1/auth/status")
+    assert status.json()["pin_length"] == 6
     verify = auth_client.post("/api/v1/auth/verify-pin", json={"pin": "482650"})
     assert verify.status_code == 200

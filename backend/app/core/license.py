@@ -297,6 +297,14 @@ def _validate_server_response(payload: Any) -> dict[str, Any]:
     }
 
 
+def _license_verification_endpoints() -> list[str]:
+    endpoints = [
+        settings.LICENSE_API_URL.strip(),
+        settings.LICENSE_API_FALLBACK_URL.strip(),
+    ]
+    return list(dict.fromkeys(endpoint for endpoint in endpoints if endpoint))
+
+
 def verify_with_server(license_key: str) -> dict[str, Any]:
     key = normalize_license_key(license_key)
     if not LICENSE_KEY_PATTERN.fullmatch(key):
@@ -305,44 +313,51 @@ def verify_with_server(license_key: str) -> dict[str, Any]:
             code="LICENSE_KEY_FORMAT",
             status_code=400,
         )
-    try:
-        response = httpx.post(
-            settings.LICENSE_API_URL,
-            json={
-                "license_key": key,
-                "machine_id": get_machine_id(),
-                "device_label": get_device_label(),
-                "app_version": settings.VERSION,
-            },
-            headers={"User-Agent": f"GODFIN/{settings.VERSION}"},
-            timeout=httpx.Timeout(10.0, connect=5.0),
-            follow_redirects=False,
-        )
-    except httpx.HTTPError as exc:
-        raise LicenseError(
-            "The license server is unavailable. Check your connection and try again.",
-            code="VERIFY_UNAVAILABLE",
-            status_code=503,
-            retriable=True,
-        ) from exc
+    request_payload = {
+        "license_key": key,
+        "machine_id": get_machine_id(),
+        "device_label": get_device_label(),
+        "app_version": settings.VERSION,
+    }
+    last_error: Exception | None = None
+    for endpoint in _license_verification_endpoints():
+        try:
+            response = httpx.post(
+                endpoint,
+                json=request_payload,
+                headers={"User-Agent": f"GODFIN/{settings.VERSION}"},
+                timeout=httpx.Timeout(10.0, connect=5.0),
+                follow_redirects=False,
+            )
+        except httpx.HTTPError as exc:
+            last_error = exc
+            continue
 
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise LicenseError(
-            "The license server returned an invalid response.",
-            code="VERIFY_INVALID_RESPONSE",
-            status_code=502,
-            retriable=True,
-        ) from exc
-    if response.status_code >= 500:
-        raise LicenseError(
-            str(payload.get("message") or "The license server is unavailable."),
-            code=str(payload.get("code") or "VERIFY_UNAVAILABLE"),
-            status_code=503,
-            retriable=True,
-        )
-    return _validate_server_response(payload)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            last_error = exc
+            continue
+
+        if response.status_code >= 500:
+            last_error = LicenseError(
+                str(payload.get("message") or "The license server is unavailable."),
+                code=str(payload.get("code") or "VERIFY_UNAVAILABLE"),
+                status_code=503,
+                retriable=True,
+            )
+            continue
+
+        # Invalid, revoked, or over-limit licenses are authoritative responses.
+        # Never retry them against a second endpoint.
+        return _validate_server_response(payload)
+
+    raise LicenseError(
+        "The license server is unavailable. Check your connection and try again.",
+        code="VERIFY_UNAVAILABLE",
+        status_code=503,
+        retriable=True,
+    ) from last_error
 
 
 def activate_license(db: Session, license_key: str) -> dict[str, Any]:
