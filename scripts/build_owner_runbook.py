@@ -449,7 +449,7 @@ def build_document() -> Document:
     metadata.paragraph_format.space_after = Pt(42)
     set_run_font(
         metadata.add_run(
-            "Version 2.1  •  30 July 2026  •  oculusrex14/GODFIN (private)\n"
+            "Version 2.2  •  30 July 2026  •  oculusrex14/GODFIN (private)\n"
             "Production branch: codex/godfin-production-v4"
         ),
         size=10,
@@ -498,7 +498,8 @@ def build_document() -> Document:
         "The website product tour uses real React application captures generated only from synthetic data, muted WebM/MP4 media with reduced-motion fallbacks, and build-time checks that prevent unreleased features from being advertised. Production deployment dpl_2dUiNiw38R9pqfsymPx7NWhpw7Ej is READY at godfin.vercel.app.",
         "Production acceptance on 30 July 2026: website Playwright 4/4; Lighthouse performance 99, accessibility 100, SEO 100, LCP 1.73 seconds, CLS 0; required CSP, HSTS, frame, MIME, referrer, and permissions headers are present.",
         "Vercel already contains the Supabase public/server variables and LICENSE_SIGNING_SECRET. Values are encrypted and are intentionally not reproduced here.",
-        "Google Cloud project GODFIN Website (project ID godfin-website) is owner-controlled. Google OAuth remains pending only until the owner accepts Google’s user-data-policy acknowledgement and the final callback test passes.",
+        "Google OAuth is active. The owner-controlled GODFIN Website project uses the rotated web client named GODFIN Website Rotated; the provider requests only openid/email/profile, the original client is revoked, and production sign-in returned successfully to /account twice on 30 July 2026.",
+        "A non-revenue Max owner_test license is active for the owner account. The server stores only its hash, purchase history remains empty, and one macOS arm64 installation is verified through the normal three-device flow. The full key is retained only in macOS Keychain and encrypted local app storage.",
         "Stripe KYC/prices, Resend/DNS, custom domain, Apple/Windows certificates, R2, clean-VM evidence, and public-launch authorization are not yet complete.",
         "Reward pilot, sponsor card, PPP checkout, and OpenDataLoader shipping remain safely feature-gated where applicable.",
         "Nothing in this document authorizes a public release. Phase 6 starts only after explicit written public-launch authorization.",
@@ -511,7 +512,6 @@ def build_document() -> Document:
         document,
         ["Blocker", "Why blocked", "Your intervention", "Completion evidence"],
         [
-            ["Google OAuth", "The dedicated Google project exists; Google requires the owner to accept its user-data-policy acknowledgement before client creation can finish.", "Review and accept the policy in the open browser, then let Codex finish client/provider setup.", "Google sign-in returns to /account with only openid/email/profile."],
             ["Stripe India", "Keys, one-time Price IDs, and webhook are absent.", "Complete KYC; create test/live products and webhook.", "Replay-safe purchase provisions once."],
             ["Resend + DNS", "No sending key/domain verification.", "Verify godfin.dev and add the production key.", "SPF, DKIM, DMARC and two inbox tests pass."],
             ["Custom domain", "No Vercel domain is attached.", "Register/control godfin.dev and connect DNS.", "HTTPS apex and redirect pass."],
@@ -535,7 +535,7 @@ def build_document() -> Document:
     add_callout(
         document,
         "CURRENT EVIDENCE",
-        "Dedicated Google Cloud project: GODFIN Website; project ID: godfin-website; project number: 173410737907. Do not reuse this website client for the optional desktop Gmail integration.",
+        "Completed 30 July 2026. Dedicated Google Cloud project: GODFIN Website; project ID: godfin-website; project number: 173410737907. The active web client is GODFIN Website Rotated. Supabase Google authentication is enabled, the original client is revoked, and two production callback runs returned the owner account to /account. Do not reuse this website client for the optional desktop Gmail integration.",
         tone="good",
     )
     for item in (
@@ -567,6 +567,12 @@ def build_document() -> Document:
         "The client secret exists only in Google/Supabase and the business vault.",
     ):
         add_list_item(document, item, check_num)
+    add_callout(
+        document,
+        "VERIFIED",
+        "The production origin is https://godfin.vercel.app, the Supabase callback is https://omrtkfwjauyakhvynutk.supabase.co/auth/v1/callback, and the website callback is https://godfin.vercel.app/auth/callback. A distinct second-account isolation test remains a pre-launch gate.",
+        tone="good",
+    )
     add_owner_fields(document, ["Google OAuth client name", "Test accounts used", "Completed by / date"])
 
     document.add_heading("2. Stripe India: one-time payments only", level=1)
@@ -690,7 +696,7 @@ def build_document() -> Document:
         "Open /account, list the devices, deactivate one, and verify a new installation can activate.",
         "Verify offline grace, re-verification, invalid key, inactive license, lost-key resend, and local license removal. Confirm local financial data remains untouched.",
         "Before any future secret rotation, design versioned key IDs, legacy verification, reissue, rollback, and customer communication.",
-        "The owner test license must be kind owner_test, tier Max, linked to the owner’s first Supabase sign-in, absent from purchase/revenue records, stored only as a hash server-side, and activated through the same three-device verification flow as a paid license.",
+        "Completed 30 July 2026: the owner license is kind owner_test, tier Max, linked to the owner’s Supabase account, absent from purchase/revenue records, stored only as a hash server-side, and activated on one macOS arm64 installation through the normal verification flow. Its full key is not reproduced in this document.",
     ):
         add_list_item(document, item, decimal_num)
     for item in (
@@ -946,7 +952,8 @@ def build_document() -> Document:
         document,
         ["Gate", "Owner", "Complete", "Evidence / approval reference"],
         [
-            ["Google OAuth + account isolation", "", "☐", ""],
+            ["Google OAuth callback", "Codex", "☒", "Production callback passed twice on 30 Jul 2026; rotated client active; original client revoked."],
+            ["Second-account isolation", "", "☐", "Repeat with a distinct Google test account before public launch."],
             ["Stripe + webhook + refund/tax", "", "☐", ""],
             ["Resend + DNS + support inboxes", "", "☐", ""],
             ["Custom domain + security headers", "", "☐", ""],
