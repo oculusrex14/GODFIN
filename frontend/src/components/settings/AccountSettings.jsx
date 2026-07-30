@@ -8,7 +8,6 @@ import {
   fetchAllAccounts,
   fetchParserProfiles,
   fetchSenderMappings,
-  replaceSenderMappings,
   updateAccount,
 } from '../../api/client';
 import { useConfirm } from '../ConfirmDialog';
@@ -62,23 +61,18 @@ export default function AccountSettings() {
         account_type: form.account_type,
         last_4_digits: form.last_4_digits,
         nickname: form.nickname || null,
+        routing: form.sender_pattern.trim()
+          ? {
+              sender_pattern: form.sender_pattern.trim().toLowerCase(),
+              parser_profile: form.parser_profile,
+            }
+          : null,
         ...(editingId ? { is_active: true } : {}),
       };
       const account = editingId
         ? await updateAccount(editingId, payload)
         : await createAccount(payload);
 
-      if (form.sender_pattern.trim()) {
-        const pattern = form.sender_pattern.trim().toLowerCase();
-        const nextMappings = mappings
-          .filter(item => item.sender_pattern !== pattern)
-          .concat({
-            sender_pattern: pattern,
-            parser_profile: form.parser_profile,
-            account_id: account.id,
-          });
-        await replaceSenderMappings(nextMappings);
-      }
       return account;
     },
     onSuccess: async () => {

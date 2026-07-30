@@ -23,7 +23,7 @@ def seed_accounts(db: Session) -> None:
             bank="HDFC",
             account_type="savings",
             last_4_digits="0000",
-            nickname="HDFC Savings",
+            nickname="Example HDFC Savings",
             is_active=True,
         ),
         Account(
@@ -31,7 +31,7 @@ def seed_accounts(db: Session) -> None:
             bank="HDFC",
             account_type="credit_card",
             last_4_digits="0001",
-            nickname="HDFC Credit Card",
+            nickname="Example HDFC Credit Card",
             is_active=True,
         ),
     ]

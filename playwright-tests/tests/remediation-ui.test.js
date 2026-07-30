@@ -19,7 +19,7 @@ async function mockPinApi(page, authStatus, verifyResponse) {
   });
 }
 
-async function mockAuthenticatedApp(page) {
+async function mockAuthenticatedApp(page, licenseOverride = null) {
   const profile = {
     savings_rate: 18.5,
     impulse_index: 22.1,
@@ -59,7 +59,7 @@ async function mockAuthenticatedApp(page) {
       '/accounts/parser-profiles': [],
       '/accounts/sender-mappings': [],
       '/auth/gmail/status': { connected: false },
-      '/license': {
+      '/license': licenseOverride || {
         tier: 'free',
         valid: false,
         status: 'inactive',
@@ -198,4 +198,24 @@ test('goal creation explains opening savings and expected return', async ({ page
   await page.getByLabel('Expected Annual Return % (optional)').fill('6.5');
   await expect(page.getByLabel('Already Saved (optional)')).toHaveValue('25000');
   await expect(page.getByLabel('Expected Annual Return % (optional)')).toHaveValue('6.5');
+});
+
+test('paid CA export is one review-oriented ZIP tax pack', async ({ page }) => {
+  await mockAuthenticatedApp(page, {
+    tier: 'pro',
+    valid: true,
+    status: 'active',
+    features: ['advanced_reports'],
+    message: 'GODFIN Pro is active.',
+    topup_credits: 0,
+  });
+  await page.goto('/pin');
+  await page.getByLabel('Enter your PIN').fill('4826');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByRole('link', { name: 'Reports', exact: true }).click();
+
+  await expect(page.getByRole('button', { name: 'Download CA Tax Pack' })).toBeEnabled();
+  await expect(page.getByText(/multi-sheet workbook, raw CSV, manifest/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'CA CSV' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'CA JSON' })).toHaveCount(0);
 });

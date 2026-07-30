@@ -18,6 +18,7 @@ from app.core.reporting import (
     prepare_detailed_report,
     prepare_summary_report,
 )
+from app.core.tax_pack import build_financial_year_tax_pack
 from app.models.account import Account
 from app.models.transaction import Transaction
 
@@ -264,6 +265,29 @@ def report_financial_year(
         headers={
             "Content-Disposition": (
                 f'attachment; filename="godfin_ca_{label.lower()}.csv"'
+            )
+        },
+    )
+
+
+@router.get("/fy/pack")
+def report_financial_year_pack(
+    start_year: int = Query(ge=2000, le=2100),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Build the review-oriented Indian FY ZIP tax pack for a CA."""
+    from app.api.v1.endpoints.license import enforce_feature
+
+    enforce_feature(db, "advanced_reports")
+    content = build_financial_year_tax_pack(db, start_year)
+    label = f"fy{start_year}-{str(start_year + 1)[-2:]}"
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="godfin_ca_tax_pack_{label}.zip"'
             )
         },
     )

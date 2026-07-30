@@ -15,7 +15,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   fetchReportSummary, fetchReportDetailed, fetchReportInsights,
-  downloadMonthlyReportPDF, downloadCSV, fetchLicenseStatus, downloadFinancialYear
+  downloadMonthlyReportPDF, downloadCSV, fetchLicenseStatus, downloadFinancialYearPack
 } from '../api/client';
 import { websiteUrl } from '../config/website';
 import { StatCard } from '../components/StatCard';
@@ -454,7 +454,7 @@ export default function Reports() {
               <div className="flex items-center gap-2 text-white/55 text-sm">
                 <CalendarRange size={15} /> Export for CA
               </div>
-              <p className="mt-1 text-white/25 text-xs">Indian financial year, April–March, with full transaction metadata.</p>
+              <p className="mt-1 text-white/25 text-xs">ZIP with a multi-sheet workbook, raw CSV, manifest, reconciliation summary, and AY filing guide.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <select
@@ -469,18 +469,11 @@ export default function Reports() {
                 })}
               </select>
               <button
-                onClick={() => downloadFinancialYear(fyStart, 'csv')}
+                onClick={() => downloadFinancialYearPack(fyStart)}
                 disabled={!insightsEnabled}
-                className="min-h-11 px-3 rounded-xl bg-white/[0.06] border border-white/[0.12] text-white/55 disabled:opacity-35 text-xs"
+                className="min-h-11 px-3 rounded-xl bg-cyan-400/[0.12] border border-cyan-300/[0.16] text-cyan-100/70 disabled:opacity-35 text-xs"
               >
-                CA CSV
-              </button>
-              <button
-                onClick={() => downloadFinancialYear(fyStart, 'json')}
-                disabled={!insightsEnabled}
-                className="min-h-11 px-3 rounded-xl bg-white/[0.06] border border-white/[0.12] text-white/55 disabled:opacity-35 text-xs"
-              >
-                CA JSON
+                Download CA Tax Pack
               </button>
             </div>
           </div>

@@ -12,6 +12,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { assertPackagePrivacy } from "./package-privacy.mjs";
+
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const projectRoot = path.resolve(desktopRoot, "..");
 const releaseRoot = path.resolve(
@@ -284,6 +286,7 @@ if (!await portIsFree()) {
 }
 
 const packaged = await locatePackage();
+await assertPackagePrivacy(await walk(releaseRoot));
 verifySignature(packaged.fuseTarget);
 verifyFuses(packaged.fuseTarget);
 

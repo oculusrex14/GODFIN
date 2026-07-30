@@ -17,11 +17,17 @@ from app.models.account import Account
 router = APIRouter()
 
 
+class AccountRouting(BaseModel):
+    sender_pattern: str = Field(min_length=3, max_length=255)
+    parser_profile: str = Field(pattern=r"^[a-z0-9_]+$")
+
+
 class AccountCreate(BaseModel):
     bank: str = Field(min_length=2, max_length=50)
     account_type: str = Field(pattern=r"^(savings|credit_card)$")
     last_4_digits: str = Field(pattern=r"^\d{4}$")
     nickname: Optional[str] = Field(default=None, max_length=100)
+    routing: Optional[AccountRouting] = None
 
     @field_validator("bank")
     @classmethod
@@ -38,6 +44,7 @@ class AccountUpdate(BaseModel):
     last_4_digits: Optional[str] = Field(default=None, pattern=r"^\d{4}$")
     nickname: Optional[str] = Field(default=None, max_length=100)
     is_active: Optional[bool] = None
+    routing: Optional[AccountRouting] = None
 
     @field_validator("bank")
     @classmethod
@@ -64,6 +71,47 @@ def _account_dict(account: Account) -> dict:
         "nickname": account.nickname,
         "is_active": account.is_active,
     }
+
+
+def _apply_account_routing(
+    db: Session,
+    account: Account,
+    routing: AccountRouting | None,
+) -> None:
+    mappings = [
+        mapping
+        for mapping in load_sender_mappings(db)
+        if mapping["account_id"] != account.id
+    ]
+    if routing is None:
+        save_sender_mappings(db, mappings)
+        return
+
+    profile = next(
+        (
+            item
+            for item in supported_parser_profiles()
+            if item["profile"] == routing.parser_profile
+        ),
+        None,
+    )
+    if not profile:
+        raise ValueError("The selected parser profile is not available.")
+    if (
+        profile["bank"] != account.bank
+        or profile["account_type"] != account.account_type
+    ):
+        raise ValueError(
+            "The parser profile must match the account bank and account type."
+        )
+    mappings.append(
+        {
+            "sender_pattern": routing.sender_pattern,
+            "parser_profile": routing.parser_profile,
+            "account_id": account.id,
+        }
+    )
+    save_sender_mappings(db, mappings)
 
 
 @router.get("")
@@ -138,7 +186,14 @@ def create_account(
         is_active=True,
     )
     db.add(account)
-    db.commit()
+    try:
+        db.flush()
+        if body.routing is not None:
+            _apply_account_routing(db, account, body.routing)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.refresh(account)
     return _account_dict(account)
 
@@ -154,7 +209,7 @@ def update_account(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    values = body.model_dump(exclude_unset=True)
+    values = body.model_dump(exclude_unset=True, exclude={"routing"})
     next_bank = values.get("bank", account.bank)
     if next_bank != "HDFC":
         enforce_feature(db, "multi_bank")
@@ -162,7 +217,14 @@ def update_account(
         values["nickname"] = values["nickname"].strip()
     for key, value in values.items():
         setattr(account, key, value)
-    db.commit()
+    try:
+        db.flush()
+        if "routing" in body.model_fields_set:
+            _apply_account_routing(db, account, body.routing)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.refresh(account)
     return _account_dict(account)
 

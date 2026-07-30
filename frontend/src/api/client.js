@@ -960,6 +960,19 @@ export async function downloadFinancialYear(startYear, format = 'csv') {
   URL.revokeObjectURL(url);
 }
 
+export async function downloadFinancialYearPack(startYear) {
+  const blob = await apiFetch(
+    `/reports/fy/pack?start_year=${startYear}`,
+    { responseType: 'blob' },
+  );
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `godfin_ca_tax_pack_fy${startYear}-${String(startYear + 1).slice(-2)}.zip`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 // Onboarding
 export function fetchOnboardingStatus() {
   return apiFetch('/onboarding');

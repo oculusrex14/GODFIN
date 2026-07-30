@@ -111,6 +111,120 @@ def test_account_crud_and_sender_mapping(auth_client):
     )
 
 
+def test_account_and_routing_are_created_atomically(auth_client):
+    response = auth_client.post(
+        "/api/v1/accounts",
+        json={
+            "bank": "HDFC",
+            "account_type": "savings",
+            "last_4_digits": "2468",
+            "nickname": "Atomic account",
+            "routing": {
+                "sender_pattern": "atomic-alerts@example.test",
+                "parser_profile": "hdfc_savings",
+            },
+        },
+    )
+    assert response.status_code == 201
+    account = response.json()
+    mappings = auth_client.get("/api/v1/accounts/sender-mappings").json()
+    assert {
+        "sender_pattern": "atomic-alerts@example.test",
+        "parser_profile": "hdfc_savings",
+        "account_id": account["id"],
+    } in mappings
+
+
+def test_invalid_atomic_routing_rolls_back_account_and_update(auth_client):
+    before = auth_client.get("/api/v1/accounts?include_inactive=true").json()
+    failed_create = auth_client.post(
+        "/api/v1/accounts",
+        json={
+            "bank": "HDFC",
+            "account_type": "credit_card",
+            "last_4_digits": "1357",
+            "nickname": "Must not persist",
+            "routing": {
+                "sender_pattern": "wrong-parser@example.test",
+                "parser_profile": "hdfc_savings",
+            },
+        },
+    )
+    assert failed_create.status_code == 400
+    after = auth_client.get("/api/v1/accounts?include_inactive=true").json()
+    assert len(after) == len(before)
+    assert all(item["last_4_digits"] != "1357" for item in after)
+
+    created = auth_client.post(
+        "/api/v1/accounts",
+        json={
+            "bank": "HDFC",
+            "account_type": "savings",
+            "last_4_digits": "8642",
+            "nickname": "Original",
+            "routing": {
+                "sender_pattern": "original-alerts@example.test",
+                "parser_profile": "hdfc_savings",
+            },
+        },
+    ).json()
+    failed_update = auth_client.patch(
+        f"/api/v1/accounts/{created['id']}",
+        json={
+            "nickname": "Should roll back",
+            "account_type": "credit_card",
+            "routing": {
+                "sender_pattern": "broken-update@example.test",
+                "parser_profile": "hdfc_savings",
+            },
+        },
+    )
+    assert failed_update.status_code == 400
+    persisted = next(
+        item
+        for item in auth_client.get(
+            "/api/v1/accounts?include_inactive=true"
+        ).json()
+        if item["id"] == created["id"]
+    )
+    assert persisted["nickname"] == "Original"
+    assert persisted["account_type"] == "savings"
+    mappings = auth_client.get("/api/v1/accounts/sender-mappings").json()
+    assert any(
+        item["sender_pattern"] == "original-alerts@example.test"
+        and item["account_id"] == created["id"]
+        for item in mappings
+    )
+    assert all(
+        item["sender_pattern"] != "broken-update@example.test"
+        for item in mappings
+    )
+
+
+def test_atomic_routing_can_be_removed(auth_client):
+    created = auth_client.post(
+        "/api/v1/accounts",
+        json={
+            "bank": "HDFC",
+            "account_type": "savings",
+            "last_4_digits": "9753",
+            "routing": {
+                "sender_pattern": "remove-me@example.test",
+                "parser_profile": "hdfc_savings",
+            },
+        },
+    ).json()
+    response = auth_client.patch(
+        f"/api/v1/accounts/{created['id']}",
+        json={"routing": None},
+    )
+    assert response.status_code == 200
+    assert all(
+        item["account_id"] != created["id"]
+        for item in auth_client.get("/api/v1/accounts/sender-mappings").json()
+    )
+
+
 def test_non_hdfc_account_requires_paid_license(auth_client):
     response = auth_client.post(
         "/api/v1/accounts",
