@@ -77,6 +77,7 @@ def compute_behavior_insights(
         lambda: {"income": 0.0, "spend": 0.0, "discretionary": 0.0}
     )
     weekly_counts: dict[tuple[int, int], set[date]] = defaultdict(set)
+    debit_transactions: list[Transaction] = []
     total_spend = 0.0
     discretionary = 0.0
     flexible_categories = {
@@ -89,6 +90,7 @@ def compute_behavior_insights(
                 month["income"] += float(transaction.amount)
         elif transaction.type == "debit":
             amount = float(transaction.amount)
+            debit_transactions.append(transaction)
             month["spend"] += amount
             total_spend += amount
             if transaction.category in flexible_categories:
@@ -130,6 +132,15 @@ def compute_behavior_insights(
             "confidence": confidence,
             "provenance": "Deterministic local calculation from included GODFIN data.",
             "caveat": caveat,
+            "difficulty": {
+                "savings_consistency": "easy",
+                "budget_adherence": "easy",
+                "subscription_load": "easy",
+                "discretionary_ratio": "intermediate",
+                "buffer_coverage": "intermediate",
+                "routine_stability": "advanced",
+                "cash_flow_volatility": "advanced",
+            }.get(key, "intermediate"),
             "hidden": bool(preference and preference.hidden),
             "correction_note": (
                 preference.correction_note if preference else None
@@ -190,10 +201,10 @@ def compute_behavior_insights(
     metrics = [
         metric(
             "savings_consistency",
-            "Savings consistency",
+            "Months your income covered spending",
             savings_consistency,
             "%",
-            "Share of income months where verified income covered included spending.",
+            "Out of the months with recorded income, how often you spent no more than came in.",
             "months with income − spending ≥ 0 ÷ months with verified income × 100",
             "Monthly verified income and non-transfer debit totals.",
             f"{positive_savings} of {len(income_months)} income months were non-negative.",
@@ -201,10 +212,10 @@ def compute_behavior_insights(
         ),
         metric(
             "cash_flow_volatility",
-            "Cash-flow volatility",
+            "How much your monthly balance changes",
             cash_flow_volatility,
             "%",
-            "How widely monthly net cash flow varies around its typical absolute level.",
+            "Whether the amount left after spending stays similar each month or moves up and down a lot.",
             "population standard deviation of monthly net ÷ mean absolute monthly net × 100",
             "Monthly verified income minus non-transfer spending.",
             f"{len(monthly_nets)} monthly net values were compared.",
@@ -212,10 +223,10 @@ def compute_behavior_insights(
         ),
         metric(
             "discretionary_ratio",
-            "Discretionary ratio",
+            "Spending you had more choice over",
             discretionary_ratio,
             "%",
-            "Share of included spending assigned to flexible categories.",
+            "The share of spending in flexible areas such as eating out, shopping, and entertainment.",
             "flexible-category spending ÷ total non-transfer spending × 100",
             "Confirmed transaction categories and debit amounts.",
             f"{len(transactions)} included transactions were reviewed.",
@@ -223,10 +234,10 @@ def compute_behavior_insights(
         ),
         metric(
             "budget_adherence",
-            "Budget adherence",
+            "Months you stayed within your limit",
             budget_adherence,
             "%",
-            "Share of observed months at or below the monthly spending limit you set.",
+            "How often your total monthly spending stayed at or below the limit you chose.",
             "months within limit ÷ observed months × 100",
             "Your monthly spending limit and non-transfer debit totals.",
             (
@@ -238,10 +249,10 @@ def compute_behavior_insights(
         ),
         metric(
             "subscription_load",
-            "Subscription load",
+            "Income already promised to subscriptions",
             subscription_load,
             "%",
-            "Monthly-equivalent confirmed subscription cost as a share of average income.",
+            "How much of an average income month is already committed to confirmed subscriptions.",
             "monthly-equivalent confirmed subscriptions ÷ average verified monthly income × 100",
             "Confirmed subscriptions and verified income months.",
             f"{db.query(Subscription).filter(Subscription.is_active.is_(True)).count()} active subscriptions were included.",
@@ -249,10 +260,10 @@ def compute_behavior_insights(
         ),
         metric(
             "buffer_coverage",
-            "Buffer coverage",
+            "How long ready-to-use savings may cover spending",
             buffer_coverage,
             "months",
-            "Approximate months of average spending covered by active liquid assets.",
+            "A rough estimate of how many average spending months your ready-to-use savings could cover.",
             "active liquid asset value ÷ average monthly non-transfer spending",
             "Net-worth cash/liquid assets and average included spending.",
             f"{len(complete_months)} observed months contributed to average spending.",
@@ -260,20 +271,154 @@ def compute_behavior_insights(
         ),
         metric(
             "routine_stability",
-            "Routine stability",
+            "How steady your week-to-week activity is",
             routine_stability,
             "score",
-            "Consistency of the number of transaction-active days from week to week.",
+            "Whether you tend to spend on a similar number of days each week.",
             "100 − capped coefficient of variation of weekly active-day counts",
             "Transaction dates only; amounts and merchants are not used.",
             f"{len(active_days)} observed weeks were compared.",
             "A stable score is descriptive and does not imply healthy or unhealthy behavior.",
         ),
     ]
+    metric_order = {
+        "savings_consistency": 1,
+        "budget_adherence": 2,
+        "subscription_load": 3,
+        "discretionary_ratio": 4,
+        "buffer_coverage": 5,
+        "routine_stability": 6,
+        "cash_flow_volatility": 7,
+    }
+    metrics.sort(key=lambda item: metric_order[item["key"]])
+
+    small_flexible = [
+        transaction
+        for transaction in debit_transactions
+        if float(transaction.amount) <= 500
+        and transaction.category in flexible_categories
+    ]
+    small_flexible_total = sum(float(item.amount) for item in small_flexible)
+    small_share = (
+        small_flexible_total / total_spend * 100 if total_spend > 0 else None
+    )
+
+    weekend_total = sum(
+        float(item.amount) for item in debit_transactions if item.date.weekday() >= 5
+    )
+    weekday_total = total_spend - weekend_total
+    day_count = (today - start).days + 1
+    weekend_days = sum(
+        1
+        for offset in range(day_count)
+        if (start + timedelta(days=offset)).weekday() >= 5
+    )
+    weekday_days = max(1, day_count - weekend_days)
+    weekend_daily = weekend_total / weekend_days if weekend_days else 0
+    weekday_daily = weekday_total / weekday_days
+    weekend_shift = (
+        (weekend_daily - weekday_daily) / weekday_daily * 100
+        if weekday_daily > 0
+        else None
+    )
+
+    late_month_total = sum(
+        float(item.amount) for item in debit_transactions if item.date.day >= 21
+    )
+    late_month_share = (
+        late_month_total / total_spend * 100 if total_spend > 0 else None
+    )
+
+    merchant_counts: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"count": 0, "total": 0.0}
+    )
+    for item in debit_transactions:
+        merchant = item.merchant_normalized or item.merchant_raw or "Unknown"
+        merchant_counts[merchant]["count"] += 1
+        merchant_counts[merchant]["total"] += float(item.amount)
+    repeat_merchant = (
+        max(
+            merchant_counts.items(),
+            key=lambda item: (item[1]["count"], item[1]["total"]),
+        )
+        if merchant_counts
+        else None
+    )
+
+    reflections = [
+        {
+            "key": "small_purchases",
+            "title": "Are small purchases quietly adding up?",
+            "observation": (
+                f"{len(small_flexible)} flexible purchases of ₹500 or less added "
+                f"up to ₹{small_flexible_total:,.0f}"
+                + (
+                    f", or {small_share:.1f}% of included spending."
+                    if small_share is not None
+                    else "."
+                )
+            ),
+            "question": "Do these purchases still feel worth it when you see their combined total?",
+            "action": "Pick one week to notice these purchases without trying to ban them.",
+            "evidence": f"{len(small_flexible)} included purchases in {period}.",
+            "confidence": confidence,
+        },
+        {
+            "key": "weekend_shift",
+            "title": "Does your spending change on weekends?",
+            "observation": (
+                "Average spending per weekend day was "
+                f"₹{weekend_daily:,.0f}, compared with ₹{weekday_daily:,.0f} on weekdays."
+                + (
+                    f" That is {abs(weekend_shift):.0f}% "
+                    f"{'higher' if weekend_shift >= 0 else 'lower'} on weekends."
+                    if weekend_shift is not None
+                    else ""
+                )
+            ),
+            "question": "Is that difference intentional, or does free time make spending easier to overlook?",
+            "action": "Before the next weekend, choose one thing you are happy to spend on.",
+            "evidence": f"{weekend_days} weekend days and {weekday_days} weekdays in {period}.",
+            "confidence": confidence,
+        },
+        {
+            "key": "late_month_spending",
+            "title": "What happens near the end of the month?",
+            "observation": (
+                f"₹{late_month_total:,.0f}"
+                + (
+                    f", or {late_month_share:.1f}% of included spending,"
+                    if late_month_share is not None
+                    else ""
+                )
+                + " happened on or after the 21st."
+            ),
+            "question": "Do later-month purchases feel planned, necessary, or like a response to earlier restraint?",
+            "action": "Compare this with your pay date and bill dates before drawing a conclusion.",
+            "evidence": f"Included debit dates in {period}.",
+            "confidence": confidence,
+        },
+        {
+            "key": "repeat_merchant",
+            "title": "Which place appears most often?",
+            "observation": (
+                f"{repeat_merchant[0]} appeared {int(repeat_merchant[1]['count'])} times, "
+                f"totalling ₹{repeat_merchant[1]['total']:,.0f}."
+                if repeat_merchant
+                else "There is not enough spending history to identify a repeated place yet."
+            ),
+            "question": "Does this repeat spending support something you value, or is it happening mostly from habit?",
+            "action": "Look at the individual purchases before deciding whether anything should change.",
+            "evidence": f"{len(debit_transactions)} included debit transactions in {period}.",
+            "confidence": confidence,
+        },
+    ]
+
     return {
         "window_days": WINDOW_DAYS,
         "period": period,
         "metrics": metrics,
+        "reflections": reflections,
         "monthly_budget": monthly_budget,
         "policy": (
             "These local, descriptive insights are never used for advertising, "

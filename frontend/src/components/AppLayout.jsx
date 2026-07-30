@@ -27,6 +27,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import ChangePinModal from './ChangePinModal';
 import { GlassBackground } from './GlassBackground';
+import GodfinBrand from './GodfinBrand';
+import GuidedTour from './GuidedTour';
 import { fetchReviewStats, fetchSyncStatus } from '../api/client';
 
 const NAV_GROUPS = [
@@ -116,12 +118,7 @@ function SidebarContent({ onItemClick }) {
     <>
       {/* Logo */}
       <div className="px-5 py-6 mb-2">
-        <h1 className="text-white/90 text-[1.3rem] tracking-[-0.04em]" style={{ fontWeight: 300 }}>
-          GODFIN
-        </h1>
-        <p className="text-white/25 text-[0.65rem] tracking-[0.15em] uppercase mt-0.5">
-          Personal Finance
-        </p>
+        <GodfinBrand compact />
       </div>
 
       {/* Nav */}
@@ -209,9 +206,7 @@ export default function AppLayout({ children }) {
 
         {/* Mobile Header */}
         <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3 bg-white/[0.04] backdrop-blur-[32px] border-b border-white/[0.08]">
-          <h1 className="text-white/90 text-[1.1rem] tracking-[-0.04em]" style={{ fontWeight: 300 }}>
-            GODFIN
-          </h1>
+          <GodfinBrand compact showTagline={false} />
           <button
             onClick={() => setMobileOpen(true)}
             aria-label="Open navigation menu"
@@ -293,6 +288,7 @@ export default function AppLayout({ children }) {
           More
         </button>
       </nav>
+      <GuidedTour />
     </div>
   );
 }

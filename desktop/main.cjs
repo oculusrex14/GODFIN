@@ -15,6 +15,7 @@ const WEBSITE_ORIGINS = new Set([
   "https://godfin.vercel.app",
   "https://godfin.dev",
   "https://accounts.google.com",
+  "https://ollama.com",
 ]);
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",

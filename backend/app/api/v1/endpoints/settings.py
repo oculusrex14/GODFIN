@@ -470,7 +470,7 @@ def reset_classification_memory(
 
     pin_setting = db.query(AppSetting).filter_by(key="pin_hash").first()
     if not pin_setting or not verify_pin_hash(body.pin, pin_setting.value):
-        raise HTTPException(status_code=401, detail="Incorrect PIN")
+        raise HTTPException(status_code=403, detail="Incorrect PIN")
     backup_filename = create_backup(DB_PATH, _get_backup_dir(db))
     result = reset_learning_memory(db)
     db.commit()
@@ -493,7 +493,7 @@ def reset_all_data(
     if not pin_setting or not pin_setting.value:
         raise HTTPException(status_code=400, detail='No PIN set')
     if not verify_pin_hash(body.pin, pin_setting.value):
-        raise HTTPException(status_code=401, detail='Incorrect PIN')
+        raise HTTPException(status_code=403, detail='Incorrect PIN')
 
     # 2. Create backup first (safety net)
     backup_filename = None

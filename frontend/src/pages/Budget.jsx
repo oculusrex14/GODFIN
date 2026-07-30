@@ -389,10 +389,10 @@ export default function Budget() {
                     <button
                       type="button"
                       onClick={() => setSavingsGoal(goal)}
-                      className="text-emerald-300/60 text-[0.7rem] hover:text-emerald-300/90 transition-colors flex items-center gap-1"
+                      className="flex min-h-9 items-center gap-1.5 rounded-lg border border-[#54E1D0]/20 bg-[#17C3B2]/[0.08] px-3 text-[#8EF1E4]/85 hover:bg-[#17C3B2]/[0.13] text-[0.7rem]"
                     >
                       <CircleDollarSign size={12} />
-                      Update savings
+                      Add savings
                     </button>
                   </div>
                 </motion.div>

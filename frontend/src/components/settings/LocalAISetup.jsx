@@ -22,6 +22,7 @@ import {
   fetchLocalAIDownload,
   fetchLocalAIProfile,
 } from '../../api/client';
+import { openExternalUrl } from '../../config/external';
 import { useToast } from '../../context/ToastContext';
 
 const CHOICES = [
@@ -172,7 +173,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
             {!profile?.ollama?.installed && (
               <button
                 type="button"
-                onClick={() => window.open(profile.installer_url, '_blank', 'noopener,noreferrer')}
+                onClick={() => openExternalUrl(profile.installer_url)}
                 className="min-h-11 px-4 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.08] text-cyan-100/75 text-sm flex items-center gap-2"
               >
                 Open official Ollama installer

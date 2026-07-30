@@ -300,6 +300,14 @@ def test_behavior_insights_are_explainable_correctable_and_exportable(
         "routine_stability",
     } == {metric["key"] for metric in payload["metrics"]}
     assert all(metric["formula"] and metric["evidence"] for metric in payload["metrics"])
+    assert [metric["difficulty"] for metric in payload["metrics"]] == [
+        "easy", "easy", "easy", "intermediate", "intermediate", "advanced", "advanced"
+    ]
+    assert len(payload["reflections"]) >= 4
+    assert all(
+        item["question"] and item["action"] and item["evidence"]
+        for item in payload["reflections"]
+    )
     assert "never used for advertising" in payload["policy"]
 
     corrected = auth_client.put(
@@ -317,7 +325,7 @@ def test_behavior_insights_are_explainable_correctable_and_exportable(
 
     exported = auth_client.get("/api/v1/behavior-insights/export")
     assert exported.status_code == 200
-    assert "Savings consistency" in exported.text
+    assert "Months your income covered spending" in exported.text
     reset = auth_client.post("/api/v1/behavior-insights/reset")
     assert reset.status_code == 200
     assert all(not item["hidden"] for item in reset.json()["metrics"])

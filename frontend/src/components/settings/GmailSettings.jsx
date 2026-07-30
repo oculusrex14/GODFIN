@@ -19,9 +19,11 @@ import {
   fetchIngestSettings,
   updateIngestSettings,
 } from '../../api/client';
+import { openExternalUrl } from '../../config/external';
 
 // Detect if we're on localhost or network IP
 function isLocalhost() {
+  if (window.location.protocol === 'godfin:') return true;
   const hostname = window.location.hostname;
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 }
@@ -40,6 +42,7 @@ function GmailSettings() {
   const [autoIngestEnabled, setAutoIngestEnabled] = useState(true);
   const [ingestFrequency, setIngestFrequency] = useState(15);
   const [ingestJustCompleted, setIngestJustCompleted] = useState(false);
+  const [awaitingOAuth, setAwaitingOAuth] = useState(false);
 
   const getErrorMessage = (err) => {
     if (typeof err === 'string') return err;
@@ -61,6 +64,7 @@ function GmailSettings() {
     queryKey: ['gmailStatus'],
     queryFn: fetchGmailStatus,
     staleTime: 30000,
+    refetchInterval: awaitingOAuth ? 2000 : false,
   });
 
   // Fetch scheduler/history status
@@ -115,29 +119,11 @@ function GmailSettings() {
         setOauthUrl(data.auth_url);
         setShowOAuthModal(true);
       } else {
-        // Standard redirect flow (localhost) - open popup directly
-        console.log('Opening popup with URL:', data.auth_url);
-        const popup = window.open(
-          data.auth_url,
-          'gmail-auth',
-          'width=600,height=800,scrollbars=yes'
-        );
-        // Check if popup was blocked
-        if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-          console.log('Popup was blocked, falling back to modal');
-          setOauthUrl(data.auth_url);
-          setShowOAuthModal(true);
-          showToast('Popup blocked. Use the manual method or allow popups.', 'info');
-        } else {
-          console.log('Popup opened successfully');
-          // Poll for popup closure
-          const checkClosed = setInterval(() => {
-            if (popup?.closed) {
-              clearInterval(checkClosed);
-              queryClient.invalidateQueries({ queryKey: ['gmailStatus'] });
-            }
-          }, 500);
-        }
+        setOauthUrl(data.auth_url);
+        setShowOAuthModal(true);
+        setAwaitingOAuth(true);
+        openExternalUrl(data.auth_url);
+        showToast('Complete the Google approval in your browser, then return to GODFIN.', 'info');
       }
     },
     onError: (err) => {
@@ -145,6 +131,14 @@ function GmailSettings() {
       showToast(getErrorMessage(err), 'error');
     },
   });
+
+  useEffect(() => {
+    if (!awaitingOAuth || !gmailStatus?.connected) return;
+    setAwaitingOAuth(false);
+    setShowOAuthModal(false);
+    setOauthUrl('');
+    showToast('Gmail connected successfully!');
+  }, [awaitingOAuth, gmailStatus?.connected]);
 
   // Manual OAuth code submission
   const manualCodeMutation = useMutation({
@@ -800,7 +794,8 @@ function GmailSettings() {
                 <button
                   onClick={() => {
                     if (oauthUrl) {
-                      window.open(oauthUrl, '_blank', 'width=600,height=800,scrollbars=yes');
+                      openExternalUrl(oauthUrl);
+                      setAwaitingOAuth(true);
                     }
                   }}
                   disabled={!oauthUrl}

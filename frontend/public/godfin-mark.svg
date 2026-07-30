@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">GODFIN vault dial mark</title>
+  <desc id="desc">A secure vault dial forming the letter G in teal, white, and lime on deep navy.</desc>
+  <defs>
+    <linearGradient id="bg" x1="30" y1="22" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#12263F"/>
+      <stop offset="1" stop-color="#071626"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="39" y1="42" x2="218" y2="218" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#54E1D0"/>
+      <stop offset=".57" stop-color="#17C3B2"/>
+      <stop offset="1" stop-color="#A6E22E"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="77" y1="75" x2="181" y2="188" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset=".5" stop-color="#E6EEF5"/>
+      <stop offset="1" stop-color="#9DB0C4"/>
+    </linearGradient>
+    <radialGradient id="hub" cx="0" cy="0" r="1" gradientTransform="translate(122 125) rotate(46) scale(39)">
+      <stop stop-color="#67F1DE"/>
+      <stop offset=".5" stop-color="#19BDB0"/>
+      <stop offset="1" stop-color="#0A6070"/>
+    </radialGradient>
+    <filter id="glow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="6" y="6" width="244" height="244" rx="54" fill="url(#bg)"/>
+  <rect x="7" y="7" width="242" height="242" rx="53" fill="none" stroke="#2B5A76" stroke-opacity=".7" stroke-width="2"/>
+  <circle cx="128" cy="128" r="91" fill="none" stroke="#183A55" stroke-width="17"/>
+  <circle cx="128" cy="128" r="91" fill="none" stroke="url(#ring)" stroke-linecap="round" stroke-width="11" stroke-dasharray="470 102" transform="rotate(-42 128 128)" filter="url(#glow)"/>
+  <g stroke="#E6EEF5" stroke-linecap="round" stroke-width="2.2" opacity=".9">
+    <path d="M128 31v10"/><path d="M159 36l-3 10"/><path d="M187 50l-6 8"/>
+    <path d="M209 72l-8 6"/><path d="M223 101l-10 3"/><path d="M225 132h-10"/>
+    <path d="M42 132H32"/><path d="M44 101l-10-3"/><path d="M56 72l-8-6"/>
+    <path d="M78 50l-6-8"/><path d="M105 36l-3-10"/>
+  </g>
+  <circle cx="214" cy="49" r="10" fill="#A6E22E" filter="url(#glow)"/>
+  <path d="M178 82a66 66 0 1 0 10 82h-62v-29h93c-4 62-42 99-94 99-59 0-106-47-106-106S66 22 125 22c32 0 59 12 80 34l-27 26Z" fill="url(#metal)" transform="translate(19 23) scale(.82)"/>
+  <circle cx="124" cy="128" r="27" fill="#071626" stroke="#CFE2EB" stroke-width="5"/>
+  <circle cx="124" cy="128" r="18" fill="url(#hub)"/>
+  <circle cx="118" cy="122" r="6" fill="#B7FFF3" opacity=".58"/>
+</svg>

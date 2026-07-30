@@ -35,11 +35,25 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
       '/health': { status: 'ok' },
       '/auth/status': { is_first_run: false, pin_length: 4 },
       '/auth/verify-pin': { authenticated: true, token: 'test-token' },
-      '/onboarding': { completed: true, deferred: true, current_step: 10 },
+      '/onboarding': {
+        completed: true,
+        deferred: true,
+        current_step: 10,
+        tutorial_step: 1,
+        tutorial_version: 1,
+        tutorial_completed: false,
+      },
       '/audit/sessions': [],
       '/review/stats': { queue_size: 0 },
       '/ingest/gmail/sync-status': { status: 'idle', percent: 0 },
-      '/goals': [],
+      '/goals': [{
+        id: 7,
+        name: 'Emergency cushion',
+        target_amount: 200000,
+        current_saved: 45000,
+        deadline_date: '2027-12-31',
+        annual_return_rate: 0,
+      }],
       '/goal-contribution-suggestions': { enabled: false, items: [] },
       '/profile': profile,
       '/recurring': [],
@@ -50,10 +64,33 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
         backup: { status: 'healthy' },
       },
       '/settings/developer': { enabled: false, rules: [] },
-      '/settings/backups': [],
+      '/settings/backups': [{
+        filename: 'godfin-backup.db',
+        size_bytes: 2097152,
+        created_at: '2026-07-29T10:30:00Z',
+      }],
       '/system/status': { status: 'ok' },
       '/system/embeddings/status': { status: 'not_installed' },
-      '/system/local-ai/profile': { choice: 'none', recommendations: [] },
+      '/system/local-ai/profile': {
+        choice: 'local',
+        total_ram_gb: 16,
+        available_ram_gb: 10,
+        disk_free_gb: 120,
+        acceleration: 'apple_silicon',
+        context_tokens: 8192,
+        privacy: 'Prompts stay on this computer.',
+        installer_url: 'https://ollama.com/download',
+        ollama: { installed: false },
+        recommendation: {
+          label: 'Qwen 4B',
+          reason: 'A comfortable fit for this computer.',
+          model: 'qwen3:4b',
+          size_gb: 2.5,
+          memory_gb: 6,
+          expected_speed: 'Responsive for short explanations',
+        },
+        recommendations: [],
+      },
       '/system/local-ai/download': { status: 'idle' },
       '/accounts': [],
       '/accounts/parser-profiles': [],
@@ -67,6 +104,7 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
         message: 'GODFIN Core is active.',
         topup_credits: 0,
       },
+      '/llm/config': { is_active: false, configurations: [] },
       '/settings/classification-memory': {
         corrections: [],
         total_confirmed: 0,
@@ -74,18 +112,59 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
       },
       '/reward-pilot/status': { consented: false, enabled: false },
       '/reports/summary': {
-        income: 0,
-        expenses: 0,
-        savings: 0,
+        total_income: 85000,
+        total_spend: 57000,
         savings_rate: 0,
+        recurring_total: 10500,
+        financial_health_score: 72,
+        financial_health_label: 'A steady month',
+        financial_health_caveat: 'This money picture is based only on the activity recorded in GODFIN.',
+        all_categories: [{ category: 'Food & Dining', amount: 12000 }],
       },
-      '/reports/detailed': { categories: [], transactions: [] },
+      '/reports/detailed': {
+        category_comparison: [],
+        income_breakdown: [{ source: 'Salary', amount: 85000 }],
+        recurring_list: [{ merchant: 'Internet', amount: 1200 }],
+        top_merchants: [],
+      },
+      '/behavior-insights': {
+        policy: 'These observations stay on this computer and are never used to judge you.',
+        monthly_budget: null,
+        reflections: [{
+          key: 'small-purchases',
+          title: 'Small purchases are adding up',
+          observation: 'You made 8 purchases under ₹500 this month.',
+          question: 'Were these useful, or did some happen without much thought?',
+          action: 'Try pausing for ten seconds before the next small purchase.',
+          evidence: '8 recorded purchases',
+          confidence: 'high',
+        }],
+        metrics: [{
+          key: 'savings-consistency',
+          label: 'How regularly you keep money aside',
+          value: 68,
+          unit: 'score',
+          meaning: 'Shows whether saving happens in most months.',
+          formula: 'Months with savings ÷ months reviewed',
+          inputs: 'Recorded income and spending',
+          period: 'Last 6 complete months',
+          provenance: 'Calculated locally',
+          caveat: 'Missing activity can change this result.',
+          confidence: 'medium',
+          difficulty: 'Easy',
+          hidden: false,
+          user_note: '',
+        }],
+      },
     };
     const exact = responses[path];
     if (exact !== undefined) return route.fulfill({ json: exact });
     if (path.startsWith('/audit/sessions?')) return route.fulfill({ json: [] });
     if (path.startsWith('/settings/classification-memory?')) {
       return route.fulfill({ json: responses['/settings/classification-memory'] });
+    }
+    if (path.startsWith('/goals/7/contributions')) {
+      return route.fulfill({ json: [] });
     }
     if (path.startsWith('/reports/')) return route.fulfill({ json: {} });
     return route.fulfill({ json: {} });
@@ -218,4 +297,95 @@ test('paid CA export is one review-oriented ZIP tax pack', async ({ page }) => {
   await expect(page.getByText(/multi-sheet workbook, raw CSV, manifest/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'CA CSV' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'CA JSON' })).toHaveCount(0);
+});
+
+test('review fixes expose the new brand, safe settings controls, and resumable app tour', async ({ page }) => {
+  await mockAuthenticatedApp(page);
+  await page.goto('/pin');
+  await expect(page.getByLabel('GODFIN')).toBeVisible();
+  await page.getByLabel('Enter your PIN').fill('4826');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+
+  for (const section of [
+    'Trust & Service Health',
+    'Setup & Learning',
+    'License & Plan',
+    'Gmail Integration',
+    'AI Model Configuration',
+    'Backup & Export',
+    'Data Management',
+  ]) {
+    await expect(page.getByRole('button', { name: section })).toHaveAttribute('aria-expanded', 'false');
+  }
+
+  await page.getByRole('button', { name: 'Backup & Export' }).click();
+  await expect(page.getByText('29 Jul 2026, 4:00 pm')).toBeVisible();
+  await expect(page.getByText(/2 MB.*godfin-backup\.db/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'AI Model Configuration' }).click();
+  await page.getByRole('button', { name: 'Match similar transaction descriptions' }).click();
+  await expect(page.getByText(/download about 100 MB/)).toBeVisible();
+  await page.getByRole('button', { name: 'Not now' }).click();
+
+  const ollamaPopup = page.waitForEvent('popup');
+  await page.getByRole('button', { name: 'Open official Ollama installer' }).click();
+  const popup = await ollamaPopup;
+  await popup.waitForLoadState('domcontentloaded');
+  expect(popup.url()).toMatch(/^https:\/\/ollama\.com\/download/);
+  await popup.close();
+
+  await page.getByRole('button', { name: 'Setup & Learning' }).click();
+  await page.getByRole('button', { name: /app tour/i }).first().click();
+  await expect(page.getByRole('complementary', { name: /GODFIN app tour/ })).toBeVisible();
+  await expect(page.getByText('Your money at a glance')).toBeVisible();
+  await page.getByRole('button', { name: 'Close and resume the tour later' }).click();
+});
+
+test('behavior reflections lead with plain language and deeper measures follow', async ({ page }) => {
+  await mockAuthenticatedApp(page, {
+    tier: 'max',
+    valid: true,
+    status: 'active',
+    features: ['behavior_insights', 'advanced_reports'],
+    message: 'GODFIN Max is active.',
+    topup_credits: 0,
+  });
+  await page.goto('/pin');
+  await page.getByLabel('Enter your PIN').fill('4826');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByRole('link', { name: 'Behavior Insights', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Your Money Habits' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Things worth reflecting on' })).toBeVisible();
+  await expect(page.getByText('Small purchases are adding up')).toBeVisible();
+  await expect(page.getByText(/without much thought/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'The numbers behind your habits' })).toBeVisible();
+  await expect(page.getByText('How regularly you keep money aside')).toBeVisible();
+});
+
+test('reports require connected AI for commentary and goals show a direct savings action', async ({ page }) => {
+  await mockAuthenticatedApp(page, {
+    tier: 'max',
+    valid: true,
+    status: 'active',
+    features: ['behavior_insights', 'advanced_reports'],
+    message: 'GODFIN Max is active.',
+    topup_credits: 0,
+  });
+  await page.goto('/pin');
+  await page.getByLabel('Enter your PIN').fill('4826');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByRole('link', { name: 'Reports', exact: true }).click();
+
+  await expect(page.getByText('Your financial report', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('72/100')).toBeVisible();
+  await expect(page.getByText(/Connect an AI to create the detailed written analysis/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Detailed AI PDF' })).toBeDisabled();
+
+  await page.getByRole('link', { name: 'Budget', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Add savings' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add savings' }).click();
+  await expect(page.getByRole('heading', { name: /Update Emergency cushion/ })).toBeVisible();
+  await expect(page.getByLabel('Change')).toHaveValue('deposit');
 });

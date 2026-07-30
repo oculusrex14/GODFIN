@@ -1,3 +1,5 @@
+import { openExternalUrl } from './external';
+
 export const GODFIN_WEBSITE_ORIGIN = (
   import.meta.env.VITE_GODFIN_WEBSITE_URL || 'https://godfin.vercel.app'
 ).replace(/\/$/, '');
@@ -8,6 +10,5 @@ export function websiteUrl(path = '/') {
 }
 
 export function openWebsite(path) {
-  window.open(websiteUrl(path), '_blank', 'noopener,noreferrer');
+  openExternalUrl(websiteUrl(path));
 }
-

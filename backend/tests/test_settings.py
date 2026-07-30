@@ -177,5 +177,7 @@ def test_reset_data_success(auth_client, db_session):
 
 def test_reset_data_wrong_pin(auth_client):
     resp = auth_client.post('/api/v1/settings/reset-data', json={'pin': '0000', 'create_backup': False})
-    assert resp.status_code == 401
+    assert resp.status_code == 403
     assert resp.json()['detail'] == 'Incorrect PIN'
+    # A wrong destructive-action confirmation is not an expired login session.
+    assert auth_client.get('/api/v1/settings').status_code == 200

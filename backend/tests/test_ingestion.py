@@ -116,3 +116,16 @@ def test_ingestion_status_api(auth_client):
     data = resp.json()
     assert "gmail_connected" in data
     assert "last_run" in data
+
+
+def test_gmail_setup_error_is_safe_and_nontechnical(auth_client, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.client_config_available",
+        lambda: False,
+    )
+    response = auth_client.get("/api/v1/auth/gmail/url")
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "not configured" in detail
+    assert "client_secret" not in detail
+    assert "data/" not in detail

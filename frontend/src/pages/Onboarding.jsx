@@ -135,7 +135,7 @@ export default function Onboarding() {
           <div>
             <p className="text-cyan-300/60 text-xs uppercase tracking-[0.18em]">First-run setup</p>
             <h1 className="mt-2 text-white/90 text-2xl sm:text-3xl" style={{ fontWeight: 300 }}>Make GODFIN yours</h1>
-            <p className="mt-2 text-white/35 text-sm">Your application data stays in SQLite on this device.</p>
+            <p className="mt-2 text-white/35 text-sm">Your everyday money records stay on this device.</p>
           </div>
           <button
             type="button"

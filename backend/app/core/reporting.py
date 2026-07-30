@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 CHART_DPI = 300
 
+
+class DetailedReportUnavailable(RuntimeError):
+    """Raised when a requested AI-authored report cannot be produced honestly."""
+
+
 CHART_COLORS = [
     '#34d399', '#60a5fa', '#f472b6', '#fbbf24',
     '#a78bfa', '#fb923c', '#2dd4bf', '#f87171',
@@ -112,6 +117,32 @@ def prepare_summary_report(db: Session, month: str) -> dict:
         .filter(RecurringPattern.is_active == True, RecurringPattern.frequency == 'monthly')
         .scalar()
     )
+    financial_health_score = None
+    financial_health_label = "Add income to calculate"
+    health_components = {}
+    if total_income > 0:
+        savings_value = savings_rate or 0.0
+        savings_points = max(0.0, min(55.0, (savings_value + 10.0) / 50.0 * 55.0))
+        coverage_points = max(
+            0.0,
+            min(25.0, (1.0 - max(0.0, total_spend - total_income) / total_income) * 25.0),
+        )
+        subscription_share = recurring_total / total_income
+        commitment_points = max(0.0, min(20.0, (1.0 - subscription_share) * 20.0))
+        financial_health_score = round(
+            savings_points + coverage_points + commitment_points
+        )
+        if financial_health_score >= 75:
+            financial_health_label = "Strong breathing room"
+        elif financial_health_score >= 50:
+            financial_health_label = "Some breathing room"
+        else:
+            financial_health_label = "Money may feel tight"
+        health_components = {
+            "money_left_after_spending": round(savings_points, 1),
+            "income_coverage": round(coverage_points, 1),
+            "room_after_subscriptions": round(commitment_points, 1),
+        }
 
     return {
         'month': month,
@@ -124,6 +155,13 @@ def prepare_summary_report(db: Session, month: str) -> dict:
         'all_categories': categories,
         'spending_by_elasticity': elasticity,
         'recurring_total': round(recurring_total, 2),
+        'financial_health_score': financial_health_score,
+        'financial_health_label': financial_health_label,
+        'financial_health_components': health_components,
+        'financial_health_caveat': (
+            "A simple monthly summary from recorded income, spending, and confirmed "
+            "recurring costs. It is not a credit score or financial diagnosis."
+        ),
     }
 
 
@@ -238,12 +276,32 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
         for p in patterns
     ]
 
+    income_rows = (
+        base.filter(Transaction.is_income == True)
+        .with_entities(
+            Transaction.subcategory,
+            Transaction.merchant_normalized,
+            func.sum(Transaction.amount).label("total"),
+        )
+        .group_by(Transaction.subcategory, Transaction.merchant_normalized)
+        .order_by(func.sum(Transaction.amount).desc())
+        .all()
+    )
+    income_breakdown = [
+        {
+            "source": row.subcategory or row.merchant_normalized or "Other income",
+            "amount": round(float(row.total), 2),
+        }
+        for row in income_rows
+    ]
+
     return {
         **summary,
         'top_merchants': top_merchants,
         'daily_spending': daily_spending,
         'category_comparison': category_comparison,
         'recurring_list': recurring_list,
+        'income_breakdown': income_breakdown,
     }
 
 
@@ -476,12 +534,12 @@ def _build_insights_prompt(detailed: dict, trend: list, month_label: str) -> str
         for t in trend
     ) or '  - (none)'
 
-    return f"""You are a senior personal-finance advisor writing a professional monthly report for an Indian
-user who banks with HDFC. All amounts are in Indian Rupees (Rs). The report month is {month_label}.
+    return f"""You are writing a careful, plain-language monthly money report for an Indian
+user. All amounts are in Indian Rupees (Rs). The report month is {month_label}.
 
 Use ONLY the data below. Do not invent figures. Be specific, quantitative, and actionable — reference
-real numbers and category names from the data. Write in clear, confident prose a professional advisor
-would sign their name to.
+real numbers and category names from the data. Explain finance terms in everyday language. Do not
+diagnose the user, shame spending, or claim certainty that the data cannot support.
 
 === FINANCIAL DATA ===
 Total Spend: Rs {_format_inr(s.get('total_spend', 0))}
@@ -775,18 +833,28 @@ def month_label_of(detailed: dict) -> str:
         return 'this month'
 
 
-def generate_financial_insights(detailed: dict, trend: list) -> dict:
+def generate_financial_insights(
+    detailed: dict,
+    trend: list,
+    *,
+    require_llm: bool = False,
+) -> dict:
     """Produce a structured professional financial report.
 
     Tries the LLM first (rich, advisor-quality narrative). Falls back to a
-    deterministic heuristic report built from the numbers so insights are always
-    available even with no LLM configured.
+    deterministic heuristic report built from the numbers for non-AI callers.
+    AI-labelled reports can require a real LLM response so a heuristic result is
+    never presented as model-authored.
     """
     month_label = month_label_of(detailed)
 
     # Not enough data → return a minimal empty-state report
     if detailed.get('total_spend', 0) == 0 and detailed.get('total_income', 0) == 0 \
             and detailed.get('transaction_count', 0) == 0:
+        if require_llm:
+            raise DetailedReportUnavailable(
+                f"No recorded activity is available for {month_label}."
+            )
         return {
             'available': False,
             'source': 'none',
@@ -813,6 +881,11 @@ def generate_financial_insights(detailed: dict, trend: list) -> dict:
             return parsed
         logger.warning("LLM insights returned unparseable JSON; falling back to heuristic")
 
+    if require_llm:
+        raise DetailedReportUnavailable(
+            "The connected AI did not return a usable report. Check the model "
+            "connection and try again; no AI commentary was generated."
+        )
     return _heuristic_insights(detailed, trend)
 
 
@@ -1196,10 +1269,19 @@ def generate_summary_pdf(db: Session, month: str) -> bytes:
     return bytes(pdf.output())
 
 
-def generate_detailed_pdf(db: Session, month: str) -> bytes:
+def generate_detailed_pdf(
+    db: Session,
+    month: str,
+    *,
+    require_llm: bool = False,
+) -> bytes:
     detailed = prepare_detailed_report(db, month)
     trend = _get_spending_trend(db, month)
-    insights = generate_financial_insights(detailed, trend)
+    insights = generate_financial_insights(
+        detailed,
+        trend,
+        require_llm=require_llm,
+    )
 
     # Generate all charts
     cat_chart = generate_category_chart(detailed['all_categories'])

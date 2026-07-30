@@ -1,5 +1,4 @@
-import { useEffect } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import {
   Archive,
   Bot,
@@ -15,18 +14,17 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 
-import { fetchOnboardingStatus, updateOnboardingStatus } from '../api/client';
 import { useLocation } from '../router';
 
 const LESSONS = [
   {
     title: 'Your money stays yours',
     icon: Lock,
-    summary: 'GODFIN is a local application. Ordinary financial data stays in SQLite on this computer.',
+    summary: 'Your everyday money records stay inside GODFIN on this computer.',
     points: [
       'Your PIN protects access to the local app.',
-      'Cloud AI is optional; local AI and no-AI modes are available.',
-      'Backups are local files that you control.',
+      'AI is optional. The main money tools still work without it.',
+      'Backup copies are saved where you choose.',
     ],
     example: 'Practice data: Asha has ₹25,000 income and ₹8,000 spending. This example never enters your real database.',
   },
@@ -44,10 +42,10 @@ const LESSONS = [
   {
     title: 'Accounts are containers',
     icon: Landmark,
-    summary: 'An account represents one bank account, card, wallet, or cash source.',
+    summary: 'An account in GODFIN stands for one bank account, card, wallet, or cash source.',
     points: [
       'Accounts keep transactions from different sources separate.',
-      'The account type helps transfer and cash-flow calculations.',
+      'The account type helps GODFIN tell spending apart from money moved between your own accounts.',
       'Deactivating an account preserves its history.',
     ],
     example: 'Practice data: “Asha Salary Account” and “Asha Credit Card” are synthetic accounts.',
@@ -59,7 +57,7 @@ const LESSONS = [
     points: [
       'Review the selected account and date range before confirming.',
       'Duplicate checks prevent the same row from being added twice.',
-      'Keep original statements outside the repository and back them up securely.',
+      'Keep the original statement somewhere safe in case you need to check it later.',
     ],
     example: 'Practice row: 12 Jul · GREEN MART · ₹1,240 debit · pending category.',
   },
@@ -70,18 +68,18 @@ const LESSONS = [
     points: [
       'Use the category that best describes why the money moved.',
       'Transfers between your own accounts are not spending.',
-      'The taxonomy is the same in imports, review, budgets, and reports.',
+      'The same category names appear everywhere in the app.',
     ],
     example: 'Practice: GREEN MART → FOOD → Groceries. Monthly spending increases by ₹1,240.',
   },
   {
     title: 'Review teaches GODFIN',
     icon: ListChecks,
-    summary: 'GODFIN learns only when you explicitly correct or confirm a transaction.',
+    summary: 'GODFIN remembers only the category choices you clearly confirm or correct.',
     points: [
-      'Exact merchant memory is the strongest learned rule.',
-      'A confirmed pattern can help with similar future descriptions.',
-      'You can inspect, undo, export, or reset learned memory.',
+      'A choice for the exact same shop or service gets the strongest priority.',
+      'A confirmed choice can help with similar descriptions later.',
+      'You can view, undo, save a copy of, or clear what GODFIN remembers.',
     ],
     example: 'Practice: changing “GREEN MART 8812” to Groceries teaches that confirmed pattern; finalized months never change.',
   },
@@ -102,8 +100,8 @@ const LESSONS = [
     summary: 'Reports summarize the transactions currently included in a selected date range.',
     points: [
       'Check the date range and account filters before interpreting a chart.',
-      'Hover, focus, or tap an information bubble to see formulas and caveats.',
-      'Exported totals come from deterministic calculations, not AI.',
+      'Hover, focus, or tap an information bubble for a simple explanation.',
+      'Exported totals are calculated from your records. AI does not invent the numbers.',
     ],
     example: 'Practice: FOOD is 40% of ₹8,000 spending because ₹3,200 ÷ ₹8,000 × 100 = 40%.',
   },
@@ -114,18 +112,18 @@ const LESSONS = [
     points: [
       'The retention policy keeps the last 7 daily and last 4 weekly backups.',
       'Create a backup before imports, resets, or upgrades.',
-      'Test recovery on a copy before you need it.',
+      'A backup gives you a safe point to return to if something goes wrong.',
     ],
     example: 'Practice: Settings → Backup & Export → Create Backup.',
   },
   {
-    title: 'Licenses and optional AI',
+    title: 'Plans and optional AI',
     icon: Bot,
     summary: 'Lifetime plans unlock released app features. Hosted AI credits are always separate.',
     points: [
-      'A paid license supports up to three active installations.',
-      'Local AI and bring-your-own keys use no GODFIN credits.',
-      'AI may explain verified calculations but never creates authoritative totals.',
+      'A paid plan can be active on up to three of your devices.',
+      'Private AI on your computer does not use GODFIN credits.',
+      'AI may explain calculated results, but your saved records remain the source of every total.',
     ],
     example: 'You can change AI mode later in Settings without affecting imports, rules, budgets, or reports.',
   },
@@ -133,37 +131,24 @@ const LESSONS = [
 
 export default function LearnGodfin() {
   const { navigate } = useLocation();
-  const queryClient = useQueryClient();
-  const { data: status } = useQuery({
-    queryKey: ['onboarding'],
-    queryFn: fetchOnboardingStatus,
-  });
-  const updateMutation = useMutation({
-    mutationFn: updateOnboardingStatus,
-    onSuccess: data => queryClient.setQueryData(['onboarding'], data),
-  });
-  const step = Math.min(LESSONS.length, Math.max(1, status?.tutorial_step || 1));
+  const [step, setStep] = useState(1);
   const lesson = LESSONS[step - 1];
   const Icon = lesson.icon;
 
-  async function move(nextStep) {
-    await updateMutation.mutateAsync({ tutorial_step: nextStep });
+  function move(nextStep) {
+    setStep(Math.min(LESSONS.length, Math.max(1, nextStep)));
   }
 
-  async function next() {
+  function next() {
     if (step === LESSONS.length) {
-      await updateMutation.mutateAsync({
-        tutorial_step: LESSONS.length,
-        tutorial_completed: true,
-      });
       navigate('/');
       return;
     }
-    await move(step + 1);
+    move(step + 1);
   }
 
-  async function back() {
-    if (step > 1) await move(step - 1);
+  function back() {
+    if (step > 1) move(step - 1);
   }
 
   useEffect(() => {
@@ -187,7 +172,7 @@ export default function LearnGodfin() {
     <div className="max-w-5xl mx-auto space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-cyan-300/55 text-xs uppercase tracking-[0.18em]">Learn GODFIN · Tutorial v{status?.tutorial_version || 1}</p>
+          <p className="text-cyan-300/55 text-xs uppercase tracking-[0.18em]">Learn GODFIN</p>
           <h1 className="mt-2 text-white/90 text-2xl sm:text-3xl font-light">Finance basics, one calm step at a time</h1>
           <p className="mt-2 text-white/35 text-sm">All examples on this page are synthetic and are never saved as your financial data.</p>
         </div>
@@ -196,7 +181,7 @@ export default function LearnGodfin() {
           onClick={() => navigate('/')}
           className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] text-sm"
         >
-          Leave and resume later
+          Leave learning
         </button>
       </header>
 
@@ -212,7 +197,7 @@ export default function LearnGodfin() {
           {LESSONS.map((item, index) => {
             const number = index + 1;
             const active = number === step;
-            const complete = number < step || status?.tutorial_completed;
+            const complete = number < step;
             return (
               <li key={item.title}>
                 <button
@@ -255,7 +240,7 @@ export default function LearnGodfin() {
             <button
               type="button"
               onClick={back}
-              disabled={step === 1 || updateMutation.isPending}
+              disabled={step === 1}
               className="min-h-11 px-4 rounded-xl border border-white/[0.09] text-white/50 disabled:opacity-30 text-sm flex items-center gap-2"
             >
               <ChevronLeft size={15} />
@@ -264,10 +249,9 @@ export default function LearnGodfin() {
             <button
               type="button"
               onClick={next}
-              disabled={updateMutation.isPending}
               className="min-h-11 px-4 rounded-xl border border-cyan-300/[0.18] bg-cyan-300/[0.08] text-cyan-100/75 text-sm flex items-center gap-2"
             >
-              {step === LESSONS.length ? 'Finish tutorial' : 'Next lesson'}
+              {step === LESSONS.length ? 'Finish learning' : 'Next lesson'}
               <ChevronRight size={15} />
             </button>
           </div>

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.reporting import (
+    DetailedReportUnavailable,
     generate_detailed_pdf,
     generate_financial_insights,
     generate_summary_pdf,
@@ -21,6 +22,7 @@ from app.core.reporting import (
 from app.core.tax_pack import build_financial_year_tax_pack
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.models.llm_config import LLMConfiguration
 
 router = APIRouter()
 
@@ -107,18 +109,40 @@ def report_insights(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Structured, LLM-authored financial insights for the month.
-    Falls back to a deterministic heuristic report when no LLM is configured."""
+    """Structured, LLM-authored financial insights for the month."""
     from app.api.v1.endpoints.license import enforce_feature
 
     enforce_feature(db, "advanced_reports")
+    llm_config = db.query(LLMConfiguration).filter_by(is_active=True).first()
+    if not llm_config:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Connect an AI in Settings to create a detailed analysis. "
+                "Standard totals and exports remain available without AI."
+            ),
+        )
     if month is None:
         month = _default_month(db)
     from app.core.reporting import _get_spending_trend
     detailed = prepare_detailed_report(db, month)
     trend = _get_spending_trend(db, month)
-    insights = generate_financial_insights(detailed, trend)
-    return {'month': month, 'insights': insights}
+    try:
+        insights = generate_financial_insights(
+            detailed,
+            trend,
+            require_llm=True,
+        )
+    except DetailedReportUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        'month': month,
+        'insights': insights,
+        'llm': {
+            'provider': llm_config.provider,
+            'model': llm_config.model,
+        },
+    }
 
 
 @router.get("/pdf/summary")
@@ -299,10 +323,24 @@ def report_pdf_detailed(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
+    from app.api.v1.endpoints.license import enforce_feature
+
+    enforce_feature(db, "advanced_reports")
     if month is None:
         month = _default_month(db)
+    if not db.query(LLMConfiguration).filter_by(is_active=True).first():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Connect an AI in Settings before creating the detailed report. "
+                "The standard summary report remains available."
+            ),
+        )
 
-    pdf_bytes = generate_detailed_pdf(db, month)
+    try:
+        pdf_bytes = generate_detailed_pdf(db, month, require_llm=True)
+    except DetailedReportUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return Response(
         content=pdf_bytes,

@@ -72,15 +72,39 @@ input {
   letter-spacing: -0.03em;
 }
 
-.brand-mark {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  background: var(--lime);
-  color: var(--ink);
-  font-size: 13px;
+.godfin-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.godfin-logo img {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+
+.godfin-wordmark {
+  display: block;
+  color: white;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.025em;
+  line-height: 1;
+}
+
+.godfin-wordmark span:last-child {
+  color: #54e1d0;
+}
+
+.godfin-logo small {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .nav-links {

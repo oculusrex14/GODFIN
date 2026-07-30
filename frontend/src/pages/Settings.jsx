@@ -27,6 +27,7 @@ import DataContributionSettings from '../components/settings/DataContributionSet
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useLocation } from '../router';
+import { activateGuidedTour } from '../components/GuidedTour';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -36,9 +37,19 @@ function formatBytes(bytes) {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-function ToggleSwitch({ enabled, onChange, disabled }) {
+function formatBackupDate(value) {
+  if (!value) return 'Date unavailable';
+  return new Date(value).toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
+function ToggleSwitch({ enabled, onChange, disabled, ariaLabel }) {
   return (
     <button
+      type="button"
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={() => onChange(!enabled)}
       className={`
@@ -293,7 +304,7 @@ export default function Settings() {
 
       {/* Trust & service health */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-        <GlassSection title="Trust & Service Health" icon={Activity}>
+        <GlassSection title="Trust & Service Health" icon={Activity} collapsible defaultExpanded={false} storageKey="godfin:settings:health-expanded">
           <div className="grid sm:grid-cols-2 gap-2.5">
             <HealthItem label="Encryption" health={health?.encryption} />
             <HealthItem label="Gmail" health={health?.gmail} />
@@ -309,9 +320,9 @@ export default function Settings() {
 
       {/* Lifetime license */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
-        <GlassSection title="Setup & Learning" icon={BookOpen}>
+        <GlassSection title="Setup & Learning" icon={BookOpen} collapsible defaultExpanded={false} storageKey="godfin:settings:learning-expanded">
           <p className="text-white/35 text-sm leading-relaxed">
-            Resume first-run setup or revisit the beginner tutorial at any time. Tutorial examples are synthetic.
+            Setup connects the parts you choose. Learn GODFIN explains money ideas. The separate app tour guides you through the real screens and can be closed or resumed at any time.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             {!onboarding?.completed && (
@@ -334,45 +345,52 @@ export default function Settings() {
             </GlassButton>
             <GlassButton
               variant="secondary"
+              icon={<PlayCircle size={14} />}
+              onClick={() => activateGuidedTour()}
+            >
+              {onboarding?.tutorial_completed ? 'Replay app tour' : 'Resume app tour'}
+            </GlassButton>
+            <GlassButton
+              variant="secondary"
               icon={<RotateCcw size={14} />}
               onClick={async () => {
                 await learningMutation.mutateAsync({ restart_tutorial: true });
-                navigate('/learn');
+                activateGuidedTour();
               }}
             >
-              Restart tutorial
+              Restart app tour
             </GlassButton>
           </div>
           <p className="mt-3 text-white/25 text-xs">
-            Tutorial v{onboarding?.tutorial_version || 1} · {onboarding?.tutorial_completed ? 'Completed' : `Lesson ${onboarding?.tutorial_step || 1} saved`}
+            App tour v{onboarding?.tutorial_version || 1} · {onboarding?.tutorial_completed ? 'Completed' : `Step ${onboarding?.tutorial_step || 1} saved`}
           </p>
         </GlassSection>
       </motion.div>
 
       {/* Lifetime license */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }}>
-        <GlassSection title="License & Plan" icon={KeyRound}>
+        <GlassSection title="License & Plan" icon={KeyRound} collapsible defaultExpanded={false} storageKey="godfin:settings:license-expanded">
           <LicenseSettings />
         </GlassSection>
       </motion.div>
 
       {/* Local accounts and bank-parser routing */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.045 }}>
-        <GlassSection title="Accounts & Import Routing" icon={Landmark}>
+        <GlassSection title="Accounts & Import Routing" icon={Landmark} collapsible defaultExpanded={false} storageKey="godfin:settings:accounts-expanded">
           <AccountSettings />
         </GlassSection>
       </motion.div>
 
       {/* Gmail */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
-        <GlassSection title="Gmail Integration" icon={Mail}>
+        <GlassSection title="Gmail Integration" icon={Mail} collapsible defaultExpanded={false} storageKey="godfin:settings:gmail-expanded">
           <GmailSettings />
         </GlassSection>
       </motion.div>
 
       {/* AI Model */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-        <GlassSection title="AI Model Configuration" icon={Cpu}>
+        <GlassSection title="AI Model Configuration" icon={Cpu} collapsible defaultExpanded={false} storageKey="godfin:settings:ai-expanded">
           <LocalAISetup compact />
           <div className="mt-5 pt-5 border-t border-white/[0.06]">
             <LLMSettings />
@@ -384,6 +402,7 @@ export default function Settings() {
                 <div className="text-white/25 text-[0.7rem]">Allow LLM to use web search for unfamiliar vendors</div>
               </div>
               <ToggleSwitch
+                ariaLabel="Allow web search"
                 enabled={settings?.llm_web_search === 'true'}
                 onChange={(v) => updateMutation.mutate({ key: 'llm_web_search', value: v ? 'true' : 'false' })}
                 disabled={updateMutation.isPending}
@@ -393,16 +412,23 @@ export default function Settings() {
           <div className="mt-4 pt-4 border-t border-white/[0.06]">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <div className="text-white/70 text-[0.85rem]">Embedding Classification</div>
+                <div className="text-white/70 text-[0.85rem]">Match similar transaction descriptions</div>
                 <div className="text-white/25 text-[0.7rem]">
-                  Optional local similarity model. First enable downloads about 100 MB.
+                  Helps GODFIN recognize differently written versions of the same kind of purchase. It is optional, works on this computer, and needs an initial download of about 100 MB.
                 </div>
               </div>
               <ToggleSwitch
+                ariaLabel="Match similar transaction descriptions"
                 enabled={embeddingStatus?.enabled || false}
-                onChange={(enabled) => {
+                onChange={async (enabled) => {
                   if (enabled) {
-                    enableEmbeddingsMutation.mutate();
+                    const approved = await confirm({
+                      title: 'Download the matching helper?',
+                      message: 'GODFIN will download about 100 MB to this computer. It helps compare similar transaction descriptions, but it is not required for imports, categories, budgets, or reports.',
+                      confirmLabel: 'Download and enable',
+                      cancelLabel: 'Not now',
+                    });
+                    if (approved) enableEmbeddingsMutation.mutate();
                   } else {
                     updateMutation.mutate({ key: 'enable_embeddings', value: 'false' });
                   }
@@ -433,7 +459,7 @@ export default function Settings() {
 
       {/* Backup & Export */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-        <GlassSection title="Backup & Export" icon={Database}>
+        <GlassSection title="Backup & Export" icon={Database} collapsible defaultExpanded={false} storageKey="godfin:settings:backup-expanded">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -464,9 +490,9 @@ export default function Settings() {
                 <div className="text-white/30 text-[0.7rem] mb-2" style={{ fontWeight: 500 }}>Recent Backups</div>
                 <div className="space-y-1.5">
                   {backups.slice(0, 5).map((b) => (
-                    <div key={b.filename} className="flex items-center justify-between text-[0.75rem] py-1">
-                      <span className="text-white/40 font-mono">{b.filename}</span>
-                      <span className="text-white/20">{formatBytes(b.size_bytes)}</span>
+                    <div key={b.filename} className="flex flex-wrap items-center justify-between gap-2 text-[0.75rem] py-1">
+                      <span className="text-white/40">{formatBackupDate(b.created_at)}</span>
+                      <span className="text-white/20">{formatBytes(b.size_bytes)} · <span className="font-mono">{b.filename}</span></span>
                     </div>
                   ))}
                 </div>
@@ -477,7 +503,7 @@ export default function Settings() {
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
-        <GlassSection title="Classification Learning" icon={BrainCircuit}>
+        <GlassSection title="Classification Learning" icon={BrainCircuit} collapsible defaultExpanded={false} storageKey="godfin:settings:classification-expanded">
           <p className="mb-4 text-white/35 text-sm leading-relaxed">
             GODFIN uses supervised learning from your explicit corrections—not reinforcement learning. Exact merchant memory is always the strongest learned match.
           </p>
@@ -486,20 +512,20 @@ export default function Settings() {
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.19 }}>
-        <GlassSection title="Optional Data Contribution" icon={Shield}>
+        <GlassSection title="Optional Data Contribution" icon={Shield} collapsible defaultExpanded={false} storageKey="godfin:settings:contribution-expanded">
           <DataContributionSettings />
         </GlassSection>
       </motion.div>
 
       {/* Developer Mode / Classification Diagnostics */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-        <GlassSection title={devEnabled ? 'Classification Diagnostics' : 'Developer Mode'} icon={Code}>
+        <GlassSection title={devEnabled ? 'Classification Diagnostics' : 'Developer Mode'} icon={Code} collapsible defaultExpanded={false} storageKey="godfin:settings:developer-expanded">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-white/70 text-[0.85rem]">Enable Developer Mode</div>
               <div className="text-white/25 text-[0.7rem]">Access classification health metrics and rules</div>
             </div>
-            <ToggleSwitch enabled={devEnabled} onChange={handleDevToggle} />
+            <ToggleSwitch ariaLabel="Developer mode" enabled={devEnabled} onChange={handleDevToggle} />
           </div>
 
           {/* Classification Health Metrics */}
@@ -660,7 +686,7 @@ export default function Settings() {
 
       {/* System */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
-        <GlassSection title="System" icon={Server}>
+        <GlassSection title="System" icon={Server} collapsible defaultExpanded={false} storageKey="godfin:settings:system-expanded">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -680,6 +706,7 @@ export default function Settings() {
                 </div>
               </div>
               <ToggleSwitch
+                ariaLabel="Allow network access"
                 enabled={settings?.allow_network_access === 'true'}
                 onChange={(enabled) => updateMutation.mutate({
                   key: 'allow_network_access',
@@ -735,7 +762,7 @@ export default function Settings() {
 
       {/* Data Management */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-        <GlassSection title="Data Management" icon={Trash}>
+        <GlassSection title="Data Management" icon={Trash} collapsible defaultExpanded={false} storageKey="godfin:settings:data-expanded">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>

@@ -4,8 +4,8 @@ import { motion } from 'framer-motion';
 import { format, subMonths } from 'date-fns';
 import {
   FileText, Download, ChevronLeft, ChevronRight, TrendingDown, TrendingUp,
-  PiggyBank, Hash, Sparkles, FileSpreadsheet, AlertTriangle, CheckCircle2,
-  Info, Lightbulb, CalendarRange
+  PiggyBank, Sparkles, FileSpreadsheet, AlertTriangle, CheckCircle2,
+  Info, Lightbulb, CalendarRange, ShieldCheck, Repeat2
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar,
@@ -15,7 +15,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   fetchReportSummary, fetchReportDetailed, fetchReportInsights,
-  downloadMonthlyReportPDF, downloadCSV, fetchLicenseStatus, downloadFinancialYearPack
+  downloadMonthlyReportPDF, downloadCSV, fetchLicenseStatus, downloadFinancialYearPack,
+  fetchLLMConfig,
 } from '../api/client';
 import { websiteUrl } from '../config/website';
 import { StatCard } from '../components/StatCard';
@@ -140,12 +141,18 @@ export default function Reports() {
     queryFn: fetchLicenseStatus,
     staleTime: 5 * 60 * 1000,
   });
+  const { data: llmConfig, isLoading: llmLoading } = useQuery({
+    queryKey: ['llmConfig'],
+    queryFn: fetchLLMConfig,
+    staleTime: 60 * 1000,
+  });
   const insightsEnabled = license?.features?.includes('advanced_reports') === true;
+  const llmConnected = Boolean(llmConfig?.is_active);
   const { data: insightsData, isLoading: insightsLoading } = useQuery({
     queryKey: ['reportInsights', month],
     queryFn: () => fetchReportInsights(month),
     staleTime: 5 * 60 * 1000,
-    enabled: insightsEnabled,
+    enabled: insightsEnabled && llmConnected,
   });
 
   const insights = insightsData?.insights;
@@ -186,12 +193,37 @@ export default function Reports() {
         </div>
       ) : (
         <>
+      <section className="mb-6 grid gap-4 rounded-[24px] border border-white/[0.14] bg-gradient-to-br from-white/[0.09] to-white/[0.045] p-5 md:grid-cols-[1fr_auto] md:items-center">
+        <div>
+          <p className="text-[#54E1D0]/60 text-[0.66rem] uppercase tracking-[0.16em]">Your financial report</p>
+          <h2 className="mt-2 text-white/90 text-2xl font-light">{monthLabel}</h2>
+          <p className="mt-2 max-w-xl text-white/35 text-sm">
+            Here is how your recorded money moved this month. Every total below comes from included transactions.
+          </p>
+        </div>
+        <div className="min-w-[230px] rounded-2xl border border-white/[0.1] bg-black/10 p-4">
+          <div className="flex items-center gap-3">
+            <div className="grid h-14 w-14 place-items-center rounded-full border-[5px] border-[#17C3B2]/45 bg-[#17C3B2]/[0.08] text-white/85">
+              <ShieldCheck size={22} />
+            </div>
+            <div>
+              <p className="text-white/35 text-[0.68rem]">Monthly money picture</p>
+              <p className="mt-0.5 text-2xl font-light text-[#54E1D0]">
+                {summary?.financial_health_score ?? '--'}<span className="text-xs text-white/25">/100</span>
+              </p>
+              <p className="text-white/45 text-xs">{summary?.financial_health_label}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-white/22 text-[0.62rem] leading-relaxed">{summary?.financial_health_caveat}</p>
+        </div>
+      </section>
+
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatCard title="Total Spend" value={summaryLoading ? '--' : formatINR(summary?.total_spend)} icon={TrendingDown} color="text-rose-400" delay={0} />
-        <StatCard title="Income" value={summaryLoading ? '--' : formatINR(summary?.total_income)} icon={TrendingUp} color="text-emerald-400" delay={0.05} />
-        <StatCard title="Savings Rate" value={summaryLoading ? '--' : summary?.savings_rate != null ? `${summary.savings_rate.toFixed(1)}%` : '--'} icon={PiggyBank} color={summary?.savings_rate > 20 ? 'text-emerald-400' : 'text-amber-400'} delay={0.1} />
-        <StatCard title="Transactions" value={summaryLoading ? '--' : summary?.transaction_count ?? 0} icon={Hash} color="text-blue-400" delay={0.15} />
+        <StatCard title="Money in" value={summaryLoading ? '--' : formatINR(summary?.total_income)} icon={TrendingUp} color="text-emerald-400" delay={0} />
+        <StatCard title="Money out" value={summaryLoading ? '--' : formatINR(summary?.total_spend)} icon={TrendingDown} color="text-rose-400" delay={0.05} />
+        <StatCard title="Money left" value={summaryLoading ? '--' : formatINR((summary?.total_income || 0) - (summary?.total_spend || 0))} icon={PiggyBank} color={(summary?.total_income || 0) >= (summary?.total_spend || 0) ? 'text-emerald-400' : 'text-rose-400'} delay={0.1} />
+        <StatCard title="Regular monthly costs" value={summaryLoading ? '--' : formatINR(summary?.recurring_total)} icon={Repeat2} color="text-violet-300" delay={0.15} />
       </div>
 
       {/* AI Financial Insights */}
@@ -205,7 +237,9 @@ export default function Reports() {
           </h2>
           {insights?.source && (
             <span className={`text-[0.6rem] px-1.5 py-0.5 rounded border ${insights.source === 'llm' ? 'bg-emerald-400/10 text-emerald-300 border-emerald-400/20' : 'bg-white/5 text-white/30 border-white/10'}`}>
-              {insights.source === 'llm' ? 'AI-Powered' : 'Heuristic'}
+              {insights.source === 'llm'
+                ? `${insightsData?.llm?.provider || 'AI'} · ${insightsData?.llm?.model || 'connected model'}`
+                : 'Verified data notes'}
             </span>
           )}
         </div>
@@ -228,7 +262,17 @@ export default function Reports() {
               View license options
             </a>
           </div>
-        ) : insightsLoading ? (
+        ) : !llmLoading && !llmConnected ? (
+          <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] p-5 text-center">
+            <p className="text-white/60 text-sm">Connect an AI to create the detailed written analysis.</p>
+            <p className="mx-auto mt-1 max-w-xl text-white/30 text-xs">
+              GODFIN gives the AI a verified monthly summary. The AI adds explanations and suggestions; it never changes the totals.
+            </p>
+            <a href="/settings" className="inline-flex mt-3 text-xs text-[#54E1D0]/80 hover:text-[#54E1D0]">
+              Open AI settings
+            </a>
+          </div>
+        ) : insightsLoading || llmLoading ? (
           <div className="space-y-3">
             <div className="h-4 bg-white/5 rounded animate-pulse w-3/4" />
             <div className="h-4 bg-white/5 rounded animate-pulse w-1/2" />
@@ -368,6 +412,53 @@ export default function Reports() {
         </motion.div>
       </div>
 
+      <div className="grid md:grid-cols-2 gap-4 mb-6">
+        <section className="rounded-[20px] border border-white/[0.14] bg-white/[0.06] p-5">
+          <h2 className="text-white/55 text-sm font-medium">Where your income came from</h2>
+          {!detailed?.income_breakdown?.length ? (
+            <p className="py-8 text-center text-sm text-white/25">No income sources recorded for this month.</p>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {detailed.income_breakdown.slice(0, 7).map((item, index) => {
+                const percentage = summary?.total_income > 0 ? (item.amount / summary.total_income) * 100 : 0;
+                return (
+                  <div key={`${item.source}-${index}`}>
+                    <div className="flex items-center justify-between gap-3 text-xs">
+                      <span className="truncate text-white/45">{item.source}</span>
+                      <span className="text-white/65 tabular-nums">{formatINR(item.amount)} · {percentage.toFixed(1)}%</span>
+                    </div>
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                      <div className="h-full rounded-full bg-gradient-to-r from-emerald-400/65 to-[#54E1D0]/65" style={{ width: `${Math.min(100, percentage)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+        <section className="rounded-[20px] border border-white/[0.14] bg-white/[0.06] p-5">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-white/55 text-sm font-medium">Regular payments</h2>
+            <span className="text-white/45 text-xs">{formatINR(summary?.recurring_total || 0)} / month</span>
+          </div>
+          {!detailed?.recurring_list?.length ? (
+            <p className="py-8 text-center text-sm text-white/25">No confirmed repeating payments for this month.</p>
+          ) : (
+            <div className="mt-4 divide-y divide-white/[0.06]">
+              {detailed.recurring_list.slice(0, 7).map((item, index) => (
+                <div key={`${item.merchant}-${index}`} className="flex items-center justify-between gap-3 py-2.5 text-xs">
+                  <div className="min-w-0">
+                    <p className="truncate text-white/55">{item.merchant || 'Unknown payment'}</p>
+                    <p className="mt-0.5 text-white/22">{item.category || 'Uncategorised'} · {item.frequency}</p>
+                  </div>
+                  <span className="shrink-0 text-white/65 tabular-nums">{formatINR(item.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
       {/* Elasticity + Top Merchants */}
       <div className="grid md:grid-cols-2 gap-4 mb-6">
         {/* Spending by Type */}
@@ -445,9 +536,22 @@ export default function Reports() {
         </h2>
         <div className="flex flex-wrap gap-3">
           <GlassButton icon={<Download size={14} />} onClick={() => downloadMonthlyReportPDF('summary', month)}>Summary PDF</GlassButton>
-          <GlassButton variant="secondary" icon={<Download size={14} />} onClick={() => downloadMonthlyReportPDF('detailed', month)}>Detailed PDF</GlassButton>
+          <GlassButton
+            variant="secondary"
+            icon={<Download size={14} />}
+            onClick={() => downloadMonthlyReportPDF('detailed', month)}
+            disabled={!llmConnected}
+            title={llmConnected ? 'Download the report with connected-AI commentary' : 'Connect an AI in Settings first'}
+          >
+            Detailed AI PDF
+          </GlassButton>
           <GlassButton variant="secondary" icon={<FileSpreadsheet size={14} />} onClick={() => downloadCSV(month)}>Export CSV</GlassButton>
         </div>
+        {!llmConnected && !llmLoading && (
+          <p className="mt-2 text-amber-200/45 text-xs">
+            Connect an AI in Settings to create the detailed report. Summary PDF and data exports remain available.
+          </p>
+        )}
         <div className="mt-5 pt-5 border-t border-white/[0.07]">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>

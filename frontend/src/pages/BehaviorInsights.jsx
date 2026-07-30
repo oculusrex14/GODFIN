@@ -5,6 +5,8 @@ import {
   Eye,
   EyeOff,
   Gauge,
+  Heart,
+  Lightbulb,
   RotateCcw,
   Save,
   ShieldCheck,
@@ -74,10 +76,10 @@ export default function BehaviorInsights() {
       <div>
         <div className="flex items-center gap-2">
           <Sparkles size={18} className="text-cyan-200/55" />
-          <h1 className="text-white/90 text-[1.6rem] font-light">Financial Behavior Insights</h1>
+          <h1 className="text-white/90 text-[1.6rem] font-light">Your Money Habits</h1>
         </div>
         <p className="mt-1 text-white/30 text-sm">
-          Descriptive local calculations—not a psychological diagnosis or risk score
+          Gentle observations to help you notice patterns—not a judgment, diagnosis, or risk score
         </p>
       </div>
 
@@ -86,9 +88,9 @@ export default function BehaviorInsights() {
           <Gauge className="mx-auto text-violet-200/45" size={34} />
           <h2 className="mt-3 text-white/75">Available with GODFIN Max</h2>
           <p className="mx-auto mt-2 max-w-xl text-sm text-white/35">
-            Seven deterministic metrics show their formula, inputs, evidence
-            window, confidence, provenance, and caveats. You can correct, hide,
-            reset, or export every result.
+            Plain-language observations and seven optional deeper measures show
+            where every result came from. You can add context, hide, reset, or
+            export each result.
           </p>
         </div>
       ) : (
@@ -99,6 +101,32 @@ export default function BehaviorInsights() {
               <p className="text-emerald-50/50 text-xs leading-relaxed">{data?.policy}</p>
             </div>
           </div>
+
+          <section>
+            <div className="mb-3 flex items-center gap-2">
+              <Heart size={16} className="text-rose-200/55" />
+              <div>
+                <h2 className="text-white/80 text-lg font-light">Things worth reflecting on</h2>
+                <p className="mt-0.5 text-white/28 text-xs">Read the observation, then decide whether it feels true for your life.</p>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {data?.reflections?.map((reflection) => (
+                <article key={reflection.key} className="rounded-[18px] border border-[#54E1D0]/[0.13] bg-[#17C3B2]/[0.035] p-4">
+                  <h3 className="text-white/78 text-sm font-medium">{reflection.title}</h3>
+                  <p className="mt-2 text-white/48 text-sm leading-relaxed">{reflection.observation}</p>
+                  <div className="mt-4 rounded-xl border border-white/[0.07] bg-black/10 p-3">
+                    <p className="flex items-start gap-2 text-white/55 text-xs leading-relaxed">
+                      <Lightbulb size={14} className="mt-0.5 shrink-0 text-[#A6E22E]/70" />
+                      {reflection.question}
+                    </p>
+                    <p className="mt-2 pl-[22px] text-white/30 text-[0.7rem] leading-relaxed">{reflection.action}</p>
+                  </div>
+                  <p className="mt-3 text-white/22 text-[0.63rem]">{reflection.evidence} · {reflection.confidence} confidence</p>
+                </article>
+              ))}
+            </div>
+          </section>
 
           <div className="flex flex-col sm:flex-row gap-2">
             <input
@@ -125,6 +153,11 @@ export default function BehaviorInsights() {
             </GlassButton>
           </div>
 
+          <section>
+            <div className="mb-3">
+              <h2 className="text-white/70 text-lg font-light">The numbers behind your habits</h2>
+              <p className="mt-1 text-white/25 text-xs">The simplest measures come first. Open the information bubble only when you want the full calculation.</p>
+            </div>
           <div className="grid md:grid-cols-2 gap-4">
             {data?.metrics?.map(metric => (
               <article
@@ -150,7 +183,7 @@ export default function BehaviorInsights() {
                       />
                     </div>
                     <p className="mt-1 text-white/25 text-[0.68rem]">
-                      Confidence: {metric.confidence} · {metric.evidence}
+                      {metric.difficulty === 'easy' ? 'Easy to read' : metric.difficulty === 'intermediate' ? 'A little more detail' : 'Deeper measure'} · {metric.confidence} confidence
                     </p>
                   </div>
                   <button
@@ -188,6 +221,7 @@ export default function BehaviorInsights() {
               </article>
             ))}
           </div>
+          </section>
         </>
       )}
 

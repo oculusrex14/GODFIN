@@ -5,7 +5,7 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,7 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.gmail_service import (
     gmail_service, disconnect_gmail, is_connected, handle_manual_oauth_code,
-    CLIENT_SECRETS_FILE
+    client_config_available,
 )
 from app.core.ingestion import (
     get_ingestion_history, run_ingestion, run_ingestion_with_dates,
@@ -59,14 +59,15 @@ def get_gmail_auth_url(
                  allow private IP redirect URIs.
     """
     try:
-        from app.core.gmail_service import CLIENT_SECRETS_FILE
-
         logger.info(f"Gmail auth URL requested, use_oob={use_oob}")
 
-        if not CLIENT_SECRETS_FILE.exists():
+        if not client_config_available():
             raise HTTPException(
-                status_code=400,
-                detail="Gmail client_secret.json not found in data/ directory",
+                status_code=503,
+                detail=(
+                    "Gmail connection is not configured for this GODFIN build yet. "
+                    "The app owner must add the dedicated desktop Google connection."
+                ),
             )
 
         # Check if ngrok is running
@@ -96,13 +97,6 @@ def get_gmail_auth_url(
             redirect_uri = f"{backend_url}/api/v1/auth/gmail/callback"
             auth_url = gmail_service.get_auth_url(redirect_uri=redirect_uri)
             logger.info(f"Using standard redirect flow: {redirect_uri}")
-
-            # Append frontend_url for callback redirect
-            if auth_url:
-                if "?" in auth_url:
-                    auth_url = f"{auth_url}&frontend_url={frontend_url}"
-                else:
-                    auth_url = f"{auth_url}?frontend_url={frontend_url}"
 
             return {"auth_url": auth_url, "flow": "redirect"}
 
@@ -148,9 +142,15 @@ def gmail_oauth_callback(
         frontend_url = "http://localhost:5200"
 
     if error:
-        return RedirectResponse(
-            url=f"{frontend_url}/settings?gmail_error={error}",
-            status_code=302,
+        return HTMLResponse(
+            content=(
+                "<!doctype html><title>GODFIN Gmail connection</title>"
+                "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
+                "<h1>Gmail was not connected</h1>"
+                "<p>Return to GODFIN and try again when you are ready. "
+                "No email was imported.</p></main>"
+            ),
+            status_code=400,
         )
 
     if not code:
@@ -165,20 +165,35 @@ def gmail_oauth_callback(
         success = gmail_service.complete_auth(code, redirect_uri=redirect_uri)
 
         if success:
-            return RedirectResponse(
-                url=f"{frontend_url}/settings?gmail_connected=true",
-                status_code=302,
+            return HTMLResponse(
+                content=(
+                    "<!doctype html><title>GODFIN Gmail connected</title>"
+                    "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
+                    "<h1>Gmail is connected</h1>"
+                    "<p>You can close this tab and return to GODFIN. "
+                    "The app will notice the connection automatically.</p>"
+                    "<script>setTimeout(function(){window.close()},1500)</script></main>"
+                )
             )
-        else:
-            return RedirectResponse(
-                url=f"{frontend_url}/settings?gmail_error=auth_failed",
-                status_code=302,
-            )
+        return HTMLResponse(
+            content=(
+                "<!doctype html><title>GODFIN Gmail connection</title>"
+                "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
+                "<h1>Gmail could not be connected</h1>"
+                "<p>Return to GODFIN and try again. No email was imported.</p></main>"
+            ),
+            status_code=400,
+        )
     except Exception as e:
         logger.error(f"OAuth callback error: {e}")
-        return RedirectResponse(
-            url=f"{frontend_url}/settings?gmail_error={str(e)}",
-            status_code=302,
+        return HTMLResponse(
+            content=(
+                "<!doctype html><title>GODFIN Gmail connection</title>"
+                "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
+                "<h1>Gmail could not be connected</h1>"
+                "<p>Return to GODFIN and try again. No email was imported.</p></main>"
+            ),
+            status_code=400,
         )
 
 

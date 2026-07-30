@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date
 
@@ -13,6 +14,7 @@ from app.core.reporting import (
     prepare_summary_report,
 )
 from app.models.transaction import Transaction
+from app.models.llm_config import LLMConfiguration
 from app.seed import SAVINGS_ACCOUNT_ID
 
 
@@ -35,6 +37,37 @@ def _add_txn(db, merchant, amount, txn_date, category=None, txn_type='debit'):
     return txn
 
 
+def _activate_test_llm(db):
+    db.add(
+        LLMConfiguration(
+            provider="ollama_local",
+            auth_method="none",
+            model="qwen-test",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+        )
+    )
+    db.commit()
+
+
+def _valid_llm_report():
+    return json.dumps(
+        {
+            "executive_summary": "Recorded income covered recorded spending.",
+            "sections": [
+                {
+                    "title": "Spending Breakdown",
+                    "tone": "neutral",
+                    "icon": "pie",
+                    "content": "Recorded spending was reviewed by category.",
+                }
+            ],
+            "highlights": [],
+            "recommendations": ["Review the largest flexible category."],
+        }
+    )
+
+
 # --- Summary Report ---
 
 def test_summary_report_empty(db_session):
@@ -43,6 +76,7 @@ def test_summary_report_empty(db_session):
     assert data['total_income'] == 0
     assert data['transaction_count'] == 0
     assert data['top_categories'] == []
+    assert data['financial_health_score'] is None
 
 
 def test_summary_report_with_data(db_session):
@@ -59,6 +93,8 @@ def test_summary_report_with_data(db_session):
     assert data['transaction_count'] == 3
     assert len(data['top_categories']) == 3
     assert data['top_categories'][0]['category'] == 'HOUSING'
+    assert 0 <= data['financial_health_score'] <= 100
+    assert data['financial_health_caveat']
 
 
 # --- Detailed Report ---
@@ -76,6 +112,7 @@ def test_detailed_report_with_data(db_session):
     assert data['top_merchants'][0]['merchant'] == 'RENT'  # Highest spend
     assert 'daily_spending' in data
     assert 'category_comparison' in data
+    assert data['income_breakdown'][0]['source'] == 'SALARY'
 
 
 # --- Chart Generation ---
@@ -186,7 +223,45 @@ def test_detailed_endpoint(auth_client):
     assert 'category_comparison' in data
 
 
-def test_insights_endpoint(auth_client, db_session):
+def test_insights_endpoint(auth_client, db_session, monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.models.app_setting import AppSetting
+
+    for key, value in {
+        "license_tier": "pro",
+        "license_status": "active",
+        "license_verified_at": datetime.now(UTC).isoformat(),
+    }.items():
+        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    db_session.commit()
+    _activate_test_llm(db_session)
+    _add_txn(
+        db_session,
+        "SALARY",
+        75000,
+        date(2025, 1, 1),
+        category="INCOME",
+        txn_type="credit",
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.core.reporting.call_llm",
+        lambda *args, **kwargs: _valid_llm_report(),
+    )
+
+    resp = auth_client.get('/api/v1/reports/insights?month=2025-01')
+    assert resp.status_code == 200
+    data = resp.json()
+    assert 'month' in data
+    assert 'insights' in data
+    assert 'executive_summary' in data['insights']
+    assert 'sections' in data['insights']
+    assert data['insights']['source'] == 'llm'
+    assert data['llm']['model'] == 'qwen-test'
+
+
+def test_detailed_reports_require_connected_ai(auth_client, db_session):
     from datetime import UTC, datetime
 
     from app.models.app_setting import AppSetting
@@ -199,13 +274,46 @@ def test_insights_endpoint(auth_client, db_session):
         db_session.query(AppSetting).filter_by(key=key).one().value = value
     db_session.commit()
 
-    resp = auth_client.get('/api/v1/reports/insights?month=2025-01')
-    assert resp.status_code == 200
-    data = resp.json()
-    assert 'month' in data
-    assert 'insights' in data
-    assert 'executive_summary' in data['insights']
-    assert 'sections' in data['insights']
+    insights = auth_client.get('/api/v1/reports/insights?month=2025-01')
+    detailed_pdf = auth_client.get('/api/v1/reports/pdf/detailed?month=2025-01')
+    assert insights.status_code == 409
+    assert detailed_pdf.status_code == 409
+    assert "Connect an AI" in insights.json()["detail"]
+
+
+def test_detailed_reports_never_mislabel_a_rules_fallback_as_ai(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    from datetime import UTC, datetime
+
+    from app.models.app_setting import AppSetting
+
+    for key, value in {
+        "license_tier": "pro",
+        "license_status": "active",
+        "license_verified_at": datetime.now(UTC).isoformat(),
+    }.items():
+        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    _activate_test_llm(db_session)
+    _add_txn(
+        db_session,
+        "SALARY",
+        75000,
+        date(2025, 1, 1),
+        category="INCOME",
+        txn_type="credit",
+    )
+    db_session.commit()
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("model is offline")
+
+    monkeypatch.setattr("app.core.reporting.call_llm", unavailable)
+    response = auth_client.get('/api/v1/reports/insights?month=2025-01')
+    assert response.status_code == 502
+    assert "did not return a usable report" in response.json()["detail"]
 
 
 def test_summary_pdf_endpoint(auth_client):
@@ -217,7 +325,31 @@ def test_summary_pdf_endpoint(auth_client):
     assert resp.content[:5] == b'%PDF-'
 
 
-def test_detailed_pdf_endpoint(auth_client):
+def test_detailed_pdf_endpoint(auth_client, db_session, monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.models.app_setting import AppSetting
+
+    for key, value in {
+        "license_tier": "pro",
+        "license_status": "active",
+        "license_verified_at": datetime.now(UTC).isoformat(),
+    }.items():
+        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    _activate_test_llm(db_session)
+    _add_txn(
+        db_session,
+        "SALARY",
+        75000,
+        date(2025, 1, 1),
+        category="INCOME",
+        txn_type="credit",
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.core.reporting.call_llm",
+        lambda *args, **kwargs: _valid_llm_report(),
+    )
     resp = auth_client.get('/api/v1/reports/pdf/detailed?month=2025-01')
     assert resp.status_code == 200
     assert resp.headers['content-type'] == 'application/pdf'

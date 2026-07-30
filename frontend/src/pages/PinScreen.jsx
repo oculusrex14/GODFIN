@@ -4,6 +4,7 @@ import { ShieldCheck, ShieldAlert } from 'lucide-react';
 import PinInput from '../components/PinInput';
 import { useAuth } from '../context/AuthContext';
 import { fetchHealth, setPin, verifyPin } from '../api/client';
+import GodfinBrand from '../components/GodfinBrand';
 
 export default function PinScreen() {
   const { isFirstRun, pinLength, handleAuth } = useAuth();
@@ -89,8 +90,7 @@ export default function PinScreen() {
       >
         <div className="text-center mb-10">
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-            <h1 className="text-white/90 text-[2.2rem] tracking-[-0.06em]" style={{ fontWeight: 300 }}>GODFIN</h1>
-            <p className="text-white/25 text-[0.65rem] tracking-[0.2em] uppercase">Personal Finance</p>
+            <GodfinBrand className="justify-center" />
           </motion.div>
         </div>
 

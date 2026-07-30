@@ -66,6 +66,11 @@ def _load_client_config() -> dict:
     return None
 
 
+def client_config_available() -> bool:
+    """Return whether this build has a desktop Gmail connection configured."""
+    return _load_client_config() is not None
+
+
 class GmailService:
     """Manages Gmail API connection and OAuth flow state."""
 
