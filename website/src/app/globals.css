@@ -5,10 +5,10 @@
   --paper: #f5f7f3;
   --paper-2: #e9efe9;
   --teal: #00a98f;
-  --teal-dark: #087b6d;
+  --teal-dark: #067064;
   --lime: #c9f36b;
   --amber: #ffca65;
-  --muted: #667987;
+  --muted: #5a6b78;
   --line: rgba(8, 35, 52, 0.13);
   --white-line: rgba(255, 255, 255, 0.14);
   --shadow: 0 24px 80px rgba(4, 22, 37, 0.12);
@@ -674,7 +674,7 @@ p {
 
 .footer-copy {
   max-width: 320px;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.68);
   line-height: 1.7;
 }
 
@@ -682,7 +682,7 @@ p {
   display: grid;
   align-content: start;
   gap: 10px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.68);
   font-size: 14px;
 }
 
@@ -695,7 +695,7 @@ p {
   margin-top: 46px;
   padding-top: 22px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.34);
+  color: rgba(255, 255, 255, 0.62);
   font-size: 12px;
 }
 
