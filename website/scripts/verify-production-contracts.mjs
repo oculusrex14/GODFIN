@@ -53,6 +53,13 @@ assert.match(migration, /v_activation_count >= p_activation_limit/);
 assert.match(migration, /deactivated_at is null/);
 assert.match(migration, /waitlist_entries/);
 
+const ownerLicenseMigration = await text(
+  "supabase/migrations/0003_owner_test_licenses.sql",
+);
+assert.match(ownerLicenseMigration, /kind in \('purchase', 'owner_test'\)/);
+assert.match(ownerLicenseMigration, /where kind = 'owner_test' and status = 'active'/);
+assert.doesNotMatch(ownerLicenseMigration, /insert into public\.purchases/i);
+
 const envExample = await text(".env.example");
 for (const name of [
   "STRIPE_PRICE_PRO_US",

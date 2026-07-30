@@ -26,12 +26,21 @@ export async function POST(request: Request) {
     const admin = createAdminClient();
     const { data: license } = await admin
       .from("licenses")
-      .select("id,tier,user_id")
+      .select("id,tier,user_id,kind")
       .eq("id", body.license_id)
       .eq("user_id", user.id)
       .maybeSingle();
     if (!license) {
       return NextResponse.json({ message: "License not found." }, { status: 404 });
+    }
+    if (license.kind === "owner_test") {
+      return NextResponse.json(
+        {
+          message:
+            "Owner-test licenses are installed directly and are not sent by email.",
+        },
+        { status: 409 },
+      );
     }
     const { data: purchase } = await admin
       .from("purchases")

@@ -41,6 +41,7 @@ export default async function AccountPage({
     id: string;
     tier: string;
     key_last4: string;
+    kind: "purchase" | "owner_test";
     status: string;
     issued_at: string;
   }> = [];
@@ -67,7 +68,7 @@ export default async function AccountPage({
     const [licenseResult, purchaseResult, creditResult, activationResult] = await Promise.all([
       supabase
         .from("licenses")
-        .select("id,tier,key_last4,status,issued_at")
+        .select("id,tier,key_last4,kind,status,issued_at")
         .order("issued_at", { ascending: false }),
       supabase
         .from("purchases")
@@ -191,6 +192,14 @@ export default async function AccountPage({
                     licenses.map((license) => (
                       <div key={license.id} style={{ marginTop: 20 }}>
                         <span className="status-pill">{license.status}</span>
+                        {license.kind === "owner_test" ? (
+                          <span
+                            className="status-pill"
+                            style={{ marginLeft: 8 }}
+                          >
+                            Owner test · no purchase
+                          </span>
+                        ) : null}
                         <h3 style={{ textTransform: "capitalize" }}>
                           GODFIN {license.tier}
                         </h3>
@@ -198,7 +207,14 @@ export default async function AccountPage({
                           GODFIN-{license.tier.toUpperCase()}-••••-••••-
                           {license.key_last4}
                         </p>
-                        <ResendLicenseButton licenseId={license.id} />
+                        {license.kind === "purchase" ? (
+                          <ResendLicenseButton licenseId={license.id} />
+                        ) : (
+                          <p style={{ color: "var(--muted)", fontSize: 13 }}>
+                            Private test entitlement. Uses the same three-device
+                            verification and deactivation controls as paid licenses.
+                          </p>
+                        )}
                       </div>
                     ))
                   ) : (

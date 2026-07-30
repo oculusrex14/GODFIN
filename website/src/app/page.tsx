@@ -3,18 +3,25 @@ import {
   BadgeIndianRupee,
   Check,
   Database,
+  FileArchive,
   FileChartColumn,
   FolderLock,
+  HardDrive,
   Laptop,
+  ListChecks,
+  Repeat2,
   ShieldCheck,
   Sparkles,
+  Target,
   WifiOff,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { ProductDemoVideo } from "@/components/product-demo-video";
 import { WaitlistForm } from "@/components/waitlist-form";
+import { ENTITLEMENTS } from "@/lib/entitlements";
 
 const features = [
   {
@@ -48,6 +55,90 @@ const features = [
     body: "Core is free forever. Pro and Max are one-time purchases—there is no software subscription waiting to compound.",
   },
 ];
+
+const productChapters = [
+  {
+    feature: "deterministic_classification",
+    icon: ListChecks,
+    eyebrow: "02 · Classification memory",
+    title: "Correct it once. See why it was classified next time.",
+    body: "Confirmed corrections build local merchant and transaction-pattern memory. GODFIN shows the source behind each choice, and finalized months remain untouched.",
+    bullets: [
+      "Exact merchant memory has priority",
+      "Learning uses explicit corrections only",
+      "Inspect, undo, export, or reset what was learned",
+    ],
+    image: "/screenshots/classification.png",
+    alt: "GODFIN transaction list showing synthetic merchants, categories, and classification reasons",
+  },
+  {
+    feature: "goal_contribution_ledger",
+    icon: Target,
+    eyebrow: "03 · Goals",
+    title: "A savings goal with a history—not a mystery number.",
+    body: "Start with what you have already saved, add deposits or withdrawals, and keep an auditable contribution ledger. Pro and Max can surface FD or RD candidates for confirmation.",
+    bullets: [
+      "Opening balance and future updates stay traceable",
+      "Simulation discloses its formula, capacity, and data coverage",
+      "Detected deposits never change a goal without confirmation",
+    ],
+    image: "/screenshots/goals.png",
+    alt: "GODFIN goals screen with two synthetic goals, progress bars, and a deposit review indicator",
+  },
+  {
+    feature: "recurring_detection",
+    icon: Repeat2,
+    eyebrow: "04 · Recurring review",
+    title: "Recurring does not mean guessed.",
+    body: "Calendar-aware detection looks for repeated evidence, amount variability, and merchant-account consistency. Review candidates before turning them into tracked subscriptions.",
+    bullets: [
+      "Monthly, quarterly, and annual patterns",
+      "Transfers, reversals, and stale patterns are excluded",
+      "Re-detect reports what was created, updated, or retired",
+    ],
+    image: "/screenshots/recurring.png",
+    alt: "GODFIN subscriptions screen with synthetic recurring costs and a confirmation candidate",
+  },
+  {
+    feature: "ca_tax_pack",
+    icon: FileArchive,
+    eyebrow: "05 · CA tax pack",
+    title: "Hand over evidence, warnings, and filing context together.",
+    body: "The paid CA export is one review-oriented ZIP: a multi-sheet XLSX, raw CSV, reconciliation JSON, manifest hashes, and an AY 2026–27 filing guide.",
+    bullets: [
+      "Flags unclassified, low-confidence, duplicate, and incomplete data",
+      "Includes masked accounts and transfer/reversal review sheets",
+      "Never claims transaction data alone is filing-ready",
+    ],
+    image: "/screenshots/ca-tax-pack.png",
+    alt: "GODFIN reports screen showing the Export for CA tax-pack control and synthetic charts",
+  },
+  {
+    feature: "local_sqlite",
+    icon: HardDrive,
+    eyebrow: "06 · Local boundary",
+    title: "Your finance database stays on your computer.",
+    body: "Statements, transaction history, category memory, goals, and reports remain in local SQLite. The website handles accounts, purchases, licenses, downloads, and optional credit balances.",
+    bullets: [
+      "No remote app database",
+      "Local backups under your control",
+      "AI is optional: local, bring-your-own provider, or none",
+    ],
+    image: "/screenshots/tutorial.png",
+    alt: "GODFIN beginner tutorial explaining the app's local privacy boundary",
+  },
+];
+
+for (const feature of [
+  "manual_import",
+  ...productChapters.map((chapter) => chapter.feature),
+]) {
+  if (ENTITLEMENTS.features[feature]?.status !== "released") {
+    throw new Error(
+      `Homepage product chapter references unreleased feature: ${feature}`,
+    );
+  }
+}
 
 export default function HomePage() {
   const waitlistEnabled = Boolean(process.env.RESEND_API_KEY);
@@ -127,41 +218,96 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section section-soft">
+      <section className="section product-tour" id="product-tour">
         <div className="shell">
-          <div className="section-head">
+          <div className="section-head center">
             <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
-              Real product, real screens
+              A complete local workflow
             </div>
-            <h2>See where the numbers came from—and learn at your pace.</h2>
+            <h2>Follow the work, from statement to reviewed evidence.</h2>
             <p>
-              These screens were captured from GODFIN using privacy-safe
-              synthetic transactions. They are not generated product mockups.
+              Every demonstration below was captured from the working app with
+              privacy-safe synthetic data. No generated UI art, hidden cloud
+              ledger, or unshipped promise.
             </p>
           </div>
-          <div className="screenshot-grid">
-            <figure className="screenshot-card">
-              <Image
-                src="/screenshots/transactions.png"
-                width={1244}
-                height={716}
-                alt="GODFIN transaction list showing merchant, category, amount, and why each classification was chosen"
-              />
-              <figcaption>
-                Searchable transactions with visible classification provenance.
-              </figcaption>
-            </figure>
-            <figure className="screenshot-card">
-              <Image
-                src="/screenshots/tutorial.png"
-                width={1244}
-                height={716}
-                alt="GODFIN beginner tutorial with ten local-first finance lessons"
-              />
-              <figcaption>
-                A resumable ten-lesson guide made for finance beginners.
-              </figcaption>
-            </figure>
+
+          <div className="product-chapters">
+            <article className="product-chapter">
+              <div className="product-copy">
+                <div className="chapter-icon">
+                  <Database size={20} />
+                </div>
+                <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+                  01 · Statement import
+                </div>
+                <h3>Review the bank file before it becomes your ledger.</h3>
+                <p>
+                  HDFC PDF and Excel imports preview, reconcile, and surface
+                  exceptions before committing rows. OpenDataLoader remains
+                  benchmark-only until it proves a material accuracy gain.
+                </p>
+                <ul className="chapter-list">
+                  <li>Preview and reconcile before import</li>
+                  <li>Duplicate and account-routing checks</li>
+                  <li>Deterministic classification works without AI</li>
+                </ul>
+              </div>
+              <figure className="product-demo">
+                <ProductDemoVideo />
+                <figcaption>
+                  12-second capture from the seeded desktop app. Motion is
+                  replaced with a still image when reduced motion is enabled.
+                </figcaption>
+              </figure>
+            </article>
+
+            {productChapters.map(
+              (
+                {
+                  icon: Icon,
+                  eyebrow,
+                  title,
+                  body,
+                  bullets,
+                  image,
+                  alt,
+                },
+                index,
+              ) => (
+                <article
+                  className={`product-chapter ${
+                    index % 2 === 0 ? "product-chapter-reverse" : ""
+                  }`}
+                  key={title}
+                >
+                  <div className="product-copy">
+                    <div className="chapter-icon">
+                      <Icon size={20} />
+                    </div>
+                    <div
+                      className="eyebrow"
+                      style={{ color: "var(--teal-dark)" }}
+                    >
+                      {eyebrow}
+                    </div>
+                    <h3>{title}</h3>
+                    <p>{body}</p>
+                    <ul className="chapter-list">
+                      {bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <figure className="product-demo">
+                    <Image src={image} width={1244} height={716} alt={alt} />
+                    <figcaption>
+                      Captured from the real app using synthetic data.
+                    </figcaption>
+                  </figure>
+                </article>
+              ),
+            )}
           </div>
         </div>
       </section>

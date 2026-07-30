@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-29",
+  "updated_at": "2026-07-30",
   "license_model": "lifetime",
   "included_hosted_ai_credits": 0,
   "tiers": {
@@ -16,6 +16,8 @@
         "manual_import",
         "deterministic_classification",
         "dashboard_budgets",
+        "goal_contribution_ledger",
+        "recurring_detection",
         "basic_reports",
         "csv_export"
       ]
@@ -32,12 +34,15 @@
         "manual_import",
         "deterministic_classification",
         "dashboard_budgets",
+        "goal_contribution_ledger",
+        "recurring_detection",
         "basic_reports",
         "csv_export",
         "multi_bank",
         "ai_classification",
-        "advanced_reports"
-        ,"fd_rd_goal_detection"
+        "advanced_reports",
+        "ca_tax_pack",
+        "fd_rd_goal_detection"
       ]
     },
     "max": {
@@ -52,11 +57,14 @@
         "manual_import",
         "deterministic_classification",
         "dashboard_budgets",
+        "goal_contribution_ledger",
+        "recurring_detection",
         "basic_reports",
         "csv_export",
         "multi_bank",
         "ai_classification",
         "advanced_reports",
+        "ca_tax_pack",
         "fd_rd_goal_detection",
         "personal_classifier",
         "net_worth",
@@ -85,6 +93,16 @@
       "label": "Dashboard and budgets",
       "description": "Track spending, income, savings, and budget pressure from local calculations."
     },
+    "goal_contribution_ledger": {
+      "status": "released",
+      "label": "Auditable goal contributions",
+      "description": "Track opening balances, deposits, withdrawals, and voided entries without silently deleting history."
+    },
+    "recurring_detection": {
+      "status": "released",
+      "label": "Recurring payment review",
+      "description": "Detect calendar-aware recurring patterns, review subscription candidates, and retire unsupported patterns."
+    },
     "basic_reports": {
       "status": "released",
       "label": "Local reports",
@@ -109,6 +127,11 @@
       "status": "released",
       "label": "Advanced reports and explanations",
       "description": "Unlock advanced locally calculated reports and optional explanatory assistance."
+    },
+    "ca_tax_pack": {
+      "status": "released",
+      "label": "CA tax pack",
+      "description": "Export a review-oriented ZIP with XLSX, CSV, reconciliation JSON, manifest hashes, and a versioned filing guide."
     },
     "fd_rd_goal_detection": {
       "status": "released",
