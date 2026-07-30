@@ -183,13 +183,13 @@ def configure_styles(document: Document) -> None:
     styles = document.styles
     normal = styles["Normal"]
     normal.font.name = "Calibri"
-    normal.font.size = Pt(11)
+    normal.font.size = Pt(10.5)
     normal.font.color.rgb = RGBColor.from_string(INK)
     normal._element.rPr.rFonts.set(qn("w:ascii"), "Calibri")
     normal._element.rPr.rFonts.set(qn("w:hAnsi"), "Calibri")
     normal.paragraph_format.space_before = Pt(0)
-    normal.paragraph_format.space_after = Pt(6)
-    normal.paragraph_format.line_spacing = 1.25
+    normal.paragraph_format.space_after = Pt(4)
+    normal.paragraph_format.line_spacing = 1.15
 
     for style_name, size, color, before, after in (
         ("Heading 1", 16, BLUE, 18, 10),
@@ -257,14 +257,14 @@ def add_numbering(document: Document, *, kind: str) -> int:
     tabs = OxmlElement("w:tabs")
     tab = OxmlElement("w:tab")
     tab.set(qn("w:val"), "num")
-    tab.set(qn("w:pos"), "540")
+    tab.set(qn("w:pos"), "720")
     tabs.append(tab)
     indent = OxmlElement("w:ind")
-    indent.set(qn("w:left"), "540")
-    indent.set(qn("w:hanging"), "270")
+    indent.set(qn("w:left"), "720")
+    indent.set(qn("w:hanging"), "360")
     spacing = OxmlElement("w:spacing")
-    spacing.set(qn("w:after"), "80")
-    spacing.set(qn("w:line"), "300")
+    spacing.set(qn("w:after"), "60")
+    spacing.set(qn("w:line"), "276")
     spacing.set(qn("w:lineRule"), "auto")
     p_pr.extend([tabs, indent, spacing])
     level.append(p_pr)
@@ -401,7 +401,6 @@ def build_document() -> Document:
     decimal_num = add_numbering(document, kind="decimal")
     bullet_num = add_numbering(document, kind="bullet")
     check_num = add_numbering(document, kind="check")
-
     header = section.header.paragraphs[0]
     header.alignment = WD_ALIGN_PARAGRAPH.LEFT
     header.paragraph_format.space_after = Pt(0)
@@ -412,7 +411,7 @@ def build_document() -> Document:
         bold=True,
     )
     footer = section.footer.paragraphs[0]
-    footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
     footer.paragraph_format.space_after = Pt(0)
     set_run_font(footer.add_run("Private & confidential  •  Page "), size=9, color=MUTED)
     add_field(footer, "PAGE")
@@ -450,8 +449,8 @@ def build_document() -> Document:
     metadata.paragraph_format.space_after = Pt(42)
     set_run_font(
         metadata.add_run(
-            "Version 2.0  •  29 July 2026  •  oculusrex14/GODFIN (private)\n"
-            "Production branch: codex/godfin-production-v3"
+            "Version 2.1  •  30 July 2026  •  oculusrex14/GODFIN (private)\n"
+            "Production branch: codex/godfin-production-v4"
         ),
         size=10,
         color=MUTED,
@@ -482,43 +481,49 @@ def build_document() -> Document:
     ):
         add_list_item(document, item, decimal_num)
 
+    document.add_page_break()
     document.add_heading("Current verified state", level=1)
     add_callout(
         document,
         "ENGINEERING BASELINE",
-        "Phases 0–4 are implemented. The local baseline is 306 passing backend tests; frontend and website production builds pass; production Playwright and mobile accessibility smoke pass; the packaged macOS app meets the accepted start, memory, database-preservation, fuse, and signature-seal checks.",
+        "Production remediation through accounts, reporting, and the website product tour is implemented on the private v4 branch. The local baseline is 324 passing backend tests; frontend and website production builds pass; focused desktop and website Playwright checks pass; package privacy inspection finds no local database, statement, Gmail credential, backup, or personal account artifact.",
         tone="good",
     )
     for item in (
         "Private repository: https://github.com/oculusrex14/GODFIN",
         "Production website: https://godfin.vercel.app",
-        "Supabase project: GODFIN (ap-south-1); migrations 0001 and 0002 match local history.",
+        "Supabase project: GODFIN (ap-south-1); migrations 0001–0003 match local history. Migration 0003 adds the non-revenue owner_test license kind without weakening normal three-device enforcement.",
+        "Deprecated source is preserved only in private, read-only repository oculusrex14/GODFIN-OPUS46-ARCHIVE. Its 35-commit rewritten history and archival tag pass secret scanning; the obsolete local source/build workspace was moved to Trash while active Application Support data was preserved.",
+        "PIN access recovery, portal-positioned calculation help, collapsible App Settings, external pricing navigation, auditable goal contributions, corrected goal simulation, recurring re-detection, atomic account routing, package privacy assertions, and the AY 2026–27 CA tax pack are implemented and tested.",
+        "The website product tour uses real React application captures generated only from synthetic data, muted WebM/MP4 media with reduced-motion fallbacks, and build-time checks that prevent unreleased features from being advertised. Production deployment dpl_2dUiNiw38R9pqfsymPx7NWhpw7Ej is READY at godfin.vercel.app.",
+        "Production acceptance on 30 July 2026: website Playwright 4/4; Lighthouse performance 99, accessibility 100, SEO 100, LCP 1.73 seconds, CLS 0; required CSP, HSTS, frame, MIME, referrer, and permissions headers are present.",
         "Vercel already contains the Supabase public/server variables and LICENSE_SIGNING_SECRET. Values are encrypted and are intentionally not reproduced here.",
-        "Stripe, Resend, custom-domain, signing, R2, and clean-VM evidence are not yet complete.",
+        "Google Cloud project GODFIN Website (project ID godfin-website) is owner-controlled. Google OAuth remains pending only until the owner accepts Google’s user-data-policy acknowledgement and the final callback test passes.",
+        "Stripe KYC/prices, Resend/DNS, custom domain, Apple/Windows certificates, R2, clean-VM evidence, and public-launch authorization are not yet complete.",
         "Reward pilot, sponsor card, PPP checkout, and OpenDataLoader shipping remain safely feature-gated where applicable.",
         "Nothing in this document authorizes a public release. Phase 6 starts only after explicit written public-launch authorization.",
     ):
         add_list_item(document, item, bullet_num)
 
+    document.add_page_break()
     document.add_heading("Critical path and blockers", level=1)
     add_table(
         document,
         ["Blocker", "Why blocked", "Your intervention", "Completion evidence"],
         [
-            ["Google OAuth", "No Google web client/provider has been verified.", "Create the client and enable Google in Supabase.", "Google sign-in returns to /account."],
+            ["Google OAuth", "The dedicated Google project exists; Google requires the owner to accept its user-data-policy acknowledgement before client creation can finish.", "Review and accept the policy in the open browser, then let Codex finish client/provider setup.", "Google sign-in returns to /account with only openid/email/profile."],
             ["Stripe India", "Keys, one-time Price IDs, and webhook are absent.", "Complete KYC; create test/live products and webhook.", "Replay-safe purchase provisions once."],
             ["Resend + DNS", "No sending key/domain verification.", "Verify godfin.dev and add the production key.", "SPF, DKIM, DMARC and two inbox tests pass."],
             ["Custom domain", "No Vercel domain is attached.", "Register/control godfin.dev and connect DNS.", "HTTPS apex and redirect pass."],
             ["Signing", "No GitHub signing secrets are configured.", "Complete Apple and Windows signing enrollment.", "Notarized/signed installers verify."],
             ["R2 updates", "No release bucket or releases.godfin.dev.", "Create R2, DNS, and least-privilege secrets.", "Immutable assets and updater metadata resolve."],
             ["Clean systems", "Only local macOS packaging is evidenced.", "Provide clean supported VMs/hardware.", "Install/upgrade/recovery matrix is signed."],
-            ["Reward pilot", "No approved endpoint, privacy review, or funded payout operation.", "Keep off or complete Section 10.", "Redaction and payout audit pass."],
-            ["OpenDataLoader", "No 200–500-file redacted benchmark corpus.", "Source a lawful corpus or leave the feature off.", "Accuracy decision is documented."],
             ["Public launch", "Owner authorization has not been issued.", "Complete final gate and sign Section 16.", "Written authorization and release IDs."],
         ],
         [1500, 2100, 3000, 2760],
     )
 
+    document.add_page_break()
     document.add_heading("1. Google OAuth through Supabase", level=1)
     add_callout(
         document,
@@ -527,6 +532,12 @@ def build_document() -> Document:
         tone="info",
     )
     document.add_heading("1.1 Create the Google web client", level=2)
+    add_callout(
+        document,
+        "CURRENT EVIDENCE",
+        "Dedicated Google Cloud project: GODFIN Website; project ID: godfin-website; project number: 173410737907. Do not reuse this website client for the optional desktop Gmail integration.",
+        tone="good",
+    )
     for item in (
         "Open Google Cloud Console in the business-owned project. Enable two-factor authentication for every administrator.",
         "Configure the OAuth consent screen. Use the final seller name, support email, privacy URL, terms URL, and verified domain. Choose the appropriate external/testing status for the launch stage.",
@@ -537,6 +548,7 @@ def build_document() -> Document:
         "Copy the client ID and client secret directly from Google into the Supabase Google provider form. Do not download or commit a client-secret JSON file.",
     ):
         add_list_item(document, item, decimal_num)
+    document.add_page_break()
     document.add_heading("1.2 Configure and test Supabase", level=2)
     for item in (
         "In Supabase Authentication → URL Configuration, set Site URL to https://godfin.vercel.app until the custom domain is live.",
@@ -555,7 +567,7 @@ def build_document() -> Document:
         "The client secret exists only in Google/Supabase and the business vault.",
     ):
         add_list_item(document, item, check_num)
-    add_owner_fields(document, ["Google Cloud project ID", "Test accounts used", "Completed by / date"])
+    add_owner_fields(document, ["Google OAuth client name", "Test accounts used", "Completed by / date"])
 
     document.add_heading("2. Stripe India: one-time payments only", level=1)
     add_callout(
@@ -604,6 +616,7 @@ def build_document() -> Document:
         "Use Stripe CLI or Dashboard replay to send the same paid event twice. Verify one purchase, one license, one credit grant if applicable, and one license email.",
     ):
         add_list_item(document, item, decimal_num)
+    document.add_page_break()
     document.add_heading("2.4 Payment acceptance evidence", level=2)
     for item in (
         "Unauthenticated checkout returns a sign-in requirement.",
@@ -661,6 +674,7 @@ def build_document() -> Document:
         add_list_item(document, item, check_num)
     add_owner_fields(document, ["Registrar", "Renewal date", "Canonical host", "Completed by / date"])
 
+    document.add_page_break()
     document.add_heading("5. License custody and three-device operations", level=1)
     add_callout(
         document,
@@ -676,6 +690,7 @@ def build_document() -> Document:
         "Open /account, list the devices, deactivate one, and verify a new installation can activate.",
         "Verify offline grace, re-verification, invalid key, inactive license, lost-key resend, and local license removal. Confirm local financial data remains untouched.",
         "Before any future secret rotation, design versioned key IDs, legacy verification, reissue, rollback, and customer communication.",
+        "The owner test license must be kind owner_test, tier Max, linked to the owner’s first Supabase sign-in, absent from purchase/revenue records, stored only as a hash server-side, and activated through the same three-device verification flow as a paid license.",
     ):
         add_list_item(document, item, decimal_num)
     for item in (
@@ -707,6 +722,7 @@ def build_document() -> Document:
         add_list_item(document, item, check_num)
     add_owner_fields(document, ["Apple Team ID", "Certificate expiry", "Workflow run URL", "Completed by / date"])
 
+    document.add_page_break()
     document.add_heading("7. Windows signing", level=1)
     for item in (
         "Purchase an Authenticode certificate in the legal seller’s name from a trusted provider. Prefer the provider’s supported hardware- or cloud-protected signing workflow.",
@@ -726,6 +742,7 @@ def build_document() -> Document:
         add_list_item(document, item, check_num)
     add_owner_fields(document, ["Certificate provider", "Certificate expiry", "Workflow run URL", "Completed by / date"])
 
+    document.add_page_break()
     document.add_heading("8. Cloudflare R2 and signed updates", level=1)
     for item in (
         "Create a business-owned Cloudflare account, enable two-factor authentication, and create an R2 bucket dedicated to release artifacts only.",
@@ -772,6 +789,7 @@ def build_document() -> Document:
     add_source(document, "Twelve Data API documentation", "https://twelvedata.com/docs")
     add_owner_fields(document, ["Reviewer", "Supported-market decision date", "Completed by / date"])
 
+    document.add_page_break()
     document.add_heading("10. Reward-pilot privacy, payouts, and controls", level=1)
     add_callout(
         document,
@@ -790,6 +808,7 @@ def build_document() -> Document:
         "Run a small internal dry run, reconcile accepted bundles to payouts, delete test identities, and obtain written approval before enabling the feature flag.",
     ):
         add_list_item(document, item, decimal_num)
+    document.add_page_break()
     for item in (
         "Legal/privacy review signed.",
         "₹50,000 cap and ₹300 participant cap are enforced server-side.",
@@ -831,7 +850,7 @@ def build_document() -> Document:
             ["Windows 11 x64", "☐", "☐", "☐", "☐", "☐", ""],
             ["Ubuntu 22.04 x64", "☐", "☐", "☐", "☐", "☐", ""],
         ],
-        [1800, 750, 750, 750, 1300, 850, 3160],
+        [1800, 750, 950, 850, 1300, 1000, 2710],
     )
     for item in (
         "Snapshot the clean system, install the signed candidate, set a synthetic PIN, import a redacted fixture, classify one item, create a backup, and record database path and app version.",
@@ -845,11 +864,12 @@ def build_document() -> Document:
         add_list_item(document, item, decimal_num)
     add_owner_fields(document, ["Test coordinator", "Candidate version", "Evidence folder", "Completed by / date"])
 
+    document.add_page_break()
     document.add_heading("13. Security, privacy, payment, and recovery evidence", level=1)
     for item in (
-        "Backend: at least 306 tests pass, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, classification memory, performance, net worth, behavior insights, and reward-pilot redaction.",
-        "Frontend: lint and production build pass. Production Playwright import/classify/report, navigation budget, mobile PIN touch target, menu names, and tutorial keyboard flows pass.",
-        "Website: entitlement/payment contract verification, production build, security headers, checkout safe-disable behavior, and dependency audit pass.",
+        "Backend: at least 324 tests pass, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, goal ledgers and FD/RD suggestions, simulation reference vectors, recurring detection, atomic accounts, package privacy, CA tax pack, classification memory, performance, net worth, behavior insights, and reward-pilot redaction.",
+        "Frontend: lint and production build pass. Focused Playwright covers PIN entry, portal calculation help, goals, recurring re-detection, external pricing, settings disclosure, and CA tax-pack controls.",
+        "Website: entitlement/payment contract verification, production build, real-app product chapters, reduced-motion fallbacks, mobile overflow, lifetime/no-bundled-credit pricing, security headers, checkout safe-disable behavior, and dependency audit pass. The final production URL scores Lighthouse performance 99, accessibility 100, and SEO 100, with LCP 1.73 seconds and CLS 0.",
         "Dependencies: Python lock, frontend, website, and desktop shipped dependencies report no known vulnerabilities.",
         "Secrets: gitleaks scans the complete cleaned history; no real statements, databases, tokens, keys, or customer screenshots are tracked.",
         "Recovery: empty database bootstrap, schema-revision backup, retained daily/weekly backups, restore-on-copy, upgrade, rollback, and license offline-grace tests pass.",
@@ -886,7 +906,14 @@ def build_document() -> Document:
         add_list_item(document, item, check_num)
     add_owner_fields(document, ["Candidate tag", "Draft release URL", "Release reviewer", "Completed by / date"])
 
+    document.add_page_break()
     document.add_heading("15. Final website and support acceptance", level=1)
+    add_callout(
+        document,
+        "VERIFIED ASSETS",
+        "The current website tour demonstrates imports, learned classification, goals, recurring detection, CA tax packs, and local privacy using synthetic-data captures from the real React application. A muted WebM/MP4 loop, still posters, lazy loading, and prefers-reduced-motion fallbacks are included.",
+        tone="good",
+    )
     for item in (
         "Verify all advertised features are marked released in shared/entitlements.json and pass app acceptance tests. Hide anything unreleased.",
         "Review the final real screenshots captured from synthetic data. Confirm there are no real names, account numbers, emails, amounts from a real person, or provider keys.",
@@ -907,6 +934,7 @@ def build_document() -> Document:
     ):
         add_list_item(document, item, check_num)
 
+    document.add_page_break()
     document.add_heading("16. Explicit public-launch gate", level=1)
     add_callout(
         document,
@@ -933,6 +961,7 @@ def build_document() -> Document:
         ],
         [3500, 1450, 900, 3510],
     )
+    document.add_page_break()
     add_owner_fields(
         document,
         [
