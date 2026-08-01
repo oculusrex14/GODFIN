@@ -39,22 +39,59 @@ def test_list_settings(auth_client):
     assert 'user_timezone' in data
     assert 'developer_mode' in data
     assert 'backup_directory' in data
+    assert 'pin_hash' not in data
+    assert 'is_first_run' not in data
+    assert 'license_key' not in data
+    assert 'license_tier' not in data
+    assert 'license_status' not in data
+    assert 'schema_revision' not in data
 
 
-def test_update_setting(auth_client):
-    resp = auth_client.put('/api/v1/settings/user_timezone', json={'value': 'US/Eastern'})
+def test_update_timezone(auth_client):
+    resp = auth_client.put(
+        '/api/v1/settings/preferences/timezone',
+        json={'timezone': 'US/Eastern'},
+    )
     assert resp.status_code == 200
     assert resp.json()['value'] == 'US/Eastern'
 
 
-def test_update_protected_setting(auth_client):
-    resp = auth_client.put('/api/v1/settings/pin_hash', json={'value': 'hacked'})
-    assert resp.status_code == 403
+def test_update_timezone_rejects_unknown_zone(auth_client):
+    resp = auth_client.put(
+        '/api/v1/settings/preferences/timezone',
+        json={'timezone': 'Definitely/Not-A-Timezone'},
+    )
+    assert resp.status_code == 422
 
 
-def test_update_nonexistent_setting(auth_client):
-    resp = auth_client.put('/api/v1/settings/does_not_exist', json={'value': 'test'})
-    assert resp.status_code == 404
+def test_generic_setting_mutation_is_deny_by_default(auth_client, db_session):
+    protected = {
+        'pin_hash': 'hacked',
+        'is_first_run': 'true',
+        'license_key': 'forged-key',
+        'license_tier': 'max',
+        'license_status': 'active',
+        'schema_revision': '999',
+        'enable_embeddings': 'true',
+        'does_not_exist': 'test',
+    }
+    before = {
+        key: (
+            db_session.query(AppSetting).filter_by(key=key).first().value
+            if db_session.query(AppSetting).filter_by(key=key).first()
+            else None
+        )
+        for key in protected
+    }
+
+    for key, value in protected.items():
+        resp = auth_client.put(f'/api/v1/settings/{key}', json={'value': value})
+        assert resp.status_code == 403, key
+
+    db_session.expire_all()
+    for key in protected:
+        setting = db_session.query(AppSetting).filter_by(key=key).first()
+        assert (setting.value if setting else None) == before[key]
 
 
 def test_settings_health_card_payload(auth_client):
@@ -71,14 +108,43 @@ def test_settings_health_card_payload(auth_client):
 
 def test_network_access_toggle_requires_restart(auth_client):
     resp = auth_client.put(
-        '/api/v1/settings/allow_network_access',
-        json={'value': 'true'},
+        '/api/v1/settings/preferences/network-access',
+        json={'enabled': True, 'current_pin': '1234'},
     )
     assert resp.status_code == 200
     assert resp.json()['restart_required'] is True
 
     health = auth_client.get('/api/v1/settings/health').json()
     assert health['network']['allow_network_access'] is True
+
+
+def test_network_access_enable_requires_current_pin(auth_client):
+    missing = auth_client.put(
+        '/api/v1/settings/preferences/network-access',
+        json={'enabled': True},
+    )
+    wrong = auth_client.put(
+        '/api/v1/settings/preferences/network-access',
+        json={'enabled': True, 'current_pin': '9999'},
+    )
+
+    assert missing.status_code == 403
+    assert wrong.status_code == 403
+
+
+def test_developer_mode_enable_requires_current_pin(auth_client):
+    missing = auth_client.put(
+        '/api/v1/settings/preferences/developer-mode',
+        json={'enabled': True},
+    )
+    accepted = auth_client.put(
+        '/api/v1/settings/preferences/developer-mode',
+        json={'enabled': True, 'current_pin': '1234'},
+    )
+
+    assert missing.status_code == 403
+    assert accepted.status_code == 200
+    assert accepted.json()['value'] == 'true'
 
 
 # --- Developer Mode ---

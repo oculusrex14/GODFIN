@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -20,6 +21,18 @@ from app.models.llm_config import LLMConfiguration
 router = APIRouter()
 
 DB_PATH = str(app_config.database_path)
+PUBLIC_SETTING_KEYS = frozenset(
+    {
+        "allow_network_access",
+        "auto_ingestion_enabled",
+        "backup_directory",
+        "developer_mode",
+        "enable_embeddings",
+        "ingestion_frequency_minutes",
+        "local_ai_choice",
+        "user_timezone",
+    }
+)
 
 
 def _get_backup_dir(db: Session) -> str:
@@ -35,13 +48,39 @@ def get_settings(
     _user: bool = Depends(get_current_user),
 ):
     settings = db.query(AppSetting).all()
-    # Exclude sensitive settings from response
-    sensitive_keys = {'pin_hash', 'auth_token', 'license_key'}
-    return {s.key: s.value for s in settings if s.key not in sensitive_keys}
+    return {s.key: s.value for s in settings if s.key in PUBLIC_SETTING_KEYS}
 
 
-class SettingUpdate(BaseModel):
-    value: str
+class TimezoneUpdate(BaseModel):
+    timezone: str = Field(..., min_length=1, max_length=64)
+
+
+class SensitiveToggleUpdate(BaseModel):
+    enabled: bool
+    current_pin: str | None = Field(
+        default=None,
+        min_length=4,
+        max_length=8,
+        pattern=r"^\d+$",
+    )
+
+
+def _set_existing_setting(db: Session, key: str, value: str) -> None:
+    setting = db.query(AppSetting).filter_by(key=key).first()
+    if setting is None:
+        raise HTTPException(status_code=500, detail="Required application setting is missing")
+    setting.value = value
+
+
+def _require_current_pin(db: Session, pin: str | None) -> None:
+    if not pin:
+        raise HTTPException(
+            status_code=403,
+            detail="Enter your current PIN to make this security change",
+        )
+    pin_setting = db.query(AppSetting).filter_by(key="pin_hash").first()
+    if not pin_setting or not verify_pin_hash(pin, pin_setting.value):
+        raise HTTPException(status_code=403, detail="Incorrect PIN")
 
 
 @router.get("/health")
@@ -132,30 +171,65 @@ def settings_health(
     }
 
 
-@router.put("/{key}")
-def update_setting(
-    key: str,
-    body: SettingUpdate,
+@router.put("/preferences/timezone")
+def update_timezone(
+    body: TimezoneUpdate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    setting = db.query(AppSetting).filter_by(key=key).first()
-    if not setting:
-        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+    try:
+        ZoneInfo(body.timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise HTTPException(status_code=422, detail="Unknown IANA timezone") from exc
 
-    # Protect sensitive settings
-    if key in ('pin_hash',):
-        raise HTTPException(status_code=403, detail="Cannot update this setting directly")
-    if key == "allow_network_access" and body.value not in {"true", "false"}:
-        raise HTTPException(status_code=400, detail="Network access must be true or false")
+    _set_existing_setting(db, "user_timezone", body.timezone)
+    db.commit()
+    return {"key": "user_timezone", "value": body.timezone, "restart_required": False}
 
-    setting.value = body.value
+
+@router.put("/preferences/network-access")
+def update_network_access(
+    body: SensitiveToggleUpdate,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    if body.enabled:
+        _require_current_pin(db, body.current_pin)
+    value = "true" if body.enabled else "false"
+    _set_existing_setting(db, "allow_network_access", value)
     db.commit()
     return {
-        'key': key,
-        'value': body.value,
-        'restart_required': key == "allow_network_access",
+        "key": "allow_network_access",
+        "value": value,
+        "restart_required": True,
     }
+
+
+@router.put("/preferences/developer-mode")
+def update_developer_mode(
+    body: SensitiveToggleUpdate,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    if body.enabled:
+        _require_current_pin(db, body.current_pin)
+    value = "true" if body.enabled else "false"
+    _set_existing_setting(db, "developer_mode", value)
+    db.commit()
+    return {"key": "developer_mode", "value": value, "restart_required": False}
+
+
+@router.put("/{key}", include_in_schema=False)
+def reject_generic_setting_mutation(
+    key: str,
+    _body: dict,
+    _user: bool = Depends(get_current_user),
+):
+    del key
+    raise HTTPException(
+        status_code=403,
+        detail="This setting cannot be changed through the generic settings API",
+    )
 
 
 # --- Backup ---

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import pickle
+
 import numpy as np
+import pytest
 
 from app.core.embedding_service import (
+    EMBEDDING_FORMAT_MAGIC,
     cosine_similarity,
     deserialize_embedding,
     serialize_embedding,
@@ -25,8 +29,37 @@ from app.models.merchant_memory import MerchantMemory
 def test_serialize_deserialize_embedding():
     original = np.random.rand(384).astype(np.float32)
     serialized = serialize_embedding(original)
+    assert serialized.startswith(EMBEDDING_FORMAT_MAGIC)
     restored = deserialize_embedding(serialized)
     np.testing.assert_array_almost_equal(original, restored)
+
+
+@pytest.mark.parametrize(
+    "vector",
+    [
+        np.zeros(383, dtype=np.float32),
+        np.zeros(385, dtype=np.float32),
+        np.full(384, np.nan, dtype=np.float32),
+        np.full(384, np.inf, dtype=np.float32),
+    ],
+)
+def test_serialize_embedding_rejects_invalid_vectors(vector):
+    with pytest.raises(ValueError):
+        serialize_embedding(vector)
+
+
+def test_deserialize_embedding_rejects_legacy_pickle_without_loading():
+    legacy_payload = pickle.dumps(np.ones(384, dtype=np.float32))
+
+    with pytest.raises(ValueError, match="Unsupported|malformed"):
+        deserialize_embedding(legacy_payload)
+
+
+def test_deserialize_embedding_rejects_truncated_payload():
+    payload = serialize_embedding(np.ones(384, dtype=np.float32))
+
+    with pytest.raises(ValueError, match="malformed"):
+        deserialize_embedding(payload[:-1])
 
 
 def test_cosine_similarity_identical():
@@ -184,3 +217,33 @@ def test_backfill_embeddings(db_session):
     updated = backfill_embeddings(db_session)
     # May be 0 if model loading fails, or 1 if it works
     assert updated >= 0
+
+
+def test_backfill_replaces_legacy_pickle_without_deserializing(
+    db_session,
+    monkeypatch,
+):
+    from app.core import embedding_service
+
+    memory = MerchantMemory(
+        raw_string='LEGACY STORE',
+        normalized_name='LEGACY STORE',
+        category='SHOPPING',
+        subcategory='General',
+        embedding_vector=pickle.dumps(np.ones(384, dtype=np.float32)),
+        embedding_model_version='all-MiniLM-L6-v2',
+    )
+    db_session.add(memory)
+    db_session.flush()
+    monkeypatch.setattr(
+        embedding_service,
+        "generate_embedding",
+        lambda _text: np.ones(384, dtype=np.float32),
+    )
+
+    assert embedding_service.backfill_embeddings(db_session) == 1
+    assert memory.embedding_vector.startswith(EMBEDDING_FORMAT_MAGIC)
+    np.testing.assert_array_equal(
+        embedding_service.deserialize_embedding(memory.embedding_vector),
+        np.ones(384, dtype=np.float32),
+    )

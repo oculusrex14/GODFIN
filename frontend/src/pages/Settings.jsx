@@ -8,9 +8,9 @@ import {
   Landmark, BookOpen, PlayCircle, RotateCcw, BrainCircuit,
 } from 'lucide-react';
 import {
-  fetchSettings, fetchSettingsHealth, updateSetting, fetchDeveloperMode, triggerBackup, fetchBackups,
+  fetchSettings, fetchSettingsHealth, updateNetworkAccess, updateDeveloperMode, fetchDeveloperMode, triggerBackup, fetchBackups,
   downloadCSV, fetchSystemStatus, restartBackend,
-  verifyPin, createRule, deleteRule, resetData,
+  createRule, deleteRule, resetData,
   fetchEmbeddingStatus, enableEmbeddings,
   fetchOnboardingStatus, updateOnboardingStatus,
 } from '../api/client';
@@ -106,7 +106,7 @@ export default function Settings() {
   });
   const [showRestart, setShowRestart] = useState(false);
   const [restartStatus, setRestartStatus] = useState(null);
-  const [showPinPrompt, setShowPinPrompt] = useState(false);
+  const [pendingSensitiveSetting, setPendingSensitiveSetting] = useState(null);
   const [pinError, setPinError] = useState('');
   const [showAddRule, setShowAddRule] = useState(false);
   const [ruleForm, setRuleForm] = useState({ rule_type: 'contains', pattern: '', category: '', subcategory: '', priority: 100 });
@@ -157,7 +157,15 @@ export default function Settings() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ key, value }) => updateSetting(key, value),
+    mutationFn: ({ key, enabled, currentPin = null }) => {
+      if (key === 'developer_mode') {
+        return updateDeveloperMode(enabled, currentPin);
+      }
+      if (key === 'allow_network_access') {
+        return updateNetworkAccess(enabled, currentPin);
+      }
+      throw new Error('Unsupported settings change');
+    },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       queryClient.invalidateQueries({ queryKey: ['developerMode'] });
@@ -257,22 +265,34 @@ export default function Settings() {
 
   const handleDevToggle = async (enable) => {
     if (enable && !devEnabled) {
-      setShowPinPrompt(true);
+      setPendingSensitiveSetting({ key: 'developer_mode', enabled: true });
       setPinError('');
     } else {
-      updateMutation.mutate({ key: 'developer_mode', value: 'false' });
+      updateMutation.mutate({ key: 'developer_mode', enabled: false });
     }
   };
 
   const handlePinVerified = async (pin) => {
+    if (!pendingSensitiveSetting) return;
     try {
-      await verifyPin(pin);
-      setShowPinPrompt(false);
+      await updateMutation.mutateAsync({
+        ...pendingSensitiveSetting,
+        currentPin: pin,
+      });
+      setPendingSensitiveSetting(null);
       setPinError('');
-      updateMutation.mutate({ key: 'developer_mode', value: 'true' });
-    } catch {
-      setPinError('Invalid PIN');
+    } catch (error) {
+      setPinError(error?.message || 'Invalid PIN');
     }
+  };
+
+  const handleNetworkToggle = (enable) => {
+    if (enable) {
+      setPendingSensitiveSetting({ key: 'allow_network_access', enabled: true });
+      setPinError('');
+      return;
+    }
+    updateMutation.mutate({ key: 'allow_network_access', enabled: false });
   };
 
   const handleResetClick = async () => {
@@ -708,10 +728,7 @@ export default function Settings() {
               <ToggleSwitch
                 ariaLabel="Allow network access"
                 enabled={settings?.allow_network_access === 'true'}
-                onChange={(enabled) => updateMutation.mutate({
-                  key: 'allow_network_access',
-                  value: enabled ? 'true' : 'false',
-                })}
+                onChange={handleNetworkToggle}
                 disabled={updateMutation.isPending}
               />
             </div>
@@ -785,10 +802,10 @@ export default function Settings() {
       {/* Confirm Dialog */}
       <ConfirmDialogComponent />
 
-      {/* PIN Prompt Modal for Developer Mode */}
+      {/* PIN prompt for security-sensitive settings */}
       <AnimatePresence>
-        {showPinPrompt && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowPinPrompt(false)}>
+        {pendingSensitiveSetting && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setPendingSensitiveSetting(null)}>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -798,8 +815,12 @@ export default function Settings() {
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>Enter PIN to enable Developer Mode</h3>
-                <button onClick={() => setShowPinPrompt(false)} className="text-white/30 hover:text-white/60"><X size={18} /></button>
+                <h3 className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>
+                  {pendingSensitiveSetting.key === 'developer_mode'
+                    ? 'Enter PIN to enable Developer Mode'
+                    : 'Enter PIN to allow network access'}
+                </h3>
+                <button onClick={() => setPendingSensitiveSetting(null)} className="text-white/30 hover:text-white/60"><X size={18} /></button>
               </div>
               <div className="flex justify-center">
                 <PinInput onComplete={handlePinVerified} />

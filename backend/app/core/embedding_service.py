@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-import pickle
+import struct
 import threading
 from pathlib import Path
 from typing import Optional
@@ -19,6 +19,9 @@ MODEL_NAME = 'all-MiniLM-L6-v2'
 FASTEMBED_MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
 EMBEDDING_DIM = 384
 SIMILARITY_THRESHOLD = 0.80
+EMBEDDING_FORMAT_MAGIC = b"GDFEMB01"
+EMBEDDING_HEADER = struct.Struct("<8sI")
+EMBEDDING_DTYPE = np.dtype("<f4")
 
 # Lazy-loaded model singleton
 _model = None
@@ -70,11 +73,53 @@ def generate_embedding(text: str) -> Optional[np.ndarray]:
 
 
 def serialize_embedding(embedding: np.ndarray) -> bytes:
-    return pickle.dumps(embedding)
+    """Serialize one validated embedding without executable object metadata."""
+    vector = np.asarray(embedding, dtype=EMBEDDING_DTYPE)
+    if vector.ndim != 1 or vector.shape[0] != EMBEDDING_DIM:
+        raise ValueError(f"Embedding must contain exactly {EMBEDDING_DIM} values")
+    if not np.isfinite(vector).all():
+        raise ValueError("Embedding contains non-finite values")
+    return EMBEDDING_HEADER.pack(EMBEDDING_FORMAT_MAGIC, EMBEDDING_DIM) + vector.tobytes(
+        order="C"
+    )
 
 
 def deserialize_embedding(data: bytes) -> np.ndarray:
-    return pickle.loads(data)
+    """Read the fixed GODFIN float32 format; legacy pickle is never opened."""
+    if not isinstance(data, (bytes, bytearray, memoryview)):
+        raise ValueError("Embedding payload must be bytes")
+
+    payload = bytes(data)
+    expected_size = EMBEDDING_HEADER.size + (EMBEDDING_DIM * EMBEDDING_DTYPE.itemsize)
+    if len(payload) != expected_size:
+        raise ValueError("Unsupported or malformed embedding payload")
+
+    magic, dimension = EMBEDDING_HEADER.unpack_from(payload)
+    if magic != EMBEDDING_FORMAT_MAGIC or dimension != EMBEDDING_DIM:
+        raise ValueError("Unsupported or legacy embedding format")
+
+    vector = np.frombuffer(
+        payload,
+        dtype=EMBEDDING_DTYPE,
+        count=dimension,
+        offset=EMBEDDING_HEADER.size,
+    ).copy()
+    if vector.shape != (EMBEDDING_DIM,) or not np.isfinite(vector).all():
+        raise ValueError("Embedding payload contains invalid values")
+    return vector
+
+
+def _embedding_needs_refresh(merchant: MerchantMemory) -> bool:
+    """Discard legacy/corrupt vectors so an explicit setup can regenerate them."""
+    if merchant.embedding_vector is None:
+        return True
+    try:
+        deserialize_embedding(merchant.embedding_vector)
+    except (TypeError, ValueError):
+        merchant.embedding_vector = None
+        merchant.embedding_model_version = None
+        return True
+    return merchant.embedding_model_version != MODEL_NAME
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -128,16 +173,14 @@ def update_merchant_embedding(db: Session, merchant: MerchantMemory) -> bool:
 
 
 def backfill_embeddings(db: Session) -> int:
-    memories = db.query(MerchantMemory).filter(
-        MerchantMemory.embedding_vector.is_(None)
-    ).all()
+    memories = db.query(MerchantMemory).all()
 
     updated = 0
     for memory in memories:
-        if update_merchant_embedding(db, memory):
+        if _embedding_needs_refresh(memory) and update_merchant_embedding(db, memory):
             updated += 1
 
-    if updated:
+    if db.dirty:
         db.flush()
 
     return updated
@@ -178,11 +221,11 @@ def start_embedding_setup() -> bool:
                 raise RuntimeError("The embedding model could not be downloaded.")
 
             db = SessionLocal()
-            memories = (
-                db.query(MerchantMemory)
-                .filter(MerchantMemory.embedding_vector.is_(None))
-                .all()
-            )
+            memories = [
+                memory
+                for memory in db.query(MerchantMemory).all()
+                if _embedding_needs_refresh(memory)
+            ]
             total = len(memories)
             _set_setup_status(
                 status="indexing",

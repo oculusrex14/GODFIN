@@ -678,10 +678,24 @@ export function fetchSettingsHealth() {
   return apiFetch('/settings/health');
 }
 
-export function updateSetting(key, value) {
-  return apiFetch(`/settings/${key}`, {
+export function updateTimezone(timezone) {
+  return apiFetch('/settings/preferences/timezone', {
     method: 'PUT',
-    body: JSON.stringify({ value }),
+    body: JSON.stringify({ timezone }),
+  });
+}
+
+export function updateNetworkAccess(enabled, currentPin = null) {
+  return apiFetch('/settings/preferences/network-access', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled, current_pin: currentPin }),
+  });
+}
+
+export function updateDeveloperMode(enabled, currentPin = null) {
+  return apiFetch('/settings/preferences/developer-mode', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled, current_pin: currentPin }),
   });
 }
 
@@ -1119,7 +1133,9 @@ export const reportsApi = {
 export const settingsApi = {
   get: fetchSettings,
   health: fetchSettingsHealth,
-  update: updateSetting,
+  updateTimezone,
+  updateNetworkAccess,
+  updateDeveloperMode,
   backup: triggerBackup,
   backups: fetchBackups,
   developer: fetchDeveloperMode,
