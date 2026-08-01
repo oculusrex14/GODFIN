@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.models.audit_session import AuditSession
+from app.models.transaction import Transaction
+from app.core.audit import reopen_audit
 from app.seed import SAVINGS_ACCOUNT_ID, CC_ACCOUNT_ID
 
 
@@ -52,6 +55,45 @@ def test_create_transaction_invalid_category(auth_client):
 def test_create_transaction_missing_fields(auth_client):
     resp = auth_client.post("/api/v1/transactions", json={"amount": 100})
     assert resp.status_code == 422
+
+
+def test_create_transaction_rejects_finalized_period(
+    auth_client,
+    db_session,
+):
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=2,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+
+    response = auth_client.post("/api/v1/transactions", json=_make_txn())
+
+    assert response.status_code == 409
+    assert "reopen" in response.json()["detail"].lower()
+    assert db_session.query(Transaction).count() == 0
+
+
+def test_create_transaction_allows_explicitly_reopened_period(
+    auth_client,
+    db_session,
+):
+    finalized = AuditSession(
+        period_year=2026,
+        period_month=2,
+        status="finalized",
+    )
+    db_session.add(finalized)
+    db_session.commit()
+    reopen_audit(db_session, finalized.id)
+    db_session.commit()
+
+    response = auth_client.post("/api/v1/transactions", json=_make_txn())
+
+    assert response.status_code == 201
 
 
 def test_list_transactions_empty(auth_client):

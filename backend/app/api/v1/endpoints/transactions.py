@@ -9,6 +9,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.audit import FinalizedPeriodError, assert_period_writable
 from app.core.database import get_db
 from app.core.transaction_semantics import apply_category_semantic
 from app.models.transaction import Transaction
@@ -28,6 +29,11 @@ def create_transaction(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
+    try:
+        assert_period_writable(db, body.date)
+    except FinalizedPeriodError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     txn = Transaction(
         id=str(uuid.uuid4()),
         date=body.date,

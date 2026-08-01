@@ -13,7 +13,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 6
+CURRENT_SCHEMA_REVISION = 7
 
 _RECURRING_PATTERN_COLUMNS = {
     "confidence": "REAL NOT NULL DEFAULT 0",
@@ -97,6 +97,41 @@ def apply_additive_schema_updates(db_path: str) -> None:
                     connection.execute(
                         f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'
                     )
+
+        audit_table = connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='audit_sessions'"
+        ).fetchone()
+        if audit_table:
+            # Older releases could leave both the previous finalized session
+            # and its replacement draft/finalized session active. Keep only
+            # the newest row authoritative before installing the invariant.
+            active_rows = connection.execute(
+                "SELECT id, period_year, period_month "
+                "FROM audit_sessions "
+                "WHERE status IN ('draft', 'finalized', 'locked') "
+                "ORDER BY period_year, period_month, "
+                "COALESCE(created_at, '') DESC, rowid DESC"
+            ).fetchall()
+            seen_periods: set[tuple[int, int]] = set()
+            superseded_ids: list[str] = []
+            for audit_id, year, month in active_rows:
+                period = (year, month)
+                if period in seen_periods:
+                    superseded_ids.append(audit_id)
+                else:
+                    seen_periods.add(period)
+            for audit_id in superseded_ids:
+                connection.execute(
+                    "UPDATE audit_sessions SET status='discarded' WHERE id=?",
+                    (audit_id,),
+                )
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "uq_audit_sessions_active_period "
+                "ON audit_sessions(period_year, period_month) "
+                "WHERE status IN ('draft', 'finalized', 'locked')"
+            )
         connection.commit()
     finally:
         connection.close()

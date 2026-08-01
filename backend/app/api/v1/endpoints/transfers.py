@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.v1.endpoints.license import enforce_feature
+from app.core.audit import FinalizedPeriodError
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.product_depth import (
@@ -55,12 +56,16 @@ def update_transfer_match(
     match = db.query(TransferMatch).filter_by(id=match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Transfer match not found")
-    decide_transfer_match(
-        db,
-        match,
-        body.decision,
-        snooze_days=body.snooze_days,
-        note=body.note,
-    )
+    try:
+        decide_transfer_match(
+            db,
+            match,
+            body.decision,
+            snooze_days=body.snooze_days,
+            note=body.note,
+        )
+    except FinalizedPeriodError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     db.commit()
     return {"id": match.id, "status": match.status}

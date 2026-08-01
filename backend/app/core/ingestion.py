@@ -13,6 +13,7 @@ from app.core.account_mapping import (
     resolve_sender_mapping,
 )
 from app.core.classifier import classify_transaction, get_review_status
+from app.core.audit import FinalizedPeriodError, assert_period_writable
 from app.core.email_parser import (
     ParsedTransaction,
     compute_canonical_checksum,
@@ -40,6 +41,7 @@ class IngestionResult:
         self.skipped_blacklist = 0
         self.skipped_no_match = 0
         self.skipped_duplicate = 0
+        self.skipped_finalized_period = 0
         self.errors = 0
         self.error_details = []
         self.merchant_keys: set[tuple[str, str | None]] = set()
@@ -54,6 +56,7 @@ class IngestionResult:
             'skipped_blacklist': self.skipped_blacklist,
             'skipped_no_match': self.skipped_no_match,
             'skipped_duplicate': self.skipped_duplicate,
+            'skipped_finalized_period': self.skipped_finalized_period,
             'errors': self.errors,
             'error_details': self.error_details[:10],
             'source_status': self.source_status,
@@ -83,6 +86,16 @@ def _process_message_with_savepoint(
     try:
         with db.begin_nested():
             _process_message(db, message, result)
+    except FinalizedPeriodError as exc:
+        result.skipped_finalized_period += 1
+        result.source_status = "partial"
+        result.retryable = True
+        result.error_details.append(
+            f"Message {message.get('id', '?')}: {str(exc)}"
+        )
+        logger.info(
+            "A Gmail transaction was held because its accounting period is finalized"
+        )
     except Exception as exc:
         result.errors += 1
         result.error_details.append(
@@ -165,11 +178,13 @@ def run_ingestion(db: Session, mock_messages: Optional[list] = None) -> Ingestio
     for msg in messages:
         _process_message_with_savepoint(db, msg, result)
 
-    if new_history_id and mock_messages is None:
+    completed = result.source_status in {"complete", "empty"}
+    if new_history_id and mock_messages is None and completed:
         _update_setting(db, 'last_gmail_history_id', new_history_id)
 
     _run_post_ingestion_detection(db, result)
-    _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
+    if completed:
+        _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
     db.commit()
 
     return result
@@ -254,6 +269,8 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
     if existing:
         result.skipped_duplicate += 1
         return
+
+    assert_period_writable(db, parsed.txn_date)
 
     # Classify the transaction
     classification = classify_transaction(
@@ -352,7 +369,8 @@ def run_initial_sync(db: Session) -> IngestionResult:
     # Store the date range
     date_range = f"{after_date} to {today.isoformat()}"
     _update_setting(db, 'initial_sync_date_range', date_range)
-    _update_setting(db, 'initial_sync_completed', 'true')
+    completed = result.source_status in {"complete", "empty"}
+    _update_setting(db, 'initial_sync_completed', 'true' if completed else 'false')
     db.commit()
 
     return result

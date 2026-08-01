@@ -1,6 +1,8 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from app.core.startup_migrations import (
     CURRENT_SCHEMA_REVISION,
     apply_additive_schema_updates,
@@ -99,3 +101,46 @@ def test_additive_migration_adds_transaction_semantic_column(tmp_path):
 
     assert columns["semantic_type"][3] == 1
     assert columns["semantic_type"][4] == "'unknown'"
+
+
+def test_additive_migration_enforces_one_active_audit_per_period(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "CREATE TABLE audit_sessions ("
+            "id TEXT PRIMARY KEY, period_year INTEGER NOT NULL, "
+            "period_month INTEGER NOT NULL, status TEXT NOT NULL, "
+            "created_at TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO audit_sessions VALUES "
+            "('old', 2026, 1, 'finalized', '2026-02-01T00:00:00'), "
+            "('new', 2026, 1, 'draft', '2026-02-02T00:00:00')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        rows = connection.execute(
+            "SELECT id, status FROM audit_sessions ORDER BY id"
+        ).fetchall()
+        index = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name='uq_audit_sessions_active_period'"
+        ).fetchone()
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO audit_sessions VALUES "
+                "('another', 2026, 1, 'finalized', '2026-02-03T00:00:00')"
+            )
+    finally:
+        connection.close()
+
+    assert rows == [("new", "draft"), ("old", "discarded")]
+    assert index == ("uq_audit_sessions_active_period",)

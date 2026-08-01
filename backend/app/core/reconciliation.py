@@ -476,6 +476,19 @@ def import_new_transactions(
     Creates Transaction records and adds them to the database.
     Skips duplicates using checksum deduplication.
     """
+    from app.core.audit import assert_period_writable
+
+    # Validate the complete batch before adding anything. A mixed statement
+    # must not partially import writable months while silently omitting a
+    # finalized one.
+    checked_periods: set[tuple[int, int]] = set()
+    for parsed_txn in transactions:
+        period = (parsed_txn.date.year, parsed_txn.date.month)
+        if period in checked_periods:
+            continue
+        assert_period_writable(db, parsed_txn.date)
+        checked_periods.add(period)
+
     imported = []
     for parsed_txn in transactions:
         txn = ReconciliationService.create_transaction_from_parsed(
@@ -500,5 +513,5 @@ def import_new_transactions(
             continue
         db.add(txn)
         imported.append(txn)
-    db.commit()
+    db.flush()
     return imported

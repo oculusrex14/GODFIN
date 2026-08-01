@@ -12,6 +12,7 @@ from app.models.account import Account
 from app.models.subscription import Subscription
 from app.models.subscription_suggestion import SubscriptionSuggestion
 from app.models.transaction import Transaction
+from app.core.audit import assert_period_writable
 from app.core.transaction_semantics import (
     TransactionSemantic,
     active_clause,
@@ -242,8 +243,10 @@ def decide_transfer_match(
 ) -> None:
     debit = db.query(Transaction).filter_by(id=match.debit_transaction_id).one()
     credit = db.query(Transaction).filter_by(id=match.credit_transaction_id).one()
-    match.decision_note = note
     if decision == "confirm":
+        for txn in (debit, credit):
+            assert_period_writable(db, txn.date)
+        match.decision_note = note
         match.status = "confirmed"
         match.snoozed_until = None
         for txn in (debit, credit):
@@ -268,9 +271,11 @@ def decide_transfer_match(
             synchronize_session=False,
         )
     elif decision == "ignore":
+        match.decision_note = note
         match.status = "ignored"
         match.snoozed_until = None
     elif decision == "snooze":
+        match.decision_note = note
         match.status = "snoozed"
         match.snoozed_until = date.today() + timedelta(days=snooze_days)
     else:

@@ -14,18 +14,53 @@ from app.models.transaction import Transaction
 from app.core.transaction_semantics import spending_clause, verified_income_clause
 
 
+class FinalizedPeriodError(ValueError):
+    """Raised when a ledger write targets a finalized accounting period."""
+
+    def __init__(self, transaction_date: date):
+        self.transaction_date = transaction_date
+        self.period = transaction_date.strftime("%Y-%m")
+        super().__init__(
+            f"{self.period} is finalized. Reopen the month before adding "
+            "transactions dated in this period."
+        )
+
+
+def assert_period_writable(db: Session, transaction_date: date) -> None:
+    """Enforce the accounting-period write boundary for every ledger ingress.
+
+    Reopening creates a newer draft session while retaining the prior session
+    as non-authoritative history, so the latest active session is the
+    authoritative period state.
+    """
+    latest_session = (
+        db.query(AuditSession)
+        .filter_by(
+            period_year=transaction_date.year,
+            period_month=transaction_date.month,
+        )
+        .filter(
+            AuditSession.status.in_(["draft", "finalized", "locked"])
+        )
+        .order_by(AuditSession.created_at.desc(), AuditSession.id.desc())
+        .first()
+    )
+    if latest_session and latest_session.status in {"finalized", "locked"}:
+        raise FinalizedPeriodError(transaction_date)
+
+
 def get_month_status(db: Session, year: int, month: int) -> str:
     """Returns 'finalized', 'draft', or 'no_audit' for a given month."""
     session = (
         db.query(AuditSession)
         .filter_by(period_year=year, period_month=month)
-        .filter(AuditSession.status.in_(['draft', 'finalized']))
-        .order_by(AuditSession.created_at.desc())
+        .filter(AuditSession.status.in_(['draft', 'finalized', 'locked']))
+        .order_by(AuditSession.created_at.desc(), AuditSession.id.desc())
         .first()
     )
     if session is None:
         return 'no_audit'
-    return session.status
+    return 'finalized' if session.status == 'locked' else session.status
 
 
 def start_audit(db: Session, year: int, month: int) -> AuditSession:
@@ -154,8 +189,14 @@ def reopen_audit(db: Session, session_id: str) -> AuditSession:
     if agg:
         agg.is_finalized = False
 
-    # Old session remains 'finalized' but with no linked transactions;
-    # a new draft session is created below for continued editing.
+    # Retain the old session as non-authoritative history. This also releases
+    # the partial unique index before the replacement draft is created.
+    session.status = 'discarded'
+    prior_summary = (session.change_summary or '').strip()
+    session.change_summary = (
+        f"{prior_summary} Reopened; this audit was superseded by a new draft."
+    ).strip()
+    db.flush()
 
     # Create new draft
     new_session = AuditSession(

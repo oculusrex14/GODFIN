@@ -4,6 +4,8 @@ import uuid
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
+
 from app.core.reconciliation import (
     ReconciliationMatch,
     reconcile_statement,
@@ -16,6 +18,7 @@ from app.core.statement_parser import (
     _parse_statement_date,
 )
 from app.models.income_source import IncomeSource
+from app.models.audit_session import AuditSession
 from app.models.transaction import Transaction
 from app.seed import CC_ACCOUNT_ID, SAVINGS_ACCOUNT_ID
 
@@ -180,6 +183,46 @@ def test_import_new_transactions(db_session):
     assert txn.instrument == 'statement'
 
 
+def test_statement_import_rejects_entire_batch_for_finalized_period(
+    db_session,
+):
+    db_session.add(
+        AuditSession(
+            period_year=2025,
+            period_month=1,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+    transactions = [
+        ParsedTransaction(
+            date=date(2025, 1, 20),
+            description="BLOCKED JANUARY ROW",
+            amount=199.00,
+            type="debit",
+        ),
+        ParsedTransaction(
+            date=date(2025, 2, 20),
+            description="WRITABLE FEBRUARY ROW",
+            amount=299.00,
+            type="debit",
+        ),
+    ]
+
+    with pytest.raises(
+        Exception,
+        match="(?i)finalized.*reopen|reopen.*finalized",
+    ):
+        import_new_transactions(db_session, transactions, CC_ACCOUNT_ID)
+
+    assert (
+        db_session.query(Transaction)
+        .filter(Transaction.source == "statement_upload")
+        .count()
+        == 0
+    )
+
+
 def test_import_returns_structured_errors_instead_of_500(
     auth_client,
     monkeypatch,
@@ -219,6 +262,74 @@ def test_import_returns_structured_errors_instead_of_500(
     assert data["classified"] == 0
     assert data["review_queue"] == 0
     assert data["errors"] == ["Import could not be completed: simulated failure"]
+
+
+def test_statement_import_endpoint_returns_409_for_finalized_period(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    from app.api.v1.endpoints import statement as statement_endpoint
+
+    db_session.add(
+        AuditSession(
+            period_year=2025,
+            period_month=1,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+    parsed_transaction = ParsedTransaction(
+        date=date(2025, 1, 20),
+        description="BLOCKED JANUARY ROW",
+        amount=199.00,
+        type="debit",
+    )
+
+    async def fake_read_and_parse(file, password):
+        return SimpleNamespace(
+            statement_type="hdfc_savings",
+            source_digest="b" * 64,
+        )
+
+    monkeypatch.setattr(
+        statement_endpoint,
+        "_read_and_parse",
+        fake_read_and_parse,
+    )
+    monkeypatch.setattr(
+        statement_endpoint.ParsedStatement,
+        "from_statement_result",
+        lambda value: object(),
+    )
+    monkeypatch.setattr(
+        statement_endpoint.ReconciliationService,
+        "reconcile",
+        lambda *args, **kwargs: SimpleNamespace(
+            new_transactions=[parsed_transaction],
+            duplicate_transactions=[],
+            potential_duplicates=[],
+            total_parsed=1,
+        ),
+    )
+
+    response = auth_client.post(
+        "/api/v1/ingest/upload/import",
+        files={"file": ("statement.pdf", b"%PDF-test", "application/pdf")},
+        data={
+            "confirm_reconciled": "true",
+            "accepted_fingerprint": "b" * 64,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "reopen" in response.json()["detail"].lower()
+    assert (
+        db_session.query(Transaction)
+        .filter(Transaction.source == "statement_upload")
+        .count()
+        == 0
+    )
 
 # --- Income source CRUD ---
 

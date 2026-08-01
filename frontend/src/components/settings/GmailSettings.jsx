@@ -479,8 +479,9 @@ function GmailSettings() {
               <div className="mt-3 pt-3 border-t border-slate-700/30 flex items-start gap-2 text-xs text-amber-300">
                 <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
                 <span>
-                  Gmail returned a partial result. Imported messages were kept,
-                  but GODFIN did not advance the sync position. Run the sync again.
+                  {syncStatus.result?.skipped_finalized_period > 0
+                    ? `${syncStatus.result.skipped_finalized_period} transaction${syncStatus.result.skipped_finalized_period === 1 ? '' : 's'} could not be added because the month is finalized. Reopen that month, then run the sync again.`
+                    : 'Gmail returned a partial result. Imported messages were kept, but GODFIN did not advance the sync position. Run the sync again.'}
                 </span>
               </div>
             )}

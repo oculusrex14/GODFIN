@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.audit import FinalizedPeriodError
 from app.core.classifier import classify_transaction
 from app.core.database import get_db
 from app.core.merchant_memory_service import upsert_merchant_memory
@@ -499,6 +500,9 @@ async def import_statement(
             "computed_balance": computed_balance,
             "balance_discrepancy": balance_discrepancy,
         }
+    except FinalizedPeriodError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as e:

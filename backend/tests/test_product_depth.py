@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from app.models.account import Account
 from app.models.app_setting import AppSetting
+from app.models.audit_session import AuditSession
 from app.models.recurring_pattern import RecurringPattern
 from app.models.subscription import Subscription
 from app.models.transaction import Transaction
@@ -132,6 +133,50 @@ def test_transfer_scan_and_confirm(auth_client, db_session):
 def test_transfer_matching_requires_paid_license(auth_client):
     response = auth_client.get("/api/v1/transfers")
     assert response.status_code == 403
+
+
+def test_transfer_confirmation_returns_409_for_finalized_period(
+    auth_client,
+    db_session,
+):
+    _activate_pro(db_session)
+    accounts = db_session.query(Account).limit(2).all()
+    _transaction(
+        db_session,
+        account_id=accounts[0].id,
+        txn_date=date(2026, 7, 10),
+        amount=5000,
+        txn_type="debit",
+        merchant="Card payment",
+    )
+    _transaction(
+        db_session,
+        account_id=accounts[1].id,
+        txn_date=date(2026, 7, 11),
+        amount=5000,
+        txn_type="credit",
+        merchant="Payment received",
+    )
+    db_session.commit()
+    candidate = auth_client.post("/api/v1/transfers/scan").json()[
+        "candidates"
+    ][0]
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=7,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+
+    response = auth_client.post(
+        f"/api/v1/transfers/{candidate['id']}/decision",
+        json={"decision": "confirm"},
+    )
+
+    assert response.status_code == 409
+    assert "reopen" in response.json()["detail"].lower()
 
 
 def test_subscription_confirmation_and_reminder(auth_client, db_session):

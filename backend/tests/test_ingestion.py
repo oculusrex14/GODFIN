@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.core.ingestion import run_ingestion
+from app.core.gmail_service import GmailFetchResult
+from app.core.ingestion import run_ingestion, run_initial_sync
+from app.models.app_setting import AppSetting
+from app.models.audit_session import AuditSession
+from app.models.transaction import Transaction
 from tests.fixtures.mock_emails import (
     ALL_MOCK_EMAILS,
     MOCK_BLACKLISTED_EMAIL,
@@ -19,6 +23,118 @@ def test_ingestion_creates_transactions(db_session):
     result = run_ingestion(db_session, mock_messages=messages)
     assert result.created == 2
     assert result.processed == 2
+
+
+def test_ingestion_reports_and_retries_finalized_period_messages(
+    db_session,
+):
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=2,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+
+    result = run_ingestion(
+        db_session,
+        mock_messages=[MOCK_UPI_DEBIT_EMAIL],
+    )
+
+    assert result.created == 0
+    assert result.skipped_finalized_period == 1
+    assert result.source_status == "partial"
+    assert result.retryable is True
+    assert (
+        db_session.query(Transaction)
+        .filter_by(email_message_id=MOCK_UPI_DEBIT_EMAIL["id"])
+        .first()
+        is None
+    )
+    assert result.to_dict()["skipped_finalized_period"] == 1
+
+
+def test_finalized_period_does_not_advance_gmail_cursor(
+    db_session,
+    monkeypatch,
+):
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=2,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+    existing_history = (
+        db_session.query(AppSetting)
+        .filter_by(key="last_gmail_history_id")
+        .first()
+    )
+    history_before = existing_history.value if existing_history else None
+    existing_last_run = (
+        db_session.query(AppSetting)
+        .filter_by(key="last_ingestion_run")
+        .first()
+    )
+    last_run_before = existing_last_run.value if existing_last_run else None
+    monkeypatch.setattr(
+        "app.core.ingestion.fetch_messages",
+        lambda **kwargs: GmailFetchResult(
+            messages=[MOCK_UPI_DEBIT_EMAIL],
+            history_id="history-after-blocked-message",
+        ),
+    )
+
+    result = run_ingestion(db_session)
+
+    assert result.source_status == "partial"
+    assert result.retryable is True
+    history_after = (
+        db_session.query(AppSetting)
+        .filter_by(key="last_gmail_history_id")
+        .first()
+    )
+    last_run_after = (
+        db_session.query(AppSetting)
+        .filter_by(key="last_ingestion_run")
+        .first()
+    )
+    assert (history_after.value if history_after else None) == history_before
+    assert (last_run_after.value if last_run_after else None) == last_run_before
+
+
+def test_initial_sync_remains_incomplete_when_finalized_rows_are_held(
+    db_session,
+    monkeypatch,
+):
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=2,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.core.ingestion.fetch_messages",
+        lambda **kwargs: GmailFetchResult(
+            messages=[MOCK_UPI_DEBIT_EMAIL],
+            history_id="history-after-blocked-message",
+        ),
+    )
+
+    result = run_initial_sync(db_session)
+
+    assert result.source_status == "partial"
+    assert (
+        db_session.query(AppSetting)
+        .filter_by(key="initial_sync_completed")
+        .one()
+        .value
+        == "false"
+    )
 
 
 def test_ingestion_skips_blacklisted(db_session):

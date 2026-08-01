@@ -178,6 +178,8 @@ def test_reopen_audit(db_session):
     new_session = reopen_audit(db_session, session.id)
     db_session.flush()
 
+    db_session.refresh(session)
+    assert session.status == 'discarded'
     assert new_session.status == 'draft'
     assert new_session.period_year == 2025
     assert new_session.period_month == 4
@@ -185,6 +187,13 @@ def test_reopen_audit(db_session):
     db_session.refresh(txn)
     assert txn.is_locked is False
     assert txn.audit_session_id is None
+    assert (
+        db_session.query(AuditSession)
+        .filter_by(period_year=2025, period_month=4)
+        .filter(AuditSession.status.in_(['draft', 'finalized', 'locked']))
+        .count()
+        == 1
+    )
 
 
 def test_cannot_reopen_non_finalized(db_session):

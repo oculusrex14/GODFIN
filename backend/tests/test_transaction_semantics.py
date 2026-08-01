@@ -5,6 +5,7 @@ from datetime import date
 
 import pytest
 
+from app.core.audit import finalize_audit, start_audit
 from app.core.product_depth import decide_transfer_match
 from app.core.reconciliation import ReconciliationService
 from app.core.reporting import prepare_summary_report
@@ -92,6 +93,47 @@ def test_confirmed_transfer_pair_has_zero_income_spend_and_net_movement(
     assert response.json()["month_income"] == 0
     assert response.json()["month_spend"] == 0
     assert response.json()["account_balance"] == 0
+
+
+def test_transfer_confirmation_cannot_mutate_a_finalized_period(
+    db_session,
+):
+    accounts = db_session.query(Account).limit(2).all()
+    debit = _transaction(
+        db_session,
+        account_id=accounts[0].id,
+        transaction_date=date(2026, 6, 10),
+        amount=10_000,
+        transaction_type="debit",
+        merchant="Own account transfer sent",
+    )
+    credit = _transaction(
+        db_session,
+        account_id=accounts[1].id,
+        transaction_date=date(2026, 6, 10),
+        amount=10_000,
+        transaction_type="credit",
+        merchant="Own account transfer received",
+    )
+    match = TransferMatch(
+        debit_transaction_id=debit.id,
+        credit_transaction_id=credit.id,
+        amount=10_000,
+        date_gap_days=0,
+        confidence=1.0,
+        status="pending",
+    )
+    db_session.add(match)
+    audit = start_audit(db_session, 2026, 6)
+    finalize_audit(db_session, audit.id)
+    db_session.flush()
+
+    with pytest.raises(Exception, match="(?i)finalized.*reopen"):
+        decide_transfer_match(db_session, match, "confirm")
+
+    assert match.status == "pending"
+    assert debit.is_transfer is False
+    assert credit.is_transfer is False
 
 
 def test_generic_statement_credit_defaults_to_unverified_not_income():
