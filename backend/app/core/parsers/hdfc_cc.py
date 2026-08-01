@@ -14,7 +14,9 @@ from app.core.statement_parser import (
 
 def _detect(text: str) -> bool:
     normalized = text.lower()
-    return "credit card" in normalized or "card number" in normalized
+    return "hdfc" in normalized and (
+        "credit card" in normalized or "card number" in normalized
+    )
 
 
 def _parse(
@@ -22,7 +24,11 @@ def _parse(
     file_format: str,
     password: Optional[str],
 ) -> StatementParseResult:
-    result = StatementParseResult(statement_type="hdfc_credit_card")
+    result = StatementParseResult(
+        statement_type="hdfc_credit_card",
+        parser_profile="hdfc_credit",
+        recognized=True,
+    )
     if file_format != "pdf":
         result.errors.append(f"Unsupported HDFC credit-card format: {file_format}")
         return result
@@ -39,6 +45,15 @@ def _parse(
         result.errors.append(f"Parse error: {exc}")
     finally:
         pdf.close()
+    if result.errors:
+        result.transactions.clear()
+        result.reconciliation_status = "failed"
+    elif not result.transactions:
+        result.errors.append("No explicit HDFC credit-card transactions were found")
+        result.reconciliation_status = "failed"
+    else:
+        result.reconciliation_status = "passed"
+        result.reconciliation_method = "explicit_credit_card_amount_columns"
     return result
 
 

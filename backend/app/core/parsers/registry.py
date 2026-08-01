@@ -63,30 +63,47 @@ def parse_registered_statement(
             errors=[f"No statement parser supports {file_format.upper()}"],
         )
 
-    detected: list[StatementParserPlugin] = []
     if file_format == "pdf":
         text, error = _pdf_text(contents, password)
         if error:
             return StatementParseResult(errors=[error])
         detected = [parser for parser in parsers if parser.detect_text(text)]
-    elif file_format in {"xls", "xlsx"}:
-        detected = [
-            parser for parser in parsers
-            if parser.profile == "hdfc_savings"
+        if not detected:
+            return StatementParseResult(
+                errors=[
+                    "Unsupported or unrecognized PDF statement; select a supported HDFC profile",
+                ],
+            )
+        if len(detected) != 1:
+            return StatementParseResult(
+                errors=["Statement is ambiguous between multiple parser profiles"],
+            )
+        parser = detected[0]
+    else:
+        spreadsheet_parsers = [
+            parser for parser in parsers if parser.profile == "hdfc_savings"
         ]
+        if len(spreadsheet_parsers) != 1:
+            return StatementParseResult(
+                errors=["No unique parser is registered for this spreadsheet format"],
+            )
+        parser = spreadsheet_parsers[0]
 
-    ordered = detected + [parser for parser in parsers if parser not in detected]
-    collected_errors: list[str] = []
-    last_result = StatementParseResult()
-    for parser in ordered:
-        result = parser.parse(contents, file_format, password)
-        last_result = result
-        if result.transactions:
-            result.errors = []
-            return result
-        collected_errors.extend(result.errors)
-
-    last_result.errors = collected_errors or [
-        "No registered parser recognized this statement",
-    ]
-    return last_result
+    result = parser.parse(contents, file_format, password)
+    result.parser_profile = result.parser_profile or parser.profile
+    if result.errors or not result.transactions:
+        result.transactions.clear()
+        result.reconciliation_status = "failed"
+        if not result.errors:
+            result.errors.append("Registered parser produced no transactions")
+        return result
+    if not result.recognized:
+        result.transactions.clear()
+        result.reconciliation_status = "failed"
+        result.errors.append("Parser did not establish a supported bank and statement profile")
+        return result
+    if result.reconciliation_status != "passed":
+        result.transactions.clear()
+        result.errors.append("Statement controls did not reconcile")
+        result.reconciliation_status = "failed"
+    return result

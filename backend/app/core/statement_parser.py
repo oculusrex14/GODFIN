@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import List, Optional
 
 import pdfplumber
@@ -97,6 +99,10 @@ class ParsedStatement:
             statement_type=result.statement_type,
             account_number='',
             statement_period=f"{result.period_start} to {result.period_end}" if result.period_start and result.period_end else '',
+            opening_balance=result.opening_balance,
+            closing_balance=result.closing_balance,
+            total_debits=result.total_debits,
+            total_credits=result.total_credits,
         )
         transactions = [ParsedTransaction.from_statement_transaction(t) for t in result.transactions]
         return cls(metadata=metadata, transactions=transactions)
@@ -106,9 +112,185 @@ class ParsedStatement:
 class StatementParseResult:
     transactions: list[StatementTransaction] = field(default_factory=list)
     statement_type: str = ''  # 'hdfc_savings' or 'hdfc_credit_card'
+    parser_profile: str = ''
+    recognized: bool = False
+    reconciliation_status: str = 'not_checked'
+    reconciliation_method: str = ''
+    source_digest: str = ''
     period_start: Optional[date] = None
     period_end: Optional[date] = None
+    opening_balance: Optional[float] = None
+    closing_balance: Optional[float] = None
+    total_debits: Optional[float] = None
+    total_credits: Optional[float] = None
     errors: list[str] = field(default_factory=list)
+
+
+_MONEY_QUANTUM = Decimal("0.01")
+
+
+def _money_decimal(value: object) -> Optional[Decimal]:
+    if value is None:
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    if not parsed.is_finite():
+        return None
+    return parsed.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _append_strict_savings_txn(
+    raw: dict,
+    txns_out: list[StatementTransaction],
+    errors: list[str],
+    *,
+    row_label: str,
+) -> None:
+    """Append one explicit savings row or record why the row is unsafe.
+
+    Debit/credit direction must come from the statement's withdrawal/deposit
+    columns. Running balances are controls only; they are never substituted for
+    a transaction amount.
+    """
+    transaction_date = raw.get("date")
+    narration = str(raw.get("narration") or "").strip()
+    withdrawal = _money_decimal(raw.get("withdrawal"))
+    deposit = _money_decimal(raw.get("deposit"))
+    balance = _money_decimal(raw.get("balance"))
+
+    if transaction_date is None:
+        errors.append(f"{row_label}: missing or invalid transaction date")
+        return
+    if not narration:
+        errors.append(f"{row_label}: missing transaction narration")
+        return
+
+    has_withdrawal = withdrawal is not None and withdrawal > 0
+    has_deposit = deposit is not None and deposit > 0
+    if has_withdrawal and has_deposit:
+        errors.append(f"{row_label}: both withdrawal and deposit are populated")
+        return
+    if not has_withdrawal and not has_deposit:
+        errors.append(f"{row_label}: exactly one explicit withdrawal or deposit is required")
+        return
+    if balance is None:
+        errors.append(f"{row_label}: closing balance is required for reconciliation")
+        return
+
+    normalized = dict(raw)
+    normalized["narration"] = narration
+    normalized["withdrawal"] = float(withdrawal) if has_withdrawal else None
+    normalized["deposit"] = float(deposit) if has_deposit else None
+    normalized["balance"] = float(balance)
+    _finalize_savings_txn(normalized, txns_out)
+
+
+def _validate_savings_controls(result: StatementParseResult) -> None:
+    """Fail the complete savings parse unless running balances reconcile."""
+    result.reconciliation_status = "failed"
+    if result.errors:
+        result.transactions.clear()
+        return
+    if len(result.transactions) < 2:
+        result.errors.append(
+            "Savings statement needs at least two explicit rows to verify balance continuity",
+        )
+        result.transactions.clear()
+        return
+
+    for index, transaction in enumerate(result.transactions, start=1):
+        if (
+            transaction.txn_type not in {"debit", "credit"}
+            or not math.isfinite(float(transaction.amount))
+            or float(transaction.amount) <= 0
+            or _money_decimal(transaction.closing_balance) is None
+        ):
+            result.errors.append(f"Transaction {index} has invalid financial controls")
+            result.transactions.clear()
+            return
+
+    def ordered_candidate(transactions: list[StatementTransaction]) -> bool:
+        return all(
+            left.date <= right.date
+            for left, right in zip(transactions, transactions[1:])
+        )
+
+    def continuity_error(transactions: list[StatementTransaction]) -> Optional[str]:
+        for index in range(1, len(transactions)):
+            previous = transactions[index - 1]
+            current = transactions[index]
+            previous_balance = _money_decimal(previous.closing_balance)
+            current_balance = _money_decimal(current.closing_balance)
+            amount = _money_decimal(current.amount)
+            assert previous_balance is not None
+            assert current_balance is not None
+            assert amount is not None
+            signed_amount = amount if current.txn_type == "credit" else -amount
+            expected = (previous_balance + signed_amount).quantize(
+                _MONEY_QUANTUM,
+                rounding=ROUND_HALF_UP,
+            )
+            if expected != current_balance:
+                return (
+                    "Savings balance continuity failed between rows "
+                    f"{index} and {index + 1}: expected {expected}, "
+                    f"statement shows {current_balance}"
+                )
+        return None
+
+    original = list(result.transactions)
+    reversed_rows = list(reversed(result.transactions))
+    candidates = [rows for rows in (original, reversed_rows) if ordered_candidate(rows)]
+    passing: Optional[list[StatementTransaction]] = None
+    failures: list[str] = []
+    for candidate in candidates:
+        error = continuity_error(candidate)
+        if error is None:
+            passing = candidate
+            break
+        failures.append(error)
+
+    if passing is None:
+        result.errors.append(
+            failures[0]
+            if failures
+            else "Transaction dates are not consistently chronological or reverse chronological",
+        )
+        result.transactions.clear()
+        return
+
+    first = passing[0]
+    last = passing[-1]
+    first_balance = _money_decimal(first.closing_balance)
+    first_amount = _money_decimal(first.amount)
+    assert first_balance is not None
+    assert first_amount is not None
+    first_signed = first_amount if first.txn_type == "credit" else -first_amount
+    opening = (first_balance - first_signed).quantize(
+        _MONEY_QUANTUM,
+        rounding=ROUND_HALF_UP,
+    )
+    debits = sum(
+        (_money_decimal(txn.amount) or Decimal("0"))
+        for txn in result.transactions
+        if txn.txn_type == "debit"
+    )
+    credits = sum(
+        (_money_decimal(txn.amount) or Decimal("0"))
+        for txn in result.transactions
+        if txn.txn_type == "credit"
+    )
+
+    result.opening_balance = float(opening)
+    result.closing_balance = float(_money_decimal(last.closing_balance) or Decimal("0"))
+    result.total_debits = float(debits.quantize(_MONEY_QUANTUM))
+    result.total_credits = float(credits.quantize(_MONEY_QUANTUM))
+    result.period_start = result.period_start or min(txn.date for txn in result.transactions)
+    result.period_end = result.period_end or max(txn.date for txn in result.transactions)
+    result.reconciliation_status = "passed"
+    result.reconciliation_method = "explicit_columns_and_running_balance"
 
 
 def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
@@ -119,8 +301,10 @@ def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
     - Header row: Date | Narration | Chq./Ref.No. | Value Dt | Withdrawal Amt. | Deposit Amt. | Closing Balance
     - Data rows until separator (********) or empty date
     """
-    result = StatementParseResult()
-    result.statement_type = 'hdfc_savings'
+    result = StatementParseResult(
+        statement_type='hdfc_savings',
+        parser_profile='hdfc_savings',
+    )
 
     try:
         wb = xlrd.open_workbook(file_contents=file_bytes)
@@ -133,9 +317,12 @@ def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
     header_row = None
     col_map: dict[str, int] = {}
 
+    bank_fingerprint = False
     for i in range(min(sheet.nrows, 30)):
         row_vals = [str(sheet.cell_value(i, j)).strip() for j in range(sheet.ncols)]
         row_upper = ' '.join(row_vals).upper()
+        if 'HDFC' in row_upper:
+            bank_fingerprint = True
 
         # Extract metadata
         if 'ACCOUNT NO' in row_upper:
@@ -175,15 +362,18 @@ def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
     if header_row is None:
         result.errors.append("Could not find header row in XLS")
         return result
+    if not bank_fingerprint:
+        result.errors.append("HDFC bank fingerprint was not found in XLS metadata")
+        return result
 
-    # Default column positions
-    col_map.setdefault('date', 0)
-    col_map.setdefault('narration', 1)
-    col_map.setdefault('ref', 2)
-    col_map.setdefault('value_date', 3)
-    col_map.setdefault('withdrawal', 4)
-    col_map.setdefault('deposit', 5)
-    col_map.setdefault('balance', 6)
+    required_columns = {'date', 'narration', 'withdrawal', 'deposit', 'balance'}
+    missing_columns = sorted(required_columns - set(col_map))
+    if missing_columns:
+        result.errors.append(
+            "Missing required XLS columns: " + ", ".join(missing_columns),
+        )
+        return result
+    result.recognized = True
 
     # Parse data rows (skip header + separator row)
     data_start = header_row + 1
@@ -210,7 +400,12 @@ def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
         if not narration:
             continue
 
-        ref = str(sheet.cell_value(i, col_map['ref'])).strip() if col_map['ref'] < sheet.ncols else ''
+        ref_index = col_map.get('ref')
+        ref = (
+            str(sheet.cell_value(i, ref_index)).strip()
+            if ref_index is not None and ref_index < sheet.ncols
+            else ''
+        )
 
         # Amounts: xlrd returns float for numbers, empty string for blank
         wd_raw = sheet.cell_value(i, col_map['withdrawal'])
@@ -236,10 +431,17 @@ def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
             'deposit': deposit,
             'balance': balance,
         }
-        _finalize_savings_txn(txn_dict, result.transactions)
+        _append_strict_savings_txn(
+            txn_dict,
+            result.transactions,
+            result.errors,
+            row_label=f"XLS row {i + 1}",
+        )
 
-    if not result.transactions:
+    if not result.transactions and not result.errors:
         result.errors.append("No transactions found in XLS")
+
+    _validate_savings_controls(result)
 
     logger.info(f"XLS parser: found {len(result.transactions)} transactions")
     return result
@@ -261,19 +463,25 @@ def parse_statement_pdf(pdf_bytes: bytes, password: Optional[str] = None) -> Sta
             text = page.extract_text() or ''
             full_text += text + '\n'
 
-        if 'credit card' in full_text.lower() or 'card number' in full_text.lower():
+        normalized_text = full_text.lower()
+        if 'hdfc' not in normalized_text:
+            result.errors.append(
+                "Unsupported or unrecognized PDF statement; HDFC fingerprint not found",
+            )
+        elif 'credit card' in normalized_text or 'card number' in normalized_text:
             result.statement_type = 'hdfc_credit_card'
+            result.parser_profile = 'hdfc_credit'
+            result.recognized = True
             _parse_hdfc_cc_statement(pdf, result)
-        elif 'savings account' in full_text.lower() or 'statement of account' in full_text.lower():
+        elif 'savings account' in normalized_text or 'statement of account' in normalized_text:
             result.statement_type = 'hdfc_savings'
+            result.parser_profile = 'hdfc_savings'
+            result.recognized = True
             _parse_hdfc_savings_statement(pdf, result)
         else:
-            # Try savings parser as fallback
-            result.statement_type = 'hdfc_savings'
-            _parse_hdfc_savings_statement(pdf, result)
-            if not result.transactions:
-                result.statement_type = 'hdfc_credit_card'
-                _parse_hdfc_cc_statement(pdf, result)
+            result.errors.append(
+                "Unsupported HDFC PDF layout; statement profile could not be established",
+            )
 
     except Exception as e:
         result.errors.append(f"Parse error: {str(e)}")
@@ -457,21 +665,37 @@ SAVINGS_DEBIT_CREDIT_PATTERN = re.compile(
 
 
 def _parse_hdfc_savings_statement(pdf: pdfplumber.PDF, result: StatementParseResult) -> None:
-    """Parse HDFC savings statement with multi-line narration joining."""
+    """Parse only explicit, column-preserving HDFC savings PDF tables."""
     raw_txns: list[StatementTransaction] = []
-    # Column map discovered from first header — reused for headerless pages
     saved_col_map: Optional[dict] = None
+    saw_supported_table = False
 
-    for page in pdf.pages:
+    for page_number, page in enumerate(pdf.pages, start=1):
         tables = page.extract_tables()
         if tables:
             for table in tables:
-                col_map_used = _process_savings_table_v2(table, raw_txns, saved_col_map)
+                col_map_used = _process_savings_table_v2(
+                    table,
+                    raw_txns,
+                    saved_col_map,
+                    errors=result.errors,
+                    table_label=f"PDF page {page_number}",
+                )
                 if col_map_used and saved_col_map is None:
                     saved_col_map = col_map_used
+                saw_supported_table = saw_supported_table or bool(col_map_used)
         else:
-            text = page.extract_text() or ''
-            _process_savings_text_v2(text, raw_txns)
+            result.errors.append(
+                f"PDF page {page_number}: text-only statement extraction cannot preserve "
+                "withdrawal and deposit columns",
+            )
+
+    if not saw_supported_table and not result.errors:
+        result.errors.append("No supported HDFC savings transaction table was found")
+    if result.errors:
+        result.transactions.clear()
+        result.reconciliation_status = "failed"
+        return
 
     # Deduplicate (same date + amount + ref + description prefix = duplicate from page overlap)
     seen: set[tuple] = set()
@@ -481,6 +705,10 @@ def _parse_hdfc_savings_statement(pdf: pdfplumber.PDF, result: StatementParseRes
             seen.add(key)
             result.transactions.append(txn)
 
+    if not result.transactions:
+        result.errors.append("No explicit savings transactions were found")
+    _validate_savings_controls(result)
+
 
 def _safe_cell(row: list, idx: int) -> str:
     """Bounds-safe cell accessor for table rows."""
@@ -489,11 +717,21 @@ def _safe_cell(row: list, idx: int) -> str:
     return str(row[idx] or '').strip()
 
 
-def _process_savings_table_v2(table: list, txns_out: list, saved_col_map: Optional[dict] = None) -> Optional[dict]:
-    """Process savings statement table with header detection and continuation row joining.
+def _process_savings_table_v2(
+    table: list,
+    txns_out: list[StatementTransaction],
+    saved_col_map: Optional[dict] = None,
+    *,
+    errors: Optional[list[str]] = None,
+    table_label: str = "PDF table",
+) -> Optional[dict]:
+    """Process rows only when their explicit statement columns remain aligned.
 
-    Returns the column map used, so it can be reused for headerless pages.
+    Packed PDF rows are rejected. They cannot safely align multiline narration
+    with sparse withdrawal/deposit cells, and running-balance deltas must never
+    be used to guess transaction facts.
     """
+    parse_errors = errors if errors is not None else []
     if not table or len(table) < 1:
         return None
 
@@ -504,7 +742,7 @@ def _process_savings_table_v2(table: list, txns_out: list, saved_col_map: Option
         if not row:
             continue
         row_text = ' '.join(str(c or '') for c in row).upper()
-        if 'NARRATION' in row_text:
+        if 'NARRATION' in row_text and 'DATE' in row_text:
             header_idx = i
             for j, cell in enumerate(row):
                 cell_str = str(cell or '').strip().upper()
@@ -526,238 +764,59 @@ def _process_savings_table_v2(table: list, txns_out: list, saved_col_map: Option
 
     if header_idx is None:
         if saved_col_map:
-            # No header on this page — use saved column map, treat all rows as data
-            col_map = saved_col_map
-            header_idx = -1  # So header_idx + 1 == 0, processing all rows
+            col_map = dict(saved_col_map)
+            header_idx = -1
         else:
-            return None  # No header found and no saved map
+            return None
 
-    # Default column positions if header parsing missed some
-    col_map.setdefault('date', 0)
-    col_map.setdefault('narration', 1)
-    col_map.setdefault('ref', 2)
-    col_map.setdefault('value_date', 3)
-    col_map.setdefault('withdrawal', 4)
-    col_map.setdefault('deposit', 5)
-    col_map.setdefault('balance', 6)
-
-    # pdfplumber often packs an entire page into a single table row with \n
-    # inside each cell. The columns have DIFFERENT line counts because narrations
-    # span multiple lines. We use the date column as anchor — each date line
-    # starts a new transaction. Narration lines between dates are continuations.
-    # Withdrawal/Deposit/Balance/Ref have one entry per transaction (aligned with dates).
+    required_columns = {'date', 'narration', 'withdrawal', 'deposit', 'balance'}
+    missing_columns = sorted(required_columns - set(col_map))
+    if missing_columns:
+        parse_errors.append(
+            f"{table_label}: missing required statement columns: "
+            + ", ".join(missing_columns),
+        )
+        return None
 
     data_rows = table[header_idx + 1:]
 
-    for row in data_rows:
+    for row_number, row in enumerate(data_rows, start=header_idx + 2):
         if not row or all(cell is None or str(cell).strip() == '' for cell in row):
             continue
 
-        # Split each column by \n
-        date_lines = str(row[col_map['date']] or '').split('\n')
-        narration_lines = str(row[col_map['narration']] or '').split('\n')
-        ref_lines = str(row[col_map['ref']] or '').split('\n')
-        value_date_lines = str(row[col_map.get('value_date', 3)] or '').split('\n') if col_map.get('value_date') is not None and col_map['value_date'] < len(row) else []
-        withdrawal_lines = str(row[col_map['withdrawal']] or '').split('\n') if col_map['withdrawal'] < len(row) else []
-        deposit_lines = str(row[col_map['deposit']] or '').split('\n') if col_map['deposit'] < len(row) else []
-        balance_lines = str(row[col_map['balance']] or '').split('\n') if col_map['balance'] < len(row) else []
-
-        # Check if this is a multi-line packed row
-        max_date_lines = len([d for d in date_lines if d.strip()])
-        if max_date_lines <= 1 and len(narration_lines) <= 1:
-            # Normal single-line row — process directly
-            date_val = _parse_statement_date(date_lines[0].strip() if date_lines else '')
-            if date_val:
-                txn_dict = {
-                    'date': date_val,
-                    'narration': narration_lines[0].strip() if narration_lines else '',
-                    'ref': ref_lines[0].strip() if ref_lines else '',
-                    'value_date': value_date_lines[0].strip() if value_date_lines else '',
-                    'withdrawal': _parse_amount(withdrawal_lines[0].strip() if withdrawal_lines else ''),
-                    'deposit': _parse_amount(deposit_lines[0].strip() if deposit_lines else ''),
-                    'balance': _parse_amount(balance_lines[0].strip() if balance_lines else ''),
-                }
-                _finalize_savings_txn(txn_dict, txns_out)
+        cell_values = {
+            name: _safe_cell(row, index)
+            for name, index in col_map.items()
+        }
+        if any("\n" in value or "\r" in value for value in cell_values.values()):
+            parse_errors.append(
+                f"{table_label} row {row_number}: packed multi-line PDF rows are "
+                "ambiguous; use the bank XLS/XLSX export",
+            )
             continue
 
-        # Multi-line packed row: date column is the anchor.
-        # Build transaction groups by scanning narration lines and aligning
-        # with date/ref/withdrawal/deposit/balance which have fewer lines.
-        # Each date corresponds to one transaction; narration lines between
-        # dates are continuation lines that should be joined.
+        transaction_date = _parse_statement_date(cell_values.get('date', ''))
+        if transaction_date is None:
+            if any(value.strip() for value in cell_values.values()):
+                parse_errors.append(
+                    f"{table_label} row {row_number}: non-empty row has no valid transaction date",
+                )
+            continue
 
-        # Index counters for the amount-aligned columns
-        txn_idx = 0  # Which transaction we're on (increments with each date)
-        current_txn: Optional[dict] = None
-
-        # Track which narration lines belong to which date
-        date_positions = []  # narration line indices where new transactions start
-        for i, dl in enumerate(date_lines):
-            if _parse_statement_date(dl.strip()):
-                date_positions.append(i)
-
-        # For each date position, gather narration lines until the next date
-        for pos_idx, date_line_idx in enumerate(date_positions):
-            date_val = _parse_statement_date(date_lines[date_line_idx].strip())
-            if not date_val:
-                continue
-
-            # Figure out where this transaction's narration ends
-            if pos_idx + 1 < len(date_positions):
-                next_date_line = date_positions[pos_idx + 1]
-            else:
-                next_date_line = len(narration_lines)
-
-            # Collect narration lines for this transaction
-            # The narration lines corresponding to this txn start at some offset.
-            # Since dates and narrations are printed in order, we need to map
-            # date_line_idx to the correct narration range.
-            # However narration has MORE lines than dates, so we can't use
-            # date_line_idx directly. Instead we track a running narration pointer.
-            pass
-
-        # Better approach: walk narration lines, use date column to detect boundaries.
-        # The date column has entries only on transaction-start lines; continuation
-        # lines in the date column are empty or repeat previous date.
-        # But pdfplumber packs dates densely (no empty lines for continuations).
-        # So we need a different strategy: scan narration for date-like patterns
-        # that correspond to the dates we found.
-
-        # Simplest reliable approach: since we know the exact dates and their order,
-        # and we know ref/withdrawal/deposit/balance have one entry per transaction,
-        # we just need to split narration lines into groups.
-        # Use a heuristic: narration lines that look like they start a new txn
-        # typically start with known prefixes (UPI-, NEFT, POS, etc.) or uppercase.
-        # But more robust: count transactions from date column, then assign
-        # narration lines by finding natural break points.
-
-        # Most robust: split narration by matching against ref numbers.
-        # Each transaction has a ref in ref_lines[txn_idx]. When we see narration
-        # content that matches a known pattern start, that's a new transaction.
-
-        # Actually the simplest approach that works:
-        # dates has N entries (one per txn), narration has M > N entries.
-        # We know the first narration line belongs to the first date.
-        # Subsequent narration lines without a corresponding date are continuations.
-        # We can detect boundaries by checking if a narration line starts a
-        # recognized pattern AND we haven't assigned all dates yet.
-
-        # Let's just use date line count to determine transaction boundaries
-        # in the narration stream.
-        n_txns = len(date_positions)
-        narr_per_txn: list[list[str]] = [[] for _ in range(n_txns)]
-
-        # Assign narration lines to transactions
-        # Strategy: lines are in order. When we encounter a narration that
-        # looks like the start of a new txn pattern, advance to next txn group.
-        txn_group = 0
-        for nl in narration_lines:
-            nl_stripped = nl.strip()
-            if not nl_stripped:
-                continue
-            # Check if this starts a new transaction (only advance if we haven't filled all groups)
-            if txn_group < n_txns:
-                narr_per_txn[txn_group].append(nl_stripped)
-                # Heuristic to detect we've moved to the next transaction:
-                # if the NEXT narration line would be the start of a new txn.
-                # We defer this check to after we've seen the line.
-            else:
-                # Extra lines beyond expected — append to last
-                narr_per_txn[-1].append(nl_stripped)
-
-        # Re-do: the above doesn't actually split correctly.
-        # Better: use the fact that ref_lines has exactly one per txn,
-        # and check if a ref appears in the narration stream as a marker.
-        # Or even simpler: just use the known date values to find splits.
-
-        # Let me use a completely different, cleaner approach.
-        # Walk all narration lines. Maintain a pointer into date_positions.
-        # A narration line "belongs" to the current transaction.
-        # We advance to the next transaction when we've seen enough narration
-        # lines AND the next narration line looks like a transaction start.
-
-        # The KEY insight from the PDF: narration lines that START a txn
-        # begin with: POS, UPI-, NEFT, IB, FD, ME DC, ACH, CRV, RD, EXC, or
-        # a known merchant pattern. Continuation lines typically start with
-        # lowercase or are fragments (e.g. "0YBLUPI-", "KITCHEN-", "-YESB").
-
-        _TXN_START_PATTERNS = re.compile(
-            r'^(POS|UPI-|NEFT\s?CR|IB\s?BILLPAY|FD\s?THROUGH|ME\s?DC|ACH\s?C-|CRV|RD\s?THROUGH|RD\s?INSTALLMENT|EXC\s?PYMT)',
-            re.IGNORECASE
+        _append_strict_savings_txn(
+            {
+                'date': transaction_date,
+                'narration': cell_values.get('narration', ''),
+                'ref': cell_values.get('ref', ''),
+                'value_date': cell_values.get('value_date', ''),
+                'withdrawal': _parse_amount(cell_values.get('withdrawal', '')),
+                'deposit': _parse_amount(cell_values.get('deposit', '')),
+                'balance': _parse_amount(cell_values.get('balance', '')),
+            },
+            txns_out,
+            parse_errors,
+            row_label=f"{table_label} row {row_number}",
         )
-
-        narr_per_txn = [[] for _ in range(n_txns)]
-        txn_group = 0
-        for nl in narration_lines:
-            nl_stripped = nl.strip()
-            if not nl_stripped:
-                continue
-            # If we're past the first line of the current group and this looks
-            # like a new transaction start, advance to next group
-            if (txn_group < n_txns - 1 and
-                    len(narr_per_txn[txn_group]) > 0 and
-                    _TXN_START_PATTERNS.match(nl_stripped)):
-                txn_group += 1
-            narr_per_txn[txn_group].append(nl_stripped)
-
-        # Parse all balance values (1:1 with dates, most reliable column)
-        parsed_balances = []
-        for bl in balance_lines:
-            parsed_balances.append(_parse_amount(bl.strip()) if bl.strip() else None)
-
-        # Withdrawal and deposit columns are SPARSE — they only have entries
-        # for their respective transaction types, so direct indexing doesn't work.
-        # Instead, derive amount and direction from balance changes.
-
-        # Build withdrawal/deposit lookup by consuming them in order
-        wd_queue = [_parse_amount(w.strip()) for w in withdrawal_lines if w.strip()]
-        dp_queue = [_parse_amount(d.strip()) for d in deposit_lines if d.strip()]
-        wd_ptr = 0
-        dp_ptr = 0
-
-        # Now build transactions
-        for i in range(n_txns):
-            date_val = _parse_statement_date(date_lines[date_positions[i]].strip())
-            if not date_val:
-                continue
-
-            joined_narration = ' '.join(narr_per_txn[i]) if i < len(narr_per_txn) else ''
-
-            ref_val = ref_lines[i].strip() if i < len(ref_lines) else ''
-            vd_val = value_date_lines[i].strip() if i < len(value_date_lines) else ''
-            bl_val = parsed_balances[i] if i < len(parsed_balances) else None
-            prev_bal = parsed_balances[i - 1] if i > 0 and i - 1 < len(parsed_balances) else None
-
-            # Determine withdrawal vs deposit from balance change
-            wd_val = None
-            dp_val = None
-            if bl_val is not None and prev_bal is not None:
-                diff = bl_val - prev_bal
-                if diff < 0:
-                    # Balance decreased = withdrawal
-                    wd_val = abs(diff)
-                elif diff > 0:
-                    # Balance increased = deposit
-                    dp_val = diff
-            elif i == 0:
-                # First transaction — try consuming from withdrawal queue first
-                if wd_ptr < len(wd_queue) and wd_queue[wd_ptr] is not None:
-                    wd_val = wd_queue[wd_ptr]
-                    wd_ptr += 1
-                elif dp_ptr < len(dp_queue) and dp_queue[dp_ptr] is not None:
-                    dp_val = dp_queue[dp_ptr]
-                    dp_ptr += 1
-
-            txn_dict = {
-                'date': date_val,
-                'narration': joined_narration,
-                'ref': ref_val,
-                'value_date': vd_val,
-                'withdrawal': wd_val,
-                'deposit': dp_val,
-                'balance': bl_val,
-            }
-            _finalize_savings_txn(txn_dict, txns_out)
 
     return col_map
 
@@ -881,42 +940,154 @@ CC_LINE_PATTERN = re.compile(
 
 
 def _parse_hdfc_cc_statement(pdf: pdfplumber.PDF, result: StatementParseResult) -> None:
-    for page in pdf.pages:
+    raw_transactions: list[StatementTransaction] = []
+    saved_col_map: Optional[dict[str, int]] = None
+    saw_supported_table = False
+    original_transactions = result.transactions
+    result.transactions = raw_transactions
+
+    for page_number, page in enumerate(pdf.pages, start=1):
         tables = page.extract_tables()
         if tables:
             for table in tables:
-                _process_cc_table(table, result)
+                col_map = _process_cc_table(
+                    table,
+                    result,
+                    saved_col_map=saved_col_map,
+                    table_label=f"PDF page {page_number}",
+                )
+                if col_map and saved_col_map is None:
+                    saved_col_map = col_map
+                saw_supported_table = saw_supported_table or bool(col_map)
         else:
-            text = page.extract_text() or ''
-            _process_cc_text(text, result)
+            result.errors.append(
+                f"PDF page {page_number}: text-only credit-card extraction cannot "
+                "preserve the explicit transaction amount column",
+            )
+
+    if not saw_supported_table and not result.errors:
+        result.errors.append("No supported HDFC credit-card transaction table was found")
+    if result.errors:
+        result.transactions = original_transactions
+        result.transactions.clear()
+        result.reconciliation_status = "failed"
+        return
+
+    seen: set[tuple[date, float, str, str]] = set()
+    deduplicated: list[StatementTransaction] = []
+    for transaction in raw_transactions:
+        key = (
+            transaction.date,
+            transaction.amount,
+            transaction.txn_type,
+            transaction.description,
+        )
+        if key not in seen:
+            seen.add(key)
+            deduplicated.append(transaction)
+
+    result.transactions = deduplicated
+    if not result.transactions:
+        result.errors.append("No explicit HDFC credit-card transactions were found")
+        result.reconciliation_status = "failed"
+        return
+
+    result.period_start = min(txn.date for txn in result.transactions)
+    result.period_end = max(txn.date for txn in result.transactions)
+    result.total_debits = round(
+        sum(txn.amount for txn in result.transactions if txn.txn_type == 'debit'),
+        2,
+    )
+    result.total_credits = round(
+        sum(txn.amount for txn in result.transactions if txn.txn_type == 'credit'),
+        2,
+    )
+    result.reconciliation_status = "passed"
+    result.reconciliation_method = "explicit_credit_card_amount_columns"
 
 
-def _process_cc_table(table: list, result: StatementParseResult) -> None:
-    for row in table:
-        if not row or len(row) < 3:
+def _process_cc_table(
+    table: list,
+    result: StatementParseResult,
+    *,
+    saved_col_map: Optional[dict[str, int]] = None,
+    table_label: str = "PDF table",
+) -> Optional[dict[str, int]]:
+    if not table:
+        return None
+
+    header_index: Optional[int] = None
+    columns: dict[str, int] = {}
+    for index, row in enumerate(table):
+        if not row:
+            continue
+        values = [str(cell or '').strip() for cell in row]
+        upper = ' '.join(values).upper()
+        if 'DATE' not in upper or 'AMOUNT' not in upper:
+            continue
+        if 'TRANSACTION' not in upper and 'DESCRIPTION' not in upper:
+            continue
+        header_index = index
+        for column, value in enumerate(values):
+            cell = value.upper()
+            if 'DATE' in cell:
+                columns['date'] = column
+            elif 'TRANSACTION' in cell or 'DESCRIPTION' in cell:
+                columns['description'] = column
+            elif 'AMOUNT' in cell:
+                columns['amount'] = column
+        break
+
+    if header_index is None:
+        if not saved_col_map:
+            return None
+        columns = dict(saved_col_map)
+        header_index = -1
+
+    missing = {'date', 'description', 'amount'} - set(columns)
+    if missing:
+        result.errors.append(
+            f"{table_label}: missing required credit-card columns: "
+            + ", ".join(sorted(missing)),
+        )
+        return None
+
+    for row_number, row in enumerate(table[header_index + 1:], start=header_index + 2):
+        if not row or all(cell is None or str(cell).strip() == '' for cell in row):
             continue
 
-        date_val = _parse_statement_date(str(row[0] or '').strip())
+        date_text = _safe_cell(row, columns['date'])
+        description = _safe_cell(row, columns['description'])
+        amount_text = _safe_cell(row, columns['amount'])
+        if any('\n' in value or '\r' in value for value in (date_text, description, amount_text)):
+            result.errors.append(
+                f"{table_label} row {row_number}: packed multi-line credit-card row is ambiguous",
+            )
+            continue
+
+        date_val = _parse_statement_date(date_text)
         if not date_val:
+            if date_text or description or amount_text:
+                result.errors.append(
+                    f"{table_label} row {row_number}: non-empty row has no valid transaction date",
+                )
             continue
-
-        description = str(row[1] or '').strip()
         if not description:
+            result.errors.append(f"{table_label} row {row_number}: missing description")
             continue
+        is_credit = bool(re.search(r'\bCR\b', amount_text, re.IGNORECASE))
+        amount = _parse_amount(re.sub(r'\bCR\b', '', amount_text, flags=re.IGNORECASE))
+        if amount is None or not math.isfinite(amount) or amount <= 0:
+            result.errors.append(f"{table_label} row {row_number}: invalid amount")
+            continue
+        result.transactions.append(StatementTransaction(
+            date=date_val,
+            description=description,
+            amount=amount,
+            txn_type='credit' if is_credit else 'debit',
+        ))
 
-        # Amount is usually last column
-        for cell in reversed(row[2:]):
-            cell_str = str(cell or '').strip()
-            is_credit = 'cr' in cell_str.lower()
-            amt = _parse_amount(cell_str.replace('Cr', '').replace('cr', '').strip())
-            if amt is not None and amt > 0:
-                result.transactions.append(StatementTransaction(
-                    date=date_val,
-                    description=description,
-                    amount=amt,
-                    txn_type='credit' if is_credit else 'debit',
-                ))
-                break
+    return columns
 
 
 def _process_cc_text(text: str, result: StatementParseResult) -> None:

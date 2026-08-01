@@ -12,9 +12,10 @@ from openpyxl import load_workbook
 from app.core.parsers.base import StatementParserPlugin
 from app.core.statement_parser import (
     StatementParseResult,
-    _finalize_savings_txn,
+    _append_strict_savings_txn,
     _parse_hdfc_savings_statement,
     _parse_statement_date,
+    _validate_savings_controls,
     parse_statement_xls,
 )
 
@@ -23,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 def _detect(text: str) -> bool:
     normalized = text.lower()
-    return "savings account" in normalized or "statement of account" in normalized
+    return "hdfc" in normalized and (
+        "savings account" in normalized or "statement of account" in normalized
+    )
 
 
 def _parse_pdf(
@@ -31,7 +34,11 @@ def _parse_pdf(
     _file_format: str,
     password: Optional[str],
 ) -> StatementParseResult:
-    result = StatementParseResult(statement_type="hdfc_savings")
+    result = StatementParseResult(
+        statement_type="hdfc_savings",
+        parser_profile="hdfc_savings",
+        recognized=True,
+    )
     try:
         pdf = pdfplumber.open(io.BytesIO(contents), password=password)
     except Exception as exc:
@@ -68,7 +75,10 @@ def _amount_value(value: object) -> Optional[float]:
 
 
 def _parse_xlsx(contents: bytes) -> StatementParseResult:
-    result = StatementParseResult(statement_type="hdfc_savings")
+    result = StatementParseResult(
+        statement_type="hdfc_savings",
+        parser_profile="hdfc_savings",
+    )
     try:
         workbook = load_workbook(
             io.BytesIO(contents),
@@ -84,6 +94,15 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
     header_index: Optional[int] = None
     columns: dict[str, int] = {}
     try:
+        metadata_text = " ".join(
+            str(value or "")
+            for row in rows[:30]
+            for value in row
+        ).upper()
+        if "HDFC" not in metadata_text:
+            result.errors.append("HDFC bank fingerprint was not found in XLSX metadata")
+            return result
+
         for index, row in enumerate(rows[:30]):
             values = [str(value or "").strip() for value in row]
             joined = " ".join(values)
@@ -121,17 +140,14 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
             result.errors.append("Could not find header row in XLSX")
             return result
 
-        defaults = {
-            "date": 0,
-            "narration": 1,
-            "ref": 2,
-            "value_date": 3,
-            "withdrawal": 4,
-            "deposit": 5,
-            "balance": 6,
-        }
-        for key, value in defaults.items():
-            columns.setdefault(key, value)
+        required_columns = {"date", "narration", "withdrawal", "deposit", "balance"}
+        missing_columns = sorted(required_columns - set(columns))
+        if missing_columns:
+            result.errors.append(
+                "Missing required XLSX columns: " + ", ".join(missing_columns),
+            )
+            return result
+        result.recognized = True
 
         for row in rows[header_index + 1 :]:
             first = str(row[0] or "").strip() if row else ""
@@ -158,7 +174,7 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
                 position = columns[name]
                 return row[position] if position < len(row) else None
 
-            _finalize_savings_txn(
+            _append_strict_savings_txn(
                 {
                     "date": transaction_date,
                     "narration": narration,
@@ -169,12 +185,15 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
                     "balance": _amount_value(cell("balance")),
                 },
                 result.transactions,
+                result.errors,
+                row_label=f"XLSX row {header_index + 2 + len(result.transactions)}",
             )
     finally:
         workbook.close()
 
-    if not result.transactions:
+    if not result.transactions and not result.errors:
         result.errors.append("No transactions found in XLSX")
+    _validate_savings_controls(result)
     logger.info("XLSX parser: found %s transactions", len(result.transactions))
     return result
 

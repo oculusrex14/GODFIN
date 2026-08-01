@@ -16,6 +16,7 @@ from app.models.transaction import Transaction
 def _hdfc_xlsx() -> bytes:
     workbook = Workbook()
     sheet = workbook.active
+    sheet.append(["HDFC BANK", "Savings Account Statement"])
     sheet.append(["Account No", "XXXXXXXX0000"])
     sheet.append(["Statement From : 01/07/2026 To : 31/07/2026"])
     sheet.append(
@@ -27,6 +28,17 @@ def _hdfc_xlsx() -> bytes:
             "Withdrawal Amt.",
             "Deposit Amt.",
             "Closing Balance",
+        ]
+    )
+    sheet.append(
+        [
+            "14/07/2026",
+            "NEFT CR-SYNTHETIC-SALARY",
+            "123456789011",
+            "14/07/2026",
+            None,
+            1000.0,
+            10000.0,
         ]
     )
     sheet.append(
@@ -51,11 +63,16 @@ def test_registered_xlsx_parser_reads_hdfc_savings():
 
     assert result.errors == []
     assert result.statement_type == "hdfc_savings"
+    assert result.parser_profile == "hdfc_savings"
+    assert result.recognized is True
+    assert result.reconciliation_status == "passed"
     assert result.period_start == date(2026, 7, 1)
     assert result.period_end == date(2026, 7, 31)
-    assert len(result.transactions) == 1
-    assert result.transactions[0].amount == 275.0
-    assert result.transactions[0].txn_type == "debit"
+    assert len(result.transactions) == 2
+    assert result.transactions[0].amount == 1000.0
+    assert result.transactions[0].txn_type == "credit"
+    assert result.transactions[1].amount == 275.0
+    assert result.transactions[1].txn_type == "debit"
 
 
 def test_account_crud_and_sender_mapping(auth_client):

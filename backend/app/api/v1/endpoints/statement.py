@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
+import secrets
+import threading
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -59,6 +63,9 @@ def _resolve_account_id(db: Session, statement_type: str, account_id: str = None
 
 
 SUPPORTED_EXTENSIONS = ('.pdf', '.xls', '.xlsx')
+MAX_STATEMENT_BYTES = 10 * 1024 * 1024
+STATEMENT_READ_CHUNK_BYTES = 1024 * 1024
+_PARSER_SLOTS = threading.BoundedSemaphore(value=2)
 
 
 def _detect_file_format(filename: str, contents: bytes) -> str:
@@ -89,16 +96,36 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
     if not any(lower_name.endswith(ext) for ext in SUPPORTED_EXTENSIONS):
         raise HTTPException(status_code=400, detail="Supported formats: PDF, XLS, XLSX")
 
-    contents = await file.read()
-
-    if len(contents) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+    contents_buffer = bytearray()
+    while True:
+        chunk = await file.read(STATEMENT_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        contents_buffer.extend(chunk)
+        if len(contents_buffer) > MAX_STATEMENT_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+    contents = bytes(contents_buffer)
 
     fmt = _detect_file_format(file.filename, contents)
 
     if fmt not in {"pdf", "xls", "xlsx"}:
         raise HTTPException(status_code=400, detail="Unrecognized file format")
-    parse_result = parse_registered_statement(contents, fmt, password=password)
+    if not _PARSER_SLOTS.acquire(blocking=False):
+        raise HTTPException(
+            status_code=429,
+            detail="Two statements are already being inspected. Try again shortly.",
+            headers={"Retry-After": "3"},
+        )
+    try:
+        parse_result = await asyncio.to_thread(
+            parse_registered_statement,
+            contents,
+            fmt,
+            password,
+        )
+    finally:
+        _PARSER_SLOTS.release()
+    parse_result.source_digest = hashlib.sha256(contents).hexdigest()
 
     if parse_result.errors:
         raise HTTPException(
@@ -110,6 +137,12 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
         raise HTTPException(
             status_code=400,
             detail="No transactions found in statement",
+        )
+
+    if not parse_result.recognized or parse_result.reconciliation_status != "passed":
+        raise HTTPException(
+            status_code=400,
+            detail="Statement type or financial controls could not be verified",
         )
 
     return parse_result
@@ -132,8 +165,19 @@ async def preview_statement(
 
     return {
         "statement_type": parse_result.statement_type,
+        "parser_profile": parse_result.parser_profile,
+        "recognized": parse_result.recognized,
+        "reconciliation_status": parse_result.reconciliation_status,
+        "reconciliation_method": parse_result.reconciliation_method,
+        "parse_fingerprint": parse_result.source_digest,
         "period_start": str(parse_result.period_start) if parse_result.period_start else None,
         "period_end": str(parse_result.period_end) if parse_result.period_end else None,
+        "control_totals": {
+            "opening_balance": parse_result.opening_balance,
+            "closing_balance": parse_result.closing_balance,
+            "total_debits": parse_result.total_debits,
+            "total_credits": parse_result.total_credits,
+        },
         "total_transactions": len(parsed.transactions),
         "transactions": [
             {
@@ -207,6 +251,16 @@ async def reconcile_statement_preview(
     return {
         "account_id": resolved_account_id,
         "statement_type": parse_result.statement_type,
+        "parser_profile": parse_result.parser_profile,
+        "reconciliation_status": parse_result.reconciliation_status,
+        "reconciliation_method": parse_result.reconciliation_method,
+        "parse_fingerprint": parse_result.source_digest,
+        "control_totals": {
+            "opening_balance": parse_result.opening_balance,
+            "closing_balance": parse_result.closing_balance,
+            "total_debits": parse_result.total_debits,
+            "total_credits": parse_result.total_credits,
+        },
         "total_parsed": recon_result.total_parsed,
         "matched_count": len(recon_result.duplicate_transactions),
         "possible_count": len(recon_result.potential_duplicates),
@@ -258,12 +312,31 @@ async def import_statement(
     account_id: Optional[str] = Form(None),
     import_new: bool = Form(True),
     detect_income: bool = Form(True),
+    confirm_reconciled: bool = Form(False),
+    accepted_fingerprint: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Step 3: Parse + reconcile + import new transactions with classification."""
     try:
         parse_result = await _read_and_parse(file, password)
+        if not confirm_reconciled:
+            raise HTTPException(
+                status_code=400,
+                detail="Review the reconciled preview and explicitly confirm before importing",
+            )
+        if (
+            not accepted_fingerprint
+            or len(accepted_fingerprint) != 64
+            or not secrets.compare_digest(
+                accepted_fingerprint.lower(),
+                parse_result.source_digest,
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The selected file changed after review; preview it again before importing",
+            )
         parsed = ParsedStatement.from_statement_result(parse_result)
 
         resolved_account_id = _resolve_account_id(db, parse_result.statement_type, account_id)
@@ -434,7 +507,6 @@ async def import_statement(
         }
 
 
-# Keep legacy endpoint for backward compatibility
 @router.post("/ingest/upload")
 async def upload_statement_legacy(
     file: UploadFile = File(...),
@@ -442,15 +514,10 @@ async def upload_statement_legacy(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Legacy single-step upload. Delegates to the import endpoint."""
-    return await import_statement(
-        file=file,
-        password=password,
-        account_id=None,
-        import_new=True,
-        detect_income=True,
-        db=db,
-        _user=_user,
+    """Retired because one-step imports bypass explicit reconciliation review."""
+    raise HTTPException(
+        status_code=410,
+        detail="One-step import was retired. Use preview, reconcile, then confirmed import.",
     )
 
 

@@ -85,6 +85,8 @@ export default function UploadPage() {
       password: password || null,
       importNew: true,
       detectIncome: true,
+      confirmReconciled: true,
+      acceptedFingerprint: reconcileData?.parse_fingerprint,
     }),
     onSuccess: (data) => {
       setImportResult(data);
@@ -308,6 +310,14 @@ export default function UploadPage() {
                   </div>
                 ) : reconcileData ? (
                   <>
+                    <div className="mb-4 rounded-[12px] border border-emerald-400/15 bg-emerald-400/[0.05] p-3">
+                      <p className="flex items-center gap-2 text-[0.75rem] text-emerald-300/80">
+                        <CheckCircle size={14} /> Financial controls passed
+                      </p>
+                      <p className="mt-1 text-[0.68rem] leading-relaxed text-white/35">
+                        GODFIN recognized {reconcileData.parser_profile?.replaceAll('_', ' ')} and verified the statement&apos;s explicit amount columns{reconcileData.reconciliation_method === 'explicit_columns_and_running_balance' ? ' against its running balances' : ''}. Import starts only after you confirm below.
+                      </p>
+                    </div>
                     {/* Summary counters */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                       {[

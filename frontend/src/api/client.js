@@ -435,8 +435,11 @@ export async function importStatement(file, accountId, options = {}) {
   if (accountId) formData.append('account_id', accountId);
   if (options.password) formData.append('password', options.password);
   formData.append('import_new', options.importNew !== false);
-  formData.append('update_matches', options.updateMatches || false);
   formData.append('detect_income', options.detectIncome !== false);
+  formData.append('confirm_reconciled', options.confirmReconciled === true);
+  if (options.acceptedFingerprint) {
+    formData.append('accepted_fingerprint', options.acceptedFingerprint);
+  }
 
   return apiFetch('/ingest/upload/import', {
     method: 'POST',

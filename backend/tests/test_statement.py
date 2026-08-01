@@ -187,7 +187,10 @@ def test_import_returns_structured_errors_instead_of_500(
     from app.api.v1.endpoints import statement as statement_endpoint
 
     async def fake_read_and_parse(file, password):
-        return SimpleNamespace(statement_type="hdfc_savings")
+        return SimpleNamespace(
+            statement_type="hdfc_savings",
+            source_digest="a" * 64,
+        )
 
     monkeypatch.setattr(statement_endpoint, "_read_and_parse", fake_read_and_parse)
     monkeypatch.setattr(
@@ -204,6 +207,10 @@ def test_import_returns_structured_errors_instead_of_500(
     response = auth_client.post(
         "/api/v1/ingest/upload/import",
         files={"file": ("statement.pdf", b"%PDF-test", "application/pdf")},
+        data={
+            "confirm_reconciled": "true",
+            "accepted_fingerprint": "a" * 64,
+        },
     )
     assert response.status_code == 200
     data = response.json()
