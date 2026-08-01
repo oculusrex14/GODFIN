@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.core.budget import ELASTICITY
 from app.core.net_worth import liquid_asset_total
+from app.core.transaction_semantics import (
+    active_clause,
+    is_spending,
+    is_verified_income,
+)
 from app.models.app_setting import AppSetting
 from app.models.behavior_insight import BehaviorInsightPreference
 from app.models.subscription import Subscription
@@ -68,8 +73,7 @@ def compute_behavior_insights(
         .filter(
             Transaction.date >= start,
             Transaction.date <= today,
-            Transaction.status != "deleted",
-            Transaction.is_transfer.is_(False),
+            active_clause(Transaction),
         )
         .all()
     )
@@ -85,19 +89,22 @@ def compute_behavior_insights(
     }
     for transaction in transactions:
         month = by_month[_month_key(transaction.date)]
-        if transaction.is_income or transaction.type == "credit":
-            if transaction.is_income:
-                month["income"] += float(transaction.amount)
-        elif transaction.type == "debit":
+        included_in_behavior = False
+        if is_verified_income(transaction):
+            month["income"] += float(transaction.amount)
+            included_in_behavior = True
+        elif is_spending(transaction):
             amount = float(transaction.amount)
             debit_transactions.append(transaction)
             month["spend"] += amount
             total_spend += amount
+            included_in_behavior = True
             if transaction.category in flexible_categories:
                 month["discretionary"] += amount
                 discretionary += amount
-        iso = transaction.date.isocalendar()
-        weekly_counts[(iso.year, iso.week)].add(transaction.date)
+        if included_in_behavior:
+            iso = transaction.date.isocalendar()
+            weekly_counts[(iso.year, iso.week)].add(transaction.date)
 
     complete_months = sorted(by_month)
     income_months = [

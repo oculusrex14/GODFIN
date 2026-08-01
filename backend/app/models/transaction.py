@@ -46,6 +46,9 @@ class Transaction(Base):
     recurring_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     is_split: Mapped[bool] = mapped_column(Boolean, default=False)
     is_income: Mapped[bool] = mapped_column(Boolean, default=False)
+    semantic_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="unknown"
+    )
     source: Mapped[str] = mapped_column(String(20), nullable=False)
     vpa_handle: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     upi_ref_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)

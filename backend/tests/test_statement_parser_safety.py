@@ -1,15 +1,46 @@
 from __future__ import annotations
 
 import io
+from datetime import date
 
 from openpyxl import Workbook
 
 from app.core.parsers import parse_registered_statement
 from app.core.statement_parser import (
     StatementParseResult,
+    StatementTransaction,
+    _validate_savings_controls,
     _parse_hdfc_savings_statement,
     _process_savings_table_v2,
 )
+
+
+def test_all_debit_statement_controls_keep_decimal_zero_for_credits():
+    result = StatementParseResult(
+        transactions=[
+            StatementTransaction(
+                date=date(2026, 7, 15),
+                description="SYNTHETIC UNKNOWN MERCHANT",
+                amount=450,
+                txn_type="debit",
+                closing_balance=9_550,
+            ),
+            StatementTransaction(
+                date=date(2026, 7, 16),
+                description="SYNTHETIC CAFE",
+                amount=275,
+                txn_type="debit",
+                closing_balance=9_275,
+            ),
+        ]
+    )
+
+    _validate_savings_controls(result)
+
+    assert result.errors == []
+    assert result.reconciliation_status == "passed"
+    assert result.total_debits == 725
+    assert result.total_credits == 0
 
 
 HEADER = [

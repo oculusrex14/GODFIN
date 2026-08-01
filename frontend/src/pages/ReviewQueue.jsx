@@ -314,18 +314,11 @@ export default function ReviewQueue() {
                   onClick={() => {
                     const newId = expandedId === item.id ? null : item.id;
                     setExpandedId(newId);
-                    // Auto-suggest INCOME for credit transactions
-                    if (newId && item.type === 'credit' && !selectedCategory[item.id]) {
-                      handleCategorySelect(item.id, 'INCOME');
-                    }
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       const newId = expandedId === item.id ? null : item.id;
                       setExpandedId(newId);
-                      if (newId && item.type === 'credit' && !selectedCategory[item.id]) {
-                        handleCategorySelect(item.id, 'INCOME');
-                      }
                     }
                   }}
                   role="button"
@@ -346,7 +339,9 @@ export default function ReviewQueue() {
                       <div className="flex items-center gap-2">
                         <p className="text-white/80 text-[0.9rem]" style={{ fontWeight: 400 }}>{item.merchant_normalized || item.merchant_raw}</p>
                         {item.type === 'credit' && (
-                          <span className="px-1.5 py-0.5 text-[0.6rem] rounded-md bg-emerald-500/15 text-emerald-400/80 border border-emerald-400/15" style={{ fontWeight: 600 }}>INCOME</span>
+                          <span className="px-1.5 py-0.5 text-[0.6rem] rounded-md bg-amber-500/15 text-amber-300/80 border border-amber-400/15" style={{ fontWeight: 600 }}>
+                            CREDIT · CONFIRM WHAT IT IS
+                          </span>
                         )}
                       </div>
                       <p className="text-white/30 text-[0.75rem]">

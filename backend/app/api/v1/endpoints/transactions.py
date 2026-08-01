@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.transaction_semantics import apply_category_semantic
 from app.models.transaction import Transaction
 from app.schemas.transaction import (
     TransactionCreate,
@@ -43,11 +44,10 @@ def create_transaction(
         confidence=1.0 if body.category else None,
         classification_source="user" if body.category else None,
         source="manual",
-        is_income=body.category == "INCOME" if body.category else False,
-        is_transfer=body.category == "TRANSFERS" if body.category else False,
         notes=body.notes,
         tags=body.tags,
     )
+    apply_category_semantic(txn, explicitly_classified=bool(body.category))
     db.add(txn)
     if body.category:
         from app.core.classification_learning import record_explicit_correction
@@ -182,11 +182,12 @@ def update_transaction(
         if "category" in update_data and update_data["category"] is not None:
             txn.classification_source = "user"
             txn.confidence = 1.0
-            txn.is_income = update_data["category"] == "INCOME"
-            txn.is_transfer = update_data["category"] == "TRANSFERS"
 
         for field, value in update_data.items():
             setattr(txn, field, value)
+
+        if "category" in update_data and update_data["category"] is not None:
+            apply_category_semantic(txn, explicitly_classified=True)
 
         if (
             "category" in update_data

@@ -23,6 +23,10 @@ from app.core.email_parser import (
 )
 from app.core.gmail_service import GmailFetchResult, GmailSyncError, fetch_messages
 from app.core.merchant_memory_service import upsert_merchant_memory
+from app.core.transaction_semantics import (
+    TransactionSemantic,
+    infer_semantic_type,
+)
 from app.models.app_setting import AppSetting
 from app.models.transaction import Transaction
 
@@ -260,6 +264,16 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
         vpa_handle=parsed.vpa_handle,
     )
 
+    trusted_income_sources = {"exact_match", "confirmed_pattern", "rule"}
+    semantic_type = infer_semantic_type(
+        transaction_type=parsed.txn_type,
+        category=classification.category,
+        subcategory=classification.subcategory,
+        is_transfer=classification.is_transfer,
+        text_parts=(parsed.raw_text, parsed.merchant_raw, parsed.merchant_normalized),
+        explicitly_classified=classification.source in trusted_income_sources,
+    )
+
     # Create transaction
     txn = Transaction(
         id=str(uuid.uuid4()),
@@ -281,13 +295,11 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
         subcategory=classification.subcategory,
         confidence=classification.confidence,
         classification_source=classification.source,
-        is_transfer=classification.is_transfer,
-        is_income=(parsed.txn_type == 'credit'),
+        is_transfer=(semantic_type == TransactionSemantic.INTERNAL_TRANSFER.value),
+        is_income=(semantic_type == TransactionSemantic.INCOME.value),
+        semantic_type=semantic_type,
         reconciled=False,
     )
-    # Sync is_income with INCOME category classification
-    if classification.category == 'INCOME':
-        txn.is_income = True
     db.add(txn)
     # Retry flush up to 3 times on database lock
     for attempt in range(3):

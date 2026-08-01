@@ -21,6 +21,11 @@ from app.core.reporting import (
     prepare_summary_report,
 )
 from app.core.tax_pack import build_financial_year_tax_pack
+from app.core.transaction_semantics import (
+    is_spending,
+    is_verified_income,
+    semantic_type_for,
+)
 from app.core.llm_privacy import has_hosted_data_consent, is_local_provider
 from app.models.account import Account
 from app.models.transaction import Transaction
@@ -83,6 +88,7 @@ def _transaction_export_row(
         "is_transfer": transaction.is_transfer,
         "is_recurring": transaction.is_recurring,
         "is_income": transaction.is_income,
+        "semantic_type": semantic_type_for(transaction),
         "source": transaction.source,
         "tags": transaction.tags,
         "notes": transaction.notes,
@@ -299,13 +305,13 @@ def report_financial_year(
     if format == "json":
         spend = sum(
             row["amount"]
-            for row in rows
-            if row["type"] == "debit" and not row["is_transfer"]
+            for transaction, row in zip(transactions, rows)
+            if is_spending(transaction)
         )
         income = sum(
             row["amount"]
-            for row in rows
-            if row["is_income"] and not row["is_transfer"]
+            for transaction, row in zip(transactions, rows)
+            if is_verified_income(transaction)
         )
         return {
             "financial_year": label,
@@ -328,7 +334,8 @@ def report_financial_year(
         "id", "date", "time", "merchant_raw", "merchant", "raw_text",
         "amount", "type", "instrument", "account", "account_id", "category",
         "subcategory", "confidence", "classification_source", "status",
-        "is_transfer", "is_recurring", "is_income", "source", "tags", "notes",
+        "is_transfer", "is_recurring", "is_income", "semantic_type", "source",
+        "tags", "notes",
     ]
     writer = csv.DictWriter(output, fieldnames=columns)
     writer.writeheader()

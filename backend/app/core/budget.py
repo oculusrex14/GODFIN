@@ -10,6 +10,13 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.taxonomy import TAXONOMY
+from app.core.transaction_semantics import (
+    active_clause,
+    is_spending,
+    is_verified_income,
+    spending_clause,
+    verified_income_clause,
+)
 from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
 
@@ -201,8 +208,7 @@ def _get_historical_capacity(
         .filter(
             Transaction.date >= history_start,
             Transaction.date < month_start,
-            Transaction.status != 'deleted',
-            Transaction.is_transfer.is_(False),
+            active_clause(Transaction),
         )
         .all()
     )
@@ -213,11 +219,12 @@ def _get_historical_capacity(
             key,
             {"income": 0.0, "expenses": 0.0, "flexible": 0.0, "count": 0},
         )
-        values["count"] += 1
         amount = float(transaction.amount)
-        if transaction.is_income or transaction.type == "credit":
+        if is_verified_income(transaction):
+            values["count"] += 1
             values["income"] += amount
-        elif transaction.type == "debit":
+        elif is_spending(transaction):
+            values["count"] += 1
             values["expenses"] += amount
             if transaction.category in flexible_categories:
                 values["flexible"] += amount
@@ -302,7 +309,7 @@ def compute_financial_profile(db: Session) -> FinancialProfile:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.is_income == True,
+            verified_income_clause(Transaction),
         )
         .scalar()
     )
@@ -313,8 +320,7 @@ def compute_financial_profile(db: Session) -> FinancialProfile:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
         )
         .scalar()
     )
@@ -330,7 +336,7 @@ def compute_financial_profile(db: Session) -> FinancialProfile:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
+            spending_clause(Transaction),
             Transaction.category.in_(fixed_categories),
         )
         .scalar()
@@ -345,7 +351,7 @@ def compute_financial_profile(db: Session) -> FinancialProfile:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
+            spending_clause(Transaction),
             Transaction.amount < 500,
             Transaction.category.in_(flexible_categories),
         )
@@ -356,7 +362,7 @@ def compute_financial_profile(db: Session) -> FinancialProfile:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
+            spending_clause(Transaction),
         )
         .scalar()
     )
@@ -369,7 +375,7 @@ def compute_financial_profile(db: Session) -> FinancialProfile:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
+            spending_clause(Transaction),
             Transaction.category.in_(flexible_categories),
         )
         .scalar()
@@ -380,7 +386,7 @@ def compute_financial_profile(db: Session) -> FinancialProfile:
             Transaction.date >= prev_month_start,
             Transaction.date < month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
+            spending_clause(Transaction),
             Transaction.category.in_(flexible_categories),
         )
         .scalar()
@@ -409,7 +415,7 @@ def compute_financial_profile(db: Session) -> FinancialProfile:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
+            spending_clause(Transaction),
             Transaction.category == 'ENTERTAINMENT',
             Transaction.subcategory == 'Subscriptions',
         )
@@ -420,7 +426,7 @@ def compute_financial_profile(db: Session) -> FinancialProfile:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
+            spending_clause(Transaction),
         )
         .scalar()
     )

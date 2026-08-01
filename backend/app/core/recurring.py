@@ -11,9 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
+from app.core.transaction_semantics import (
+    TransactionSemantic,
+    semantic_type_for,
+    spending_clause,
+)
 
 _EXCLUDED_STATUSES = {"deleted", "reversed", "reversal", "voided"}
-_REVERSAL_TEXT = ("REVERSAL", "REVERSED", "REFUND", "CHARGEBACK")
 
 
 @dataclass
@@ -51,17 +55,7 @@ class PatternAnalysis:
 
 
 def _is_reversal(transaction: Transaction) -> bool:
-    text = " ".join(
-        part
-        for part in (
-            transaction.raw_text,
-            transaction.merchant_raw,
-            transaction.merchant_normalized,
-            transaction.notes,
-        )
-        if part
-    ).upper()
-    return any(keyword in text for keyword in _REVERSAL_TEXT)
+    return semantic_type_for(transaction) == TransactionSemantic.REVERSAL.value
 
 
 def _add_months(value: date, months: int) -> date:
@@ -187,8 +181,7 @@ def detect_recurring_patterns(
         db.query(Transaction.merchant_normalized, Transaction.account_id)
         .filter(
             Transaction.status.notin_(_EXCLUDED_STATUSES),
-            Transaction.type == "debit",
-            Transaction.is_transfer.is_(False),
+            spending_clause(Transaction),
             Transaction.merchant_normalized.isnot(None),
         )
     )
@@ -222,8 +215,7 @@ def detect_recurring_patterns(
                 Transaction.merchant_normalized == merchant,
                 Transaction.account_id == account_id,
                 Transaction.status.notin_(_EXCLUDED_STATUSES),
-                Transaction.type == "debit",
-                Transaction.is_transfer.is_(False),
+                spending_clause(Transaction),
             )
             .order_by(Transaction.date)
             .all()

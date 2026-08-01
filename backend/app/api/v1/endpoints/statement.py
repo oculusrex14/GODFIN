@@ -21,6 +21,12 @@ from app.core.reconciliation import (
     reconcile_statement,
 )
 from app.core.statement_parser import ParsedStatement
+from app.core.transaction_semantics import (
+    TransactionSemantic,
+    apply_category_semantic,
+    ledger_credit_clause,
+    ledger_debit_clause,
+)
 from app.models.account import Account
 from app.models.income_source import IncomeSource
 from app.models.transaction import Transaction
@@ -189,6 +195,7 @@ async def preview_statement(
                 "instrument": t.instrument,
                 "is_transfer": t.is_transfer,
                 "is_income": t.is_income,
+                "semantic_type": t.semantic_type,
                 "merchant_name": t.merchant_name,
             }
             for t in parsed.transactions
@@ -238,11 +245,11 @@ async def reconcile_statement_preview(
                 Transaction.status != 'deleted',
             )
             credit_sum = bal_query.filter(
-                (Transaction.is_income == True) | (Transaction.type == 'credit'),
+                ledger_credit_clause(Transaction),
             ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
 
             debit_sum = bal_query.filter(
-                Transaction.type == 'debit',
+                ledger_debit_clause(Transaction),
             ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
 
             computed_balance = round(float(credit_sum) - float(debit_sum), 2)
@@ -372,9 +379,11 @@ async def import_statement(
                         txn.subcategory = classification.subcategory
                         txn.confidence = classification.confidence
                         txn.classification_source = classification.source
-                        # Sync is_income with INCOME category
-                        if classification.category == 'INCOME':
-                            txn.is_income = True
+                        apply_category_semantic(
+                            txn,
+                            explicitly_classified=classification.source
+                            in {"exact_match", "confirmed_pattern", "rule"},
+                        )
                         classified_count += 1
 
                         # Update merchant memory for future classifications
@@ -391,6 +400,13 @@ async def import_statement(
                         txn.subcategory = getattr(parsed_txn, 'subcategory_hint', None)
                         txn.confidence = 0.65
                         txn.classification_source = 'narration_hint'
+                        apply_category_semantic(
+                            txn,
+                            explicitly_classified=(
+                                getattr(parsed_txn, 'semantic_type', None)
+                                == TransactionSemantic.INCOME.value
+                            ),
+                        )
                         classified_count += 1
                     else:
                         review_queue_count += 1
@@ -456,11 +472,11 @@ async def import_statement(
                     Transaction.status != 'deleted',
                 )
                 credit_sum = bal_query.filter(
-                    (Transaction.is_income == True) | (Transaction.type == 'credit'),
+                    ledger_credit_clause(Transaction),
                 ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
 
                 debit_sum = bal_query.filter(
-                    Transaction.type == 'debit',
+                    ledger_debit_clause(Transaction),
                 ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
 
                 computed_balance = round(float(credit_sum) - float(debit_sum), 2)

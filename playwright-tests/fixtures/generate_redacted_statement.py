@@ -19,23 +19,47 @@ def main() -> None:
     pdf.set_title("Synthetic GODFIN statement fixture")
     pdf.add_page()
     pdf.set_font("Helvetica", size=12)
-    pdf.cell(0, 10, "Statement of Account - Synthetic Test Data", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, "HDFC Bank Statement of Account - Synthetic Test Data", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 8, "Savings Account XXXX0000", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
-    pdf.cell(
-        0,
-        8,
-        "15/07/2026 SYNTHETIC UNKNOWN MERCHANT 450.00",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
-    pdf.cell(
-        0,
-        8,
-        "16/07/2026 UPI-SYNTHETIC CAFE-cafe@upi-000000000001 275.00",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
+    widths = [22, 55, 24, 24, 22, 20, 27]
+    headers = [
+        "Date",
+        "Narration",
+        "Chq/Ref",
+        "Value Date",
+        "Withdrawal",
+        "Deposit",
+        "Closing Balance",
+    ]
+    rows = [
+        [
+            "15/07/2026",
+            "SYNTHETIC UNKNOWN MERCHANT",
+            "TEST0001",
+            "15/07/2026",
+            "450.00",
+            "",
+            "9550.00",
+        ],
+        [
+            "16/07/2026",
+            "UPI-SYNTHETIC CAFE-cafe@upi-000000000001",
+            "TEST0002",
+            "16/07/2026",
+            "275.00",
+            "",
+            "9275.00",
+        ],
+    ]
+    pdf.set_font("Helvetica", size=7)
+    for width, value in zip(widths, headers):
+        pdf.cell(width, 8, value, border=1)
+    pdf.ln(8)
+    for row in rows:
+        for width, value in zip(widths, row):
+            pdf.cell(width, 8, value, border=1)
+        pdf.ln(8)
     pdf.output(str(output))
 
 

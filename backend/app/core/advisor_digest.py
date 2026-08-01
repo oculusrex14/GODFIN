@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.goal import Goal
 from app.models.merchant_memory import MerchantMemory
 from app.models.transaction import Transaction
+from app.core.transaction_semantics import is_spending, spending_clause
 
 
 def build_weekly_digest(
@@ -26,7 +27,6 @@ def build_weekly_digest(
             Transaction.date >= week_start,
             Transaction.date <= today,
             Transaction.status != "deleted",
-            Transaction.is_transfer.is_(False),
         )
         .order_by(Transaction.amount.desc())
         .all()
@@ -34,7 +34,7 @@ def build_weekly_digest(
     current_debits = [
         transaction
         for transaction in current_transactions
-        if transaction.type == "debit" and not transaction.is_income
+        if is_spending(transaction)
     ]
     current_spend = round(
         sum(float(transaction.amount) for transaction in current_debits), 2
@@ -45,8 +45,7 @@ def build_weekly_digest(
             Transaction.date >= previous_start,
             Transaction.date < week_start,
             Transaction.status != "deleted",
-            Transaction.type == "debit",
-            Transaction.is_transfer.is_(False),
+            spending_clause(Transaction),
         )
         .scalar()
     )

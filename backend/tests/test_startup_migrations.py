@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.core.startup_migrations import (
     CURRENT_SCHEMA_REVISION,
+    apply_additive_schema_updates,
     backup_before_schema_update,
     read_schema_revision,
     record_schema_revision,
@@ -67,3 +68,34 @@ def test_current_schema_does_not_create_redundant_backup(
         str(db_path),
         str(tmp_path / "backups"),
     ) is None
+
+
+def test_additive_migration_adds_transaction_semantic_column(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "CREATE TABLE transactions ("
+            "id VARCHAR(36) PRIMARY KEY, "
+            "is_income BOOLEAN NOT NULL DEFAULT 0, "
+            "is_transfer BOOLEAN NOT NULL DEFAULT 0"
+            ")"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        columns = {
+            row[1]: row
+            for row in connection.execute("PRAGMA table_info(transactions)")
+        }
+    finally:
+        connection.close()
+
+    assert columns["semantic_type"][3] == 1
+    assert columns["semantic_type"][4] == "'unknown'"

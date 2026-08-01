@@ -14,6 +14,11 @@ from difflib import SequenceMatcher
 from sqlalchemy.orm import Session
 
 from app.models.transaction import Transaction
+from app.core.transaction_semantics import (
+    TransactionSemantic,
+    VALID_SEMANTICS,
+    infer_semantic_type,
+)
 from app.models.account import Account
 from app.core.statement_parser import ParsedTransaction, ParsedStatement, StatementTransaction, StatementMetadata
 
@@ -324,7 +329,20 @@ class ReconciliationService:
         merchant_raw = getattr(parsed_txn, 'merchant_name', None) or parsed_txn.description
         instrument = getattr(parsed_txn, 'instrument', None) or 'statement'
         is_transfer = getattr(parsed_txn, 'is_transfer', False)
-        is_income = getattr(parsed_txn, 'is_income', False) or parsed_txn.type == 'credit'
+        semantic_type = getattr(parsed_txn, 'semantic_type', None)
+        if semantic_type not in VALID_SEMANTICS or semantic_type == TransactionSemantic.UNKNOWN.value:
+            if getattr(parsed_txn, 'is_income', False):
+                semantic_type = TransactionSemantic.INCOME.value
+            else:
+                semantic_type = infer_semantic_type(
+                    transaction_type=parsed_txn.type,
+                    category=getattr(parsed_txn, 'category_hint', None),
+                    subcategory=getattr(parsed_txn, 'subcategory_hint', None),
+                    is_transfer=is_transfer,
+                    text_parts=(parsed_txn.description,),
+                )
+        is_income = semantic_type == TransactionSemantic.INCOME.value
+        is_transfer = semantic_type == TransactionSemantic.INTERNAL_TRANSFER.value
         vpa_handle = getattr(parsed_txn, 'vpa_handle', None)
         upi_ref = getattr(parsed_txn, 'upi_ref_number', None) or parsed_txn.reference
 
@@ -341,6 +359,7 @@ class ReconciliationService:
             source=source,
             is_income=is_income,
             is_transfer=is_transfer,
+            semantic_type=semantic_type,
             vpa_handle=vpa_handle,
             upi_ref_number=upi_ref,
             confidence=0.8,
@@ -355,17 +374,15 @@ class ReconciliationService:
         statement: ParsedStatement,
     ) -> List[ParsedTransaction]:
         """
-        Detect income transactions from statement credits.
+        Detect only verified income transactions from statement credits.
 
-        ALL credit transactions are treated as income. Keywords are used
-        to assign subcategory hints for more specific classification.
+        Refunds, cashback, reimbursements, reversals, transfers and generic
+        credits remain non-income and available for explicit user review.
         """
         subcategory_keywords = {
             'Salary': ['SALARY', 'WAGES'],
-            'Refund': ['REFUND', 'CRV POS', 'REVERSAL', 'MANDATE REFUND'],
-            'Cashback': ['CASHBACK', 'CASH BACK'],
             'Interest': ['INTEREST', 'INT DIV', 'DIVIDEND'],
-            'Other Income': ['REIMBURSEMENT', 'BONUS', 'INCENTIVE'],
+            'Other Income': ['BONUS', 'INCENTIVE'],
         }
 
         income_transactions = []
@@ -374,8 +391,34 @@ class ReconciliationService:
             if txn.type != 'credit':
                 continue
 
-            txn.category_hint = 'INCOME'
             desc_upper = txn.description.upper()
+
+            semantic_type = getattr(txn, 'semantic_type', None)
+            if semantic_type not in VALID_SEMANTICS or semantic_type == TransactionSemantic.UNKNOWN.value:
+                if getattr(txn, 'is_income', False):
+                    semantic_type = TransactionSemantic.INCOME.value
+                else:
+                    semantic_type = infer_semantic_type(
+                        transaction_type=txn.type,
+                        category=txn.category_hint,
+                        subcategory=txn.subcategory_hint,
+                        is_transfer=getattr(txn, 'is_transfer', False),
+                        text_parts=(txn.description,),
+                    )
+            txn.semantic_type = semantic_type
+            txn.is_income = semantic_type == TransactionSemantic.INCOME.value
+            txn.is_transfer = semantic_type == TransactionSemantic.INTERNAL_TRANSFER.value
+
+            if not txn.is_income:
+                if semantic_type == TransactionSemantic.REFUND.value:
+                    txn.category_hint = 'INCOME'
+                    txn.subcategory_hint = 'Refund'
+                elif semantic_type == TransactionSemantic.CASHBACK.value:
+                    txn.category_hint = 'INCOME'
+                    txn.subcategory_hint = 'Cashback'
+                continue
+
+            txn.category_hint = 'INCOME'
 
             # Try to assign a subcategory hint based on keywords
             matched_sub = None

@@ -12,6 +12,8 @@ from typing import List, Optional
 import pdfplumber
 import xlrd
 
+from app.core.transaction_semantics import contains_semantic_term
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +29,7 @@ class StatementTransaction:
     instrument: Optional[str] = None  # 'upi', 'debit_card', 'neft', 'savings_account'
     is_transfer: bool = False
     is_income: bool = False
+    semantic_type: str = "unknown"
     vpa_handle: Optional[str] = None
     upi_ref_number: Optional[str] = None
     suggested_category: Optional[str] = None
@@ -49,6 +52,7 @@ class ParsedTransaction:
     instrument: Optional[str] = None
     is_transfer: bool = False
     is_income: bool = False
+    semantic_type: str = "unknown"
     vpa_handle: Optional[str] = None
     upi_ref_number: Optional[str] = None
     merchant_name: Optional[str] = None
@@ -68,6 +72,7 @@ class ParsedTransaction:
             instrument=st.instrument,
             is_transfer=st.is_transfer,
             is_income=st.is_income,
+            semantic_type=st.semantic_type,
             vpa_handle=st.vpa_handle,
             upi_ref_number=st.upi_ref_number,
             merchant_name=st.merchant_name,
@@ -273,14 +278,20 @@ def _validate_savings_controls(result: StatementParseResult) -> None:
         rounding=ROUND_HALF_UP,
     )
     debits = sum(
-        (_money_decimal(txn.amount) or Decimal("0"))
-        for txn in result.transactions
-        if txn.txn_type == "debit"
+        (
+            (_money_decimal(txn.amount) or Decimal("0"))
+            for txn in result.transactions
+            if txn.txn_type == "debit"
+        ),
+        start=Decimal("0"),
     )
     credits = sum(
-        (_money_decimal(txn.amount) or Decimal("0"))
-        for txn in result.transactions
-        if txn.txn_type == "credit"
+        (
+            (_money_decimal(txn.amount) or Decimal("0"))
+            for txn in result.transactions
+            if txn.txn_type == "credit"
+        ),
+        start=Decimal("0"),
     )
 
     result.opening_balance = float(opening)
@@ -541,6 +552,7 @@ def parse_statement_narration(narration: str) -> dict:
         'instrument': 'savings_account',
         'is_transfer': False,
         'is_income': False,
+        'semantic_type': 'unknown',
         'vpa': None,
         'ref': None,
         'suggested_category': None,
@@ -554,17 +566,29 @@ def parse_statement_narration(narration: str) -> dict:
         result['instrument'] = 'upi'
         return result
 
-    # === NEFT Credit (Income) ===
+    # === NEFT credit ===
     neft_match = re.match(r'NEFT\s?CR-(.+)', narration, re.IGNORECASE)
     if neft_match:
         # Extract meaningful part after NEFT CR-
         remainder = neft_match.group(1).strip()
         parts = remainder.split('-', 1)
         result['merchant_name'] = parts[1].strip() if len(parts) > 1 else parts[0].strip()
-        result['is_income'] = True
         result['instrument'] = 'neft'
-        result['suggested_category'] = 'INCOME'
-        result['suggested_subcategory'] = 'Salary'
+        if contains_semantic_term(
+            upper,
+            (
+                'SALARY', 'WAGES', 'PENSION', 'INTEREST', 'DIVIDEND',
+                'BONUS', 'INCENTIVE',
+            ),
+        ):
+            result['is_income'] = True
+            result['semantic_type'] = 'income'
+            result['suggested_category'] = 'INCOME'
+            result['suggested_subcategory'] = (
+                'Interest'
+                if contains_semantic_term(upper, ('INTEREST', 'DIVIDEND'))
+                else 'Salary'
+            )
         return result
 
     # === Bill Pay (Transfer to CC) ===
@@ -572,6 +596,7 @@ def parse_statement_narration(narration: str) -> dict:
     if 'IBBILLPAY' in upper or 'IB BILLPAY' in upper:
         result['merchant_name'] = 'HDFC Credit Card Payment'
         result['is_transfer'] = True
+        result['semantic_type'] = 'internal_transfer'
         result['suggested_category'] = 'TRANSFERS'
         result['suggested_subcategory'] = 'Credit Card Payment'
         return result
@@ -580,6 +605,7 @@ def parse_statement_narration(narration: str) -> dict:
     if upper.startswith('FD THROUGH') or upper.startswith('FDTHROUGH'):
         result['merchant_name'] = 'Fixed Deposit'
         result['is_transfer'] = True
+        result['semantic_type'] = 'internal_transfer'
         result['suggested_category'] = 'TRANSFERS'
         result['suggested_subcategory'] = 'Investment Transfer'
         return result
@@ -589,6 +615,7 @@ def parse_statement_narration(narration: str) -> dict:
     if re.search(r'RD\s*THROUGH|RD\s*INSTALLMENT', upper):
         result['merchant_name'] = 'Recurring Deposit'
         result['is_transfer'] = True
+        result['semantic_type'] = 'internal_transfer'
         result['suggested_category'] = 'TRANSFERS'
         result['suggested_subcategory'] = 'Investment Transfer'
         return result
@@ -620,7 +647,7 @@ def parse_statement_narration(narration: str) -> dict:
         crv_match = re.match(r'CRV POS[- ]+\d+[\*X]+\d+[- ]*(.*)', narration, re.IGNORECASE)
         merchant = crv_match.group(1).strip() if crv_match else 'Reversal'
         result['merchant_name'] = f"Refund - {merchant}" if merchant else 'Refund'
-        result['is_income'] = True
+        result['semantic_type'] = 'refund'
         result['suggested_category'] = 'INCOME'
         result['suggested_subcategory'] = 'Refund'
         return result
@@ -629,6 +656,7 @@ def parse_statement_narration(narration: str) -> dict:
     if 'EXC PYMT' in upper or 'EXCPYMT' in upper:
         result['merchant_name'] = 'CC Excess Payment Refund'
         result['is_transfer'] = True
+        result['semantic_type'] = 'internal_transfer'
         result['suggested_category'] = 'TRANSFERS'
         result['suggested_subcategory'] = 'Credit Card Payment'
         return result
@@ -637,9 +665,30 @@ def parse_statement_narration(narration: str) -> dict:
     if upper.startswith('ACH C-') or upper.startswith('ACHC-'):
         ach_match = re.match(r'ACH C-\s*(.*?)-\d+', narration, re.IGNORECASE)
         result['merchant_name'] = ach_match.group(1).strip() if ach_match else 'ACH Credit'
-        result['is_income'] = True
+        if contains_semantic_term(
+            upper,
+            ('SALARY', 'WAGES', 'PENSION', 'INTEREST', 'DIVIDEND'),
+        ):
+            result['is_income'] = True
+            result['semantic_type'] = 'income'
+            result['suggested_category'] = 'INCOME'
+            result['suggested_subcategory'] = (
+                'Interest'
+                if contains_semantic_term(upper, ('INTEREST', 'DIVIDEND'))
+                else 'Salary'
+            )
+        return result
+
+    if contains_semantic_term(upper, ('CASHBACK', 'CASH BACK')):
+        result['merchant_name'] = narration[:50]
+        result['semantic_type'] = 'cashback'
         result['suggested_category'] = 'INCOME'
-        result['suggested_subcategory'] = 'Interest'
+        result['suggested_subcategory'] = 'Cashback'
+        return result
+
+    if contains_semantic_term(upper, ('REIMBURSEMENT', 'REIMBURSED')):
+        result['merchant_name'] = narration[:50]
+        result['semantic_type'] = 'reimbursement'
         return result
 
     # === Fallback ===
@@ -840,10 +889,10 @@ def _finalize_savings_txn(raw: dict, txns_out: list) -> None:
     # Parse narration for structured metadata
     parsed = parse_statement_narration(narration)
 
-    # For credits, also flag as income unless narration says it's a transfer
-    is_income = parsed.get('is_income', False)
-    if txn_type == 'credit' and not parsed.get('is_transfer', False):
-        is_income = True
+    semantic_type = parsed.get('semantic_type', 'unknown')
+    if txn_type == 'debit' and semantic_type == 'unknown':
+        semantic_type = 'expense'
+    is_income = semantic_type == 'income'
 
     txn = StatementTransaction(
         date=raw['date'],
@@ -855,6 +904,7 @@ def _finalize_savings_txn(raw: dict, txns_out: list) -> None:
         instrument=parsed.get('instrument', 'savings_account'),
         is_transfer=parsed.get('is_transfer', False),
         is_income=is_income,
+        semantic_type=semantic_type,
         vpa_handle=parsed.get('vpa'),
         upi_ref_number=parsed.get('ref'),
         suggested_category=parsed.get('suggested_category'),
@@ -895,6 +945,11 @@ def _process_savings_text_v2(text: str, txns_out: list) -> None:
                     instrument=parsed.get('instrument', 'savings_account'),
                     is_transfer=parsed.get('is_transfer', False),
                     is_income=is_income,
+                    semantic_type=(
+                        parsed.get('semantic_type', 'unknown')
+                        if parsed.get('semantic_type', 'unknown') != 'unknown'
+                        else 'expense'
+                    ),
                     vpa_handle=parsed.get('vpa'),
                     upi_ref_number=parsed.get('ref'),
                     suggested_category=parsed.get('suggested_category'),
@@ -922,6 +977,11 @@ def _process_savings_text_v2(text: str, txns_out: list) -> None:
                     instrument=parsed.get('instrument', 'savings_account'),
                     is_transfer=parsed.get('is_transfer', False),
                     is_income=parsed.get('is_income', False),
+                    semantic_type=(
+                        parsed.get('semantic_type', 'unknown')
+                        if parsed.get('semantic_type', 'unknown') != 'unknown'
+                        else 'expense'
+                    ),
                     vpa_handle=parsed.get('vpa'),
                     upi_ref_number=parsed.get('ref'),
                     suggested_category=parsed.get('suggested_category'),

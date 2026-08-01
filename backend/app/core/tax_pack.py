@@ -18,6 +18,12 @@ from sqlalchemy.orm import Session
 from app.models.account import Account
 from app.models.audit_session import AuditSession
 from app.models.transaction import Transaction
+from app.core.transaction_semantics import (
+    TransactionSemantic,
+    is_spending,
+    is_verified_income,
+    semantic_type_for,
+)
 
 TAX_PACK_SCHEMA_VERSION = "1.0"
 TAX_GUIDE_VERSION = "1.0"
@@ -27,9 +33,6 @@ OFFICIAL_AIS_URL = (
     "https://www.incometax.gov.in/iec/foportal/help/all-topics/"
     "e-filing-services/ais%20-%20annual%20information%20statement-faqs"
 )
-REVERSAL_STATUSES = {"reversed", "reversal", "voided"}
-REVERSAL_TERMS = ("REVERSAL", "REVERSED", "REFUND", "CHARGEBACK")
-
 INR_FORMAT = '[$₹-en-IN]#,##0.00'
 DATE_FORMAT = "dd-mm-yyyy"
 HEADER_FILL = PatternFill("solid", fgColor="17365D")
@@ -53,6 +56,7 @@ TRANSACTION_COLUMNS = [
     "Transfer",
     "Recurring",
     "Income",
+    "Economic meaning",
     "Source",
     "Reconciled",
     "Duplicate risk",
@@ -83,18 +87,7 @@ def _masked_account(account: Account | None) -> str:
 
 
 def _is_reversal(transaction: Transaction) -> bool:
-    if (transaction.status or "").lower() in REVERSAL_STATUSES:
-        return True
-    text = " ".join(
-        part
-        for part in (
-            transaction.raw_text,
-            transaction.merchant_raw,
-            transaction.merchant_normalized,
-        )
-        if part
-    ).upper()
-    return any(term in text for term in REVERSAL_TERMS)
+    return semantic_type_for(transaction) == TransactionSemantic.REVERSAL.value
 
 
 def _transaction_row(
@@ -124,6 +117,7 @@ def _transaction_row(
         "Transfer": bool(transaction.is_transfer),
         "Recurring": bool(transaction.is_recurring),
         "Income": bool(transaction.is_income),
+        "Economic meaning": semantic_type_for(transaction),
         "Source": transaction.source,
         "Reconciled": bool(transaction.reconciled),
         "Duplicate risk": bool(
@@ -145,6 +139,13 @@ def _quality_exceptions(
         issues = []
         if not transaction.category:
             issues.append(("unclassified", "Assign and confirm a category."))
+        if transaction.type == "credit" and not is_verified_income(transaction):
+            issues.append(
+                (
+                    "unverified_credit",
+                    "Confirm whether this is income, a transfer, refund, cashback, reimbursement or reversal.",
+                )
+            )
         if (
             transaction.confidence is not None
             and transaction.confidence < LOW_CONFIDENCE_THRESHOLD
@@ -336,7 +337,7 @@ def _build_workbook(
     )
     _append_table(
         workbook,
-        "Transfers Reversals",
+        "Transfers Other Credits",
         transfer_rows,
         columns=TRANSACTION_COLUMNS,
     )
@@ -559,9 +560,7 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
     income_rows = [
         row
         for transaction, row in zip(transactions, transaction_rows)
-        if (transaction.is_income or transaction.type == "credit")
-        and not transaction.is_transfer
-        and not _is_reversal(transaction)
+        if is_verified_income(transaction)
     ]
     expense_rows = [
         {
@@ -569,14 +568,19 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
             "Tax review status": "Review with CA; no deductibility asserted",
         }
         for transaction, row in zip(transactions, transaction_rows)
-        if transaction.type == "debit"
-        and not transaction.is_transfer
-        and not _is_reversal(transaction)
+        if is_spending(transaction)
     ]
     transfer_rows = [
         row
         for transaction, row in zip(transactions, transaction_rows)
-        if transaction.is_transfer or _is_reversal(transaction)
+        if (
+            transaction.is_transfer
+            or _is_reversal(transaction)
+            or (
+                transaction.type == "credit"
+                and not is_verified_income(transaction)
+            )
+        )
     ]
     exceptions = _quality_exceptions(
         transactions, accounts, duplicate_checksums

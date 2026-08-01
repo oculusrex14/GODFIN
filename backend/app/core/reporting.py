@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.budget import ELASTICITY
 from app.core.llm_service import call_llm, estimate_tokens
+from app.core.transaction_semantics import spending_clause, verified_income_clause
 from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
 
@@ -65,13 +66,13 @@ def prepare_summary_report(db: Session, month: str) -> dict:
     )
 
     total_spend = float(
-        base.filter(Transaction.type == 'debit', Transaction.is_transfer == False)
+        base.filter(spending_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
     )
 
     total_income = float(
-        base.filter(Transaction.is_income == True)
+        base.filter(verified_income_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
     )
@@ -81,7 +82,7 @@ def prepare_summary_report(db: Session, month: str) -> dict:
         savings_rate = round(((total_income - total_spend) / total_income) * 100, 1)
 
     transaction_count = base.filter(
-        Transaction.type == 'debit', Transaction.is_transfer == False
+        spending_clause(Transaction)
     ).count()
 
     avg_transaction = round(total_spend / transaction_count, 2) if transaction_count > 0 else 0
@@ -89,8 +90,7 @@ def prepare_summary_report(db: Session, month: str) -> dict:
     # Category breakdown
     category_rows = (
         base.filter(
-            Transaction.type == 'debit',
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
             Transaction.category.isnot(None),
         )
         .with_entities(Transaction.category, func.sum(Transaction.amount).label('total'))
@@ -178,8 +178,7 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
     # Top merchants by spend
     merchant_rows = (
         base.filter(
-            Transaction.type == 'debit',
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
         )
         .with_entities(
             Transaction.merchant_normalized,
@@ -199,8 +198,7 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
     # Daily spending timeline
     daily_rows = (
         base.filter(
-            Transaction.type == 'debit',
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
         )
         .with_entities(
             Transaction.date,
@@ -239,8 +237,7 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
             Transaction.date >= three_months_ago,
             Transaction.date < start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
             Transaction.category.isnot(None),
         )
         .group_by(Transaction.category)
@@ -277,7 +274,7 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
     ]
 
     income_rows = (
-        base.filter(Transaction.is_income == True)
+        base.filter(verified_income_clause(Transaction))
         .with_entities(
             Transaction.subcategory,
             Transaction.merchant_normalized,
@@ -327,8 +324,7 @@ def _get_spending_trend(db: Session, month: str, num_months: int = 6) -> list:
                 Transaction.date >= m_start,
                 Transaction.date < m_end,
                 Transaction.status != 'deleted',
-                Transaction.type == 'debit',
-                Transaction.is_transfer == False,
+                spending_clause(Transaction),
             )
             .scalar()
         )
@@ -338,7 +334,7 @@ def _get_spending_trend(db: Session, month: str, num_months: int = 6) -> list:
                 Transaction.date >= m_start,
                 Transaction.date < m_end,
                 Transaction.status != 'deleted',
-                Transaction.is_income == True,
+                verified_income_clause(Transaction),
             )
             .scalar()
         )

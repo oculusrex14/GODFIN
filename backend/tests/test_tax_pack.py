@@ -190,12 +190,15 @@ def test_tax_pack_contents_hashes_workbook_pdf_and_warnings(
             "Transactions",
             "Income Review",
             "Expense Tax Review",
-            "Transfers Reversals",
+            "Transfers Other Credits",
             "Data Quality Exceptions",
             "Period Completeness",
             "Missing Evidence",
             "Filing Steps",
         } <= set(workbook.sheetnames)
+        assert "Economic meaning" in [
+            cell.value for cell in workbook["Transactions"][1]
+        ]
         transactions = workbook["Transactions"]
         assert transactions.freeze_panes == "A2"
         assert transactions.auto_filter.ref

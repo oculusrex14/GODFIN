@@ -9,6 +9,12 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.transaction_semantics import (
+    ledger_credit_clause,
+    ledger_debit_clause,
+    spending_clause,
+    verified_income_clause,
+)
 from app.models.transaction import Transaction
 from app.schemas.dashboard import DashboardStats
 
@@ -76,16 +82,15 @@ def dashboard_stats(
         Transaction.status != "deleted",
     )
 
-    # Month spend: sum of debits excluding transfers
+    # Month spend uses the shared economic-semantic definition.
     spend_result = base_query.filter(
-        Transaction.type == "debit",
-        Transaction.is_transfer == False,
+        spending_clause(Transaction),
     ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
     month_spend = float(spend_result)
 
-    # Month income: sum where is_income is True
+    # Only explicit/deterministic verified income is counted.
     income_result = base_query.filter(
-        Transaction.is_income == True,
+        verified_income_clause(Transaction),
     ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
     month_income = float(income_result)
 
@@ -106,12 +111,11 @@ def dashboard_stats(
     )
 
     credits_total = balance_query.filter(
-        (Transaction.is_income == True) | (Transaction.type == 'credit'),
+        ledger_credit_clause(Transaction),
     ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
 
     debits_total = balance_query.filter(
-        Transaction.type == 'debit',
-        Transaction.is_transfer == False,
+        ledger_debit_clause(Transaction),
     ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
 
     account_balance = round(float(credits_total) - float(debits_total), 2)
@@ -149,8 +153,7 @@ def category_breakdown(
             Transaction.date >= start_date,
             Transaction.date < end_date,
             Transaction.status != "deleted",
-            Transaction.type == "debit",
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
         )
         .group_by(Transaction.category)
         .order_by(func.sum(Transaction.amount).desc())
@@ -231,8 +234,7 @@ def spending_trend(
             Transaction.date >= min_date,
             Transaction.date < max_date,
             Transaction.status != "deleted",
-            Transaction.type == "debit",
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
         )
         .group_by(func.strftime('%Y-%m', Transaction.date))
         .all()
@@ -248,7 +250,7 @@ def spending_trend(
             Transaction.date >= min_date,
             Transaction.date < max_date,
             Transaction.status != "deleted",
-            Transaction.is_income == True,
+            verified_income_clause(Transaction),
         )
         .group_by(func.strftime('%Y-%m', Transaction.date))
         .all()

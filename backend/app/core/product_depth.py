@@ -12,6 +12,13 @@ from app.models.account import Account
 from app.models.subscription import Subscription
 from app.models.subscription_suggestion import SubscriptionSuggestion
 from app.models.transaction import Transaction
+from app.core.transaction_semantics import (
+    TransactionSemantic,
+    active_clause,
+    apply_transaction_semantic,
+    is_spending,
+    is_verified_income,
+)
 from app.models.transfer_match import TransferMatch
 
 
@@ -29,20 +36,21 @@ def cash_flow_calendar(db: Session, month: str) -> dict[str, Any]:
         .filter(
             Transaction.date >= start,
             Transaction.date < end,
-            Transaction.status != "deleted",
-            Transaction.is_transfer.is_(False),
+            active_clause(Transaction),
         )
         .all()
     )
     by_day: dict[date, dict[str, float | int]] = {}
     for txn in rows:
+        if not is_spending(txn) and not is_verified_income(txn):
+            continue
         day = by_day.setdefault(
             txn.date, {"spend": 0.0, "income": 0.0, "transaction_count": 0}
         )
         day["transaction_count"] += 1
-        if txn.type == "debit" and not txn.is_income:
+        if is_spending(txn):
             day["spend"] += float(txn.amount)
-        elif txn.is_income:
+        elif is_verified_income(txn):
             day["income"] += float(txn.amount)
 
     days = []
@@ -239,7 +247,10 @@ def decide_transfer_match(
         match.status = "confirmed"
         match.snoozed_until = None
         for txn in (debit, credit):
-            txn.is_transfer = True
+            apply_transaction_semantic(
+                txn,
+                TransactionSemantic.INTERNAL_TRANSFER.value,
+            )
             txn.category = "TRANSFERS"
             txn.subcategory = "Matched Transfer"
         db.query(TransferMatch).filter(

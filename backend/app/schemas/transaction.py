@@ -68,6 +68,7 @@ class TransactionResponse(BaseModel):
     is_transfer: bool
     is_recurring: bool
     is_income: bool
+    semantic_type: str
     is_locked: bool
     is_split: bool
     tags: Optional[str] = None

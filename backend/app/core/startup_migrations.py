@@ -13,7 +13,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 5
+CURRENT_SCHEMA_REVISION = 6
 
 _RECURRING_PATTERN_COLUMNS = {
     "confidence": "REAL NOT NULL DEFAULT 0",
@@ -21,6 +21,10 @@ _RECURRING_PATTERN_COLUMNS = {
     "interval_variability": "REAL",
     "amount_variability": "REAL",
     "detection_status": "TEXT NOT NULL DEFAULT 'active'",
+}
+
+_TRANSACTION_COLUMNS = {
+    "semantic_type": "TEXT NOT NULL DEFAULT 'unknown'",
 }
 
 
@@ -72,30 +76,37 @@ def apply_additive_schema_updates(db_path: str) -> None:
 
     connection = sqlite3.connect(path)
     try:
-        has_recurring = connection.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type='table' AND name='recurring_patterns'"
-        ).fetchone()
-        if not has_recurring:
-            return
-        existing = {
-            row[1]
-            for row in connection.execute(
-                "PRAGMA table_info(recurring_patterns)"
-            ).fetchall()
-        }
-        for column, definition in _RECURRING_PATTERN_COLUMNS.items():
-            if column not in existing:
-                connection.execute(
-                    f'ALTER TABLE recurring_patterns ADD COLUMN "{column}" {definition}'
-                )
+        for table, columns in (
+            ("recurring_patterns", _RECURRING_PATTERN_COLUMNS),
+            ("transactions", _TRANSACTION_COLUMNS),
+        ):
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()
+            if not exists:
+                continue
+            existing = {
+                row[1]
+                for row in connection.execute(
+                    f'PRAGMA table_info("{table}")'
+                ).fetchall()
+            }
+            for column, definition in columns.items():
+                if column not in existing:
+                    connection.execute(
+                        f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'
+                    )
         connection.commit()
     finally:
         connection.close()
 
 
 def run_post_create_migrations(db: Session) -> None:
-    """Backfill auditable opening balances after new tables are available."""
+    """Backfill transaction semantics and auditable opening balances."""
+    from app.core.transaction_semantics import backfill_transaction_semantics
+
+    backfill_transaction_semantics(db)
     goals = db.query(Goal).filter(Goal.current_saved > 0).all()
     for goal in goals:
         existing = (

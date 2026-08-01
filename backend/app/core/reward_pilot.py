@@ -10,6 +10,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.transaction import Transaction
+from app.core.transaction_semantics import (
+    active_clause,
+    is_spending,
+    is_verified_income,
+)
 
 PAYOUT_POLICY = {
     "aggregate_bundle_inr": 100,
@@ -95,13 +100,12 @@ def build_redacted_preview(
         .filter(
             Transaction.date >= start,
             Transaction.date <= today,
-            Transaction.status != "deleted",
-            Transaction.is_transfer.is_(False),
+            active_clause(Transaction),
         )
         .all()
     )
     category_counts = Counter(
-        (row.category or "UNCLASSIFIED") for row in rows if row.type == "debit"
+        (row.category or "UNCLASSIFIED") for row in rows if is_spending(row)
     )
     debit_count = sum(category_counts.values())
     category_share_bands = {
@@ -109,7 +113,7 @@ def build_redacted_preview(
         for category, count in category_counts.most_common()
     } if debit_count else {}
     active_day_count = len({row.date for row in rows})
-    income_count = sum(bool(row.is_income) for row in rows)
+    income_count = sum(is_verified_income(row) for row in rows)
     recurring_count = sum(bool(row.is_recurring) for row in rows)
     payload = {
         "schema_version": 1,

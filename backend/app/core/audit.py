@@ -11,6 +11,7 @@ from app.models.audit_log import AuditLog
 from app.models.audit_session import AuditSession
 from app.models.monthly_aggregate import MonthlyAggregate
 from app.models.transaction import Transaction
+from app.core.transaction_semantics import spending_clause, verified_income_clause
 
 
 def get_month_status(db: Session, year: int, month: int) -> str:
@@ -180,12 +181,12 @@ def _compute_aggregate(
     )
 
     total_spend = float(
-        base.filter(Transaction.type == 'debit', Transaction.is_transfer == False)
+        base.filter(spending_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
     )
     total_income = float(
-        base.filter(Transaction.is_income == True)
+        base.filter(verified_income_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
     )
@@ -195,7 +196,7 @@ def _compute_aggregate(
         savings_rate = round(((total_income - total_spend) / total_income) * 100, 1)
 
     transaction_count = base.filter(
-        Transaction.type == 'debit', Transaction.is_transfer == False
+        spending_clause(Transaction)
     ).count()
 
     # Elasticity totals
@@ -205,7 +206,7 @@ def _compute_aggregate(
     transfer_total = 0.0
 
     cat_rows = (
-        base.filter(Transaction.type == 'debit', Transaction.category.isnot(None))
+        base.filter(spending_clause(Transaction), Transaction.category.isnot(None))
         .with_entities(Transaction.category, func.sum(Transaction.amount).label('total'))
         .group_by(Transaction.category)
         .all()
@@ -227,7 +228,7 @@ def _compute_aggregate(
 
     # Recurring total
     recurring_total = float(
-        base.filter(Transaction.is_recurring == True, Transaction.type == 'debit')
+        base.filter(Transaction.is_recurring == True, spending_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
     )

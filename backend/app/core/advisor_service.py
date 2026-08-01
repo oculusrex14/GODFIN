@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.budget import ELASTICITY, compute_financial_profile
 from app.core.llm_service import call_llm
+from app.core.transaction_semantics import spending_clause, verified_income_clause
 from app.models.goal import Goal
 from app.models.recurring_pattern import RecurringPattern
 from app.models.subscription import Subscription
@@ -45,7 +46,7 @@ def build_financial_profile_text(db: Session) -> str:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.is_income == True,
+            verified_income_clause(Transaction),
         )
         .scalar()
     )
@@ -55,8 +56,7 @@ def build_financial_profile_text(db: Session) -> str:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
         )
         .scalar()
     )
@@ -67,8 +67,7 @@ def build_financial_profile_text(db: Session) -> str:
         .filter(
             Transaction.date >= month_start,
             Transaction.status != 'deleted',
-            Transaction.type == 'debit',
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
             Transaction.category.isnot(None),
         )
         .group_by(Transaction.category)
@@ -91,21 +90,20 @@ def build_financial_profile_text(db: Session) -> str:
         h_income = float(
             db.query(func.coalesce(func.sum(Transaction.amount), 0))
             .filter(Transaction.date >= ms, Transaction.date < me,
-                    Transaction.status != 'deleted', Transaction.is_income == True)
+                    Transaction.status != 'deleted', verified_income_clause(Transaction))
             .scalar()
         )
         h_spend = float(
             db.query(func.coalesce(func.sum(Transaction.amount), 0))
             .filter(Transaction.date >= ms, Transaction.date < me,
-                    Transaction.status != 'deleted', Transaction.type == 'debit',
-                    Transaction.is_transfer == False)
+                    Transaction.status != 'deleted', spending_clause(Transaction))
             .scalar()
         )
         h_cats = (
             db.query(Transaction.category, func.sum(Transaction.amount).label('total'))
             .filter(Transaction.date >= ms, Transaction.date < me,
-                    Transaction.status != 'deleted', Transaction.type == 'debit',
-                    Transaction.is_transfer == False, Transaction.category.isnot(None))
+                    Transaction.status != 'deleted', spending_clause(Transaction),
+                    Transaction.category.isnot(None))
             .group_by(Transaction.category)
             .order_by(func.sum(Transaction.amount).desc())
             .limit(3)
@@ -126,8 +124,7 @@ def build_financial_profile_text(db: Session) -> str:
 
     all_time_spend = float(
         db.query(func.coalesce(func.sum(Transaction.amount), 0))
-        .filter(Transaction.status != 'deleted', Transaction.type == 'debit',
-                Transaction.is_transfer == False)
+        .filter(Transaction.status != 'deleted', spending_clause(Transaction))
         .scalar()
     )
 

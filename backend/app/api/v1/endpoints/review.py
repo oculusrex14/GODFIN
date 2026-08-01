@@ -17,6 +17,7 @@ from app.core.classification_learning import (
 )
 from app.core.classifier import validate_category, validate_subcategory
 from app.core.database import get_db
+from app.core.transaction_semantics import apply_category_semantic, semantic_type_for
 from app.core.llm_privacy import sanitize_untrusted_text
 from app.core.llm_service import call_llm
 from app.core.merchant_memory_service import upsert_merchant_memory
@@ -165,6 +166,7 @@ def list_review_queue(
                 "instrument": t.instrument,
                 "source": t.source,
                 "is_income": t.is_income or False,
+                "semantic_type": semantic_type_for(t),
                 "confidence": t.confidence,
                 "classification_source": t.classification_source,
                 "classification_reason": classification_reason(
@@ -210,12 +212,7 @@ def resolve_review(
         txn.confidence = 1.0
         txn.classification_source = "user"
 
-        # Sync is_income flag with INCOME category
-        if body.category == 'INCOME':
-            txn.is_income = True
-        elif txn.is_income and body.category != 'INCOME':
-            # User explicitly classified a credit as non-income
-            txn.is_income = False
+        apply_category_semantic(txn, explicitly_classified=True)
 
         # Audit log
         db.add(AuditLog(
@@ -291,11 +288,7 @@ def batch_resolve(
             txn.confidence = 1.0
             txn.classification_source = "user"
 
-            # Sync is_income flag with INCOME category
-            if item.category == 'INCOME':
-                txn.is_income = True
-            elif txn.is_income and item.category != 'INCOME':
-                txn.is_income = False
+            apply_category_semantic(txn, explicitly_classified=True)
 
             db.add(AuditLog(
                 transaction_id=txn.id,

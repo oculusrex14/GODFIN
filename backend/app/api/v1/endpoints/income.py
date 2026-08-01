@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.transaction_semantics import verified_income_clause
 from app.models.income_source import IncomeSource
 from app.models.transaction import Transaction
 
@@ -219,7 +220,7 @@ def get_income_stats(
     total_detected = (
         db.query(func.sum(Transaction.amount))
         .filter(
-            Transaction.is_income == True,
+            verified_income_clause(Transaction),
             Transaction.date >= start_date,
             Transaction.date < end_date,
             Transaction.status != "deleted",
@@ -242,7 +243,7 @@ def get_income_stats(
         matching = (
             db.query(Transaction)
             .filter(
-                Transaction.is_income == True,
+                verified_income_clause(Transaction),
                 Transaction.date >= start_date,
                 Transaction.date < end_date,
                 Transaction.status != "deleted",
