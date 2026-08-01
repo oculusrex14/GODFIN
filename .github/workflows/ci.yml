@@ -23,6 +23,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements-lock.txt
       - run: python -m pip install --require-hashes -r backend/requirements-lock.txt
+      - run: python scripts/generate_brand_assets.py --check
       - run: python -m pytest backend/tests -q
         env:
           GODFIN_TESTING: "1"

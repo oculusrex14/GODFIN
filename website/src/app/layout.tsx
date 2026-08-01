@@ -10,9 +10,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl()),
   icons: {
-    icon: "/godfin-mark.svg",
-    shortcut: "/godfin-mark.svg",
-    apple: "/godfin-mark.svg",
+    icon: "/godfin-vault-dial.png",
+    shortcut: "/godfin-vault-dial.png",
+    apple: "/godfin-vault-dial.png",
   },
   title: {
     default: "GODFIN — The Finance App That Respects Your Privacy",

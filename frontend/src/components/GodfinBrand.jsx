@@ -6,10 +6,10 @@ export default function GodfinBrand({
   return (
     <div className={`flex items-center gap-3 ${className}`}>
       <img
-        src="/godfin-mark.svg"
+        src="/godfin-vault-dial.png"
         alt=""
         aria-hidden="true"
-        className={compact ? 'h-9 w-9 rounded-xl' : 'h-12 w-12 rounded-2xl'}
+        className={compact ? 'h-10 w-10 object-contain' : 'h-14 w-14 object-contain'}
       />
       <div className="min-w-0">
         <div
@@ -17,7 +17,7 @@ export default function GodfinBrand({
           aria-label="GODFIN"
         >
           <span className="text-white/95">GOD</span>
-          <span className="bg-gradient-to-r from-[#54E1D0] to-[#17C3B2] bg-clip-text text-transparent">FIN</span>
+          <span className="text-[#A6E22E]">FIN</span>
         </div>
         {showTagline && (
           <p className={`mt-1 uppercase text-white/28 ${compact ? 'text-[0.48rem] tracking-[0.12em]' : 'text-[0.55rem] tracking-[0.15em]'}`}>
