@@ -21,6 +21,7 @@ from app.core.reporting import (
     prepare_summary_report,
 )
 from app.core.tax_pack import build_financial_year_tax_pack
+from app.core.llm_privacy import has_hosted_data_consent, is_local_provider
 from app.models.account import Account
 from app.models.transaction import Transaction
 from app.models.llm_config import LLMConfiguration
@@ -111,6 +112,7 @@ def report_detailed(
 
 
 def _ai_report_metadata(llm_config: LLMConfiguration) -> dict:
+    local_provider = is_local_provider(llm_config.provider)
     return {
         'generated_at': datetime.now(UTC).isoformat(),
         'llm': {
@@ -123,15 +125,24 @@ def _ai_report_metadata(llm_config: LLMConfiguration) -> dict:
             'action': 'generate_ai_financial_report',
         },
         'data_disclosure': {
-            'shared': [
-                'exact monthly income, spending, and savings totals',
-                'category and merchant aggregate totals',
-                'recurring-payment summaries',
-                'six months of aggregate income and spending trends',
-            ],
+            'processing': 'on_device' if local_provider else 'hosted_provider',
+            'shared': (
+                [
+                    'exact aggregate totals processed only by the local model',
+                    'category summaries and aggregate trends processed on this device',
+                ]
+                if local_provider
+                else [
+                    'amount bands rather than exact financial amounts',
+                    'ratios, counts, taxonomy categories, and aggregate trend direction',
+                    'the report instructions needed to produce the requested explanation',
+                ]
+            ),
             'not_shared': [
                 'account or card numbers',
                 'raw transaction descriptions',
+                'merchant names',
+                'exact dates or exact financial amounts for hosted providers',
                 'transaction IDs or account IDs',
                 'PIN, license key, or Gmail credentials',
             ],
@@ -162,6 +173,11 @@ def report_ai_insights(
                 "Connect an AI in Settings to create a detailed analysis. "
                 "Standard totals and exports remain available without AI."
             ),
+        )
+    if not has_hosted_data_consent(llm_config):
+        raise HTTPException(
+            status_code=409,
+            detail="Accept the hosted AI data disclosure in Settings before continuing.",
         )
     month = body.month or _default_month(db)
     from app.core.reporting import _get_spending_trend
@@ -374,6 +390,11 @@ def report_pdf_detailed(
                 "Connect an AI in Settings before creating the detailed report. "
                 "The standard summary report remains available."
             ),
+        )
+    if not has_hosted_data_consent(llm_config):
+        raise HTTPException(
+            status_code=409,
+            detail="Accept the hosted AI data disclosure in Settings before continuing.",
         )
 
     try:

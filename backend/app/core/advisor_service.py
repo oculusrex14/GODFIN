@@ -141,7 +141,17 @@ def build_financial_profile_text(db: Session) -> str:
 
     # Goals (only active ones)
     goals = db.query(Goal).filter(Goal.deadline_date >= today, Goal.is_active == True).all()
-    goals_text = ', '.join(f"{g.name} (Rs {g.current_saved:,.0f}/{g.target_amount:,.0f})" for g in goals[:3]) or 'None'
+    goal_progress = [
+        min(100.0, max(0.0, float(g.current_saved or 0) / float(g.target_amount) * 100))
+        for g in goals
+        if g.target_amount and float(g.target_amount) > 0
+    ]
+    goals_text = (
+        f"{len(goals)} active; average progress "
+        f"{sum(goal_progress) / len(goal_progress):.0f}%"
+        if goal_progress
+        else f"{len(goals)} active"
+    )
 
     # Recurring expenses
     recurring_total = float(
@@ -207,7 +217,7 @@ def chat(db: Session, user_message: str, conversation_history: list) -> Optional
     # Build the full prompt with conversation context
     prompt_parts = [f"System: {system}\n"]
 
-    for msg in conversation_history[-10:]:  # Keep last 10 messages for context
+    for msg in conversation_history[-4:]:
         role = msg.get('role', 'user')
         content = msg.get('content', '')
         prompt_parts.append(f"{role.capitalize()}: {content}")

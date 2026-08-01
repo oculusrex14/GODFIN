@@ -519,13 +519,8 @@ def _build_insights_prompt(detailed: dict, trend: list, month_label: str) -> str
         for c in s.get('category_comparison', [])[:8]
     ) or '  - (none)'
 
-    merch_lines = '\n'.join(
-        f"  - {m['merchant'] or 'Unknown'}: Rs {_format_inr(m['amount'])} across {m['count']} transactions"
-        for m in s.get('top_merchants', [])[:6]
-    ) or '  - (none)'
-
     recur_lines = '\n'.join(
-        f"  - {r['merchant'] or 'Unknown'} ({r['category']}): Rs {_format_inr(r['amount'])} / {r['frequency']}"
+        f"  - {r['category']}: Rs {_format_inr(r['amount'])} / {r['frequency']}"
         for r in s.get('recurring_list', [])[:8]
     ) or '  - (none)'
 
@@ -537,8 +532,8 @@ def _build_insights_prompt(detailed: dict, trend: list, month_label: str) -> str
     return f"""You are writing a careful, plain-language monthly money report for an Indian
 user. All amounts are in Indian Rupees (Rs). The report month is {month_label}.
 
-Use ONLY the data below. Do not invent figures. Be specific, quantitative, and actionable — reference
-real numbers and category names from the data. Explain finance terms in everyday language. Do not
+Use ONLY the data below. Do not invent figures. Be specific and actionable using the supplied amount
+bands, ratios, and category names. Explain finance terms in everyday language. Do not
 diagnose the user, shame spending, or claim certainty that the data cannot support.
 
 === FINANCIAL DATA ===
@@ -560,10 +555,7 @@ Top categories:
 Category vs trailing 3-month average:
 {comp_lines}
 
-Top merchants:
-{merch_lines}
-
-Recurring subscriptions/commitments:
+Recurring commitments by category:
 {recur_lines}
 
 Last 6 months trend (oldest → newest):
@@ -580,12 +572,12 @@ Respond with ONLY a JSON object (no prose, no markdown fences) in EXACTLY this s
     {{"title": "Watch-outs", "tone": "<positive|warning|negative|neutral>", "icon": "alert", "content": "markdown: categories spiking vs their 3-mo average, flexible spend risks, recurring creep"}}
   ],
   "highlights": [
-    {{"label": "Biggest Category", "value": "Rs X (Y%)", "tone": "neutral", "delta": null}},
-    {{"label": "Flexible Spend", "value": "Rs X (Y%)", "tone": "warning", "delta": null}},
-    {{"label": "Top Spike vs Avg", "value": "Category +Rs X", "tone": "negative", "delta": null}}
+    {{"label": "Biggest Category", "value": "amount band (Y%)", "tone": "neutral", "delta": null}},
+    {{"label": "Flexible Spend", "value": "amount band (Y%)", "tone": "warning", "delta": null}},
+    {{"label": "Top Spike vs Avg", "value": "Category amount band", "tone": "negative", "delta": null}}
   ],
   "recommendations": [
-    "markdown bullet: one specific, prioritized action with a Rs target",
+    "markdown bullet: one specific, prioritized action using an amount band or percentage target",
     "markdown bullet: a second concrete action",
     "markdown bullet: a third forward-looking action for next month"
   ]
@@ -596,7 +588,7 @@ Rules:
 - "icon" must be one of: pie, piggy, trend, alert, wallet, repeat.
 - Keep executive_summary to 2-4 sentences. Each section's content: 3-6 sentences of markdown (use **bold** for category/amount anchors, and bullet lists where natural).
 - 3 recommendations max, each a single bullet string.
-- Reference real numbers from the data. No generic platitudes."""
+- Reference only the supplied bands, percentages, and counts. No generic platitudes."""
 
 
 def _parse_insights_json(raw: str) -> Optional[dict]:
@@ -621,19 +613,58 @@ def _parse_insights_json(raw: str) -> Optional[dict]:
         return None
     if not isinstance(data, dict):
         return None
-    # Minimal shape validation / normalization
-    if not isinstance(data.get('sections'), list):
+    if not isinstance(data.get('executive_summary'), str):
         return None
-    for sec in data['sections']:
-        sec['tone'] = sec.get('tone') if sec.get('tone') in INSIGHT_TONES else 'neutral'
-        sec.setdefault('icon', 'wallet')
-        sec.setdefault('content', '')
-        sec.setdefault('title', 'Insights')
-    if not isinstance(data.get('recommendations'), list):
-        data['recommendations'] = []
-    if not isinstance(data.get('highlights'), list):
-        data['highlights'] = []
-    data.setdefault('executive_summary', '')
+    sections = data.get('sections')
+    if not isinstance(sections, list) or not sections:
+        return None
+    normalized_sections = []
+    for sec in sections[:8]:
+        if not isinstance(sec, dict):
+            return None
+        title = sec.get('title')
+        content = sec.get('content')
+        if not isinstance(title, str) or not isinstance(content, str):
+            return None
+        normalized_sections.append({
+            'title': title.strip()[:120] or 'Insights',
+            'content': content.strip()[:8000],
+            'tone': sec.get('tone') if sec.get('tone') in INSIGHT_TONES else 'neutral',
+            'icon': sec.get('icon') if sec.get('icon') in {
+                'pie', 'piggy', 'trend', 'alert', 'wallet', 'repeat'
+            } else 'wallet',
+        })
+
+    highlights = data.get('highlights', [])
+    if not isinstance(highlights, list):
+        return None
+    normalized_highlights = []
+    for item in highlights[:8]:
+        if not isinstance(item, dict):
+            return None
+        label = item.get('label')
+        value = item.get('value')
+        if not isinstance(label, str) or not isinstance(value, str):
+            return None
+        delta = item.get('delta')
+        normalized_highlights.append({
+            'label': label.strip()[:120],
+            'value': value.strip()[:240],
+            'tone': item.get('tone') if item.get('tone') in INSIGHT_TONES else 'neutral',
+            'delta': delta.strip()[:240] if isinstance(delta, str) else None,
+        })
+
+    recommendations = data.get('recommendations', [])
+    if not isinstance(recommendations, list) or any(
+        not isinstance(item, str) for item in recommendations
+    ):
+        return None
+    data = {
+        'executive_summary': data['executive_summary'].strip()[:8000],
+        'sections': normalized_sections,
+        'highlights': normalized_highlights,
+        'recommendations': [item.strip()[:2000] for item in recommendations[:3]],
+    }
     return data
 
 
@@ -1322,7 +1353,7 @@ def generate_detailed_pdf(
     )
     shared = ai_metadata.get('data_disclosure', {}).get('shared', [])
     pdf.render_markdown(
-        "Data sent to the connected AI:\n" + "\n".join(f"- {item}" for item in shared),
+        "Data provided to the connected AI:\n" + "\n".join(f"- {item}" for item in shared),
         font_size=8,
     )
     pdf.ln(4)

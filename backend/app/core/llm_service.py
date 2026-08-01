@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 import time
 from collections import OrderedDict
@@ -9,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
 from app.core.classifier import validate_category, validate_subcategory
+from app.core.llm_privacy import redact_hosted_prompt, sanitize_untrusted_text
 from app.core.taxonomy import TAXONOMY
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,7 @@ MODEL_TOKEN_LIMITS = {
     'gemini-1.5-pro': 1000000, 'gemini-1.5-flash': 1000000,
 }
 DEFAULT_TOKEN_LIMIT = 8000
+MAX_LLM_RESPONSE_CHARS = 1_000_000
 
 
 def get_token_limit(model: str = '') -> int:
@@ -120,9 +123,13 @@ def build_prompt(merchant_name: str, amount: float, instrument: str, web_search_
         web_instruction = "- Do NOT access the internet. Classify using only the vendor name provided."
     return LLM_CLASSIFICATION_PROMPT.format(
         taxonomy_list=_build_taxonomy_list(),
-        merchant_name=merchant_name,
+        merchant_name=(
+            "<UNTRUSTED_VENDOR_TEXT>"
+            + sanitize_untrusted_text(merchant_name, max_length=160)
+            + "</UNTRUSTED_VENDOR_TEXT>"
+        ),
         amount=f"{amount:,.2f}",
-        instrument=instrument,
+        instrument=sanitize_untrusted_text(instrument, max_length=32),
         web_search_instruction=web_instruction,
     )
 
@@ -178,6 +185,8 @@ class LLMProvider(Protocol):
     """Structural contract shared by every local and remote LLM provider."""
 
     model: str
+    is_local: bool
+    hosted_data_consent: bool
 
     def call(self, prompt: str, temperature: float = 0.1) -> Optional[str]: ...
 
@@ -186,6 +195,8 @@ class StubLLMProvider(LLMProvider):
     """Stub provider that returns None — used when no LLM is configured."""
 
     model = "stub"
+    is_local = True
+    hosted_data_consent = False
 
     def call(self, prompt: str, temperature: float = 0.1) -> Optional[str]:
         del prompt, temperature
@@ -214,13 +225,30 @@ def _call_active_provider(
     prompt: str,
     *,
     temperature: float,
+    purpose: str,
 ) -> Optional[str]:
-    response = _provider.call(prompt, temperature=temperature)
+    if getattr(_provider, "is_local", False):
+        prepared_prompt = prompt
+    else:
+        if not getattr(_provider, "hosted_data_consent", False):
+            raise PermissionError(
+                "Hosted AI data consent is missing or out of date"
+            )
+        prepared_prompt = redact_hosted_prompt(prompt)
+        logger.info("Applied hosted AI redaction for purpose=%s", purpose)
+    response = _provider.call(prepared_prompt, temperature=temperature)
     if response is not None and not isinstance(response, str):
         raise TypeError(
             f"LLM provider returned {type(response).__name__}; expected text or None"
         )
-    return response
+    if response is None:
+        return None
+    normalized = response.strip()
+    if not normalized:
+        return None
+    if len(normalized) > MAX_LLM_RESPONSE_CHARS:
+        raise ValueError("LLM provider response exceeded the safe size limit")
+    return normalized
 
 
 def set_llm_provider(provider: LLMProvider) -> None:
@@ -267,7 +295,11 @@ def classify_with_llm(
         prompt = prompt[:max_chars]  # Rough trim
 
     try:
-        response = _call_active_provider(prompt, temperature=0.1)
+        response = _call_active_provider(
+            prompt,
+            temperature=0.1,
+            purpose="classification",
+        )
         if response is None:
             if not isinstance(_provider, StubLLMProvider):
                 breaker.record_failure()
@@ -294,11 +326,22 @@ def classify_with_llm(
         if subcategory and not validate_subcategory(category, subcategory):
             subcategory = None  # Drop invalid subcategory but keep category
 
+        try:
+            confidence_value = float(confidence)
+        except (TypeError, ValueError):
+            breaker.record_failure()
+            result.error = "Invalid confidence from LLM"
+            return result
+        if not math.isfinite(confidence_value) or not 0 <= confidence_value <= 1:
+            breaker.record_failure()
+            result.error = "Invalid confidence from LLM"
+            return result
+
         breaker.record_success()
 
         result.category = category
         result.subcategory = subcategory
-        result.confidence = min(float(confidence) * 0.85, 1.0)  # Scale down LLM confidence
+        result.confidence = confidence_value * 0.85
         result.success = True
 
         # Cache successful result
@@ -330,7 +373,11 @@ def call_llm(
         return None
 
     try:
-        response = _call_active_provider(prompt, temperature=temperature)
+        response = _call_active_provider(
+            prompt,
+            temperature=temperature,
+            purpose=purpose,
+        )
         if response:
             breaker.record_success()
         elif not isinstance(_provider, StubLLMProvider):

@@ -104,6 +104,11 @@ def settings_health(
     if active_llm:
         llm_status = "ok"
         llm_message = f"{active_llm.provider} / {active_llm.model} is active."
+        from app.core.llm_privacy import has_hosted_data_consent
+
+        if not has_hosted_data_consent(active_llm):
+            llm_status = "consent_required"
+            llm_message = "Review the hosted AI data disclosure before using this provider."
         if active_llm.api_key:
             try:
                 decrypt(active_llm.api_key)

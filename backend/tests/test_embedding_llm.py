@@ -23,6 +23,7 @@ from app.core.llm_service import (
     set_llm_provider,
     call_llm,
 )
+from app.core.llm_privacy import redact_hosted_prompt
 from app.core.llm_providers import QwenProvider
 from app.models.merchant_memory import MerchantMemory
 
@@ -143,6 +144,9 @@ def test_stub_provider_returns_none():
 # --- LLM classify with mock provider ---
 
 class MockLLMProvider(LLMProvider):
+    is_local = True
+    hosted_data_consent = False
+
     def __init__(self, response):
         self._response = response
         self.model = 'mock-model'
@@ -177,6 +181,79 @@ def test_classify_with_invalid_category_llm():
         assert 'Invalid category' in result.error
     finally:
         set_llm_provider(StubLLMProvider())
+
+
+@pytest.mark.parametrize("confidence", ["NaN", "Infinity", -0.1, 1.1, "unknown"])
+def test_classify_rejects_invalid_or_non_finite_confidence(confidence):
+    mock = MockLLMProvider(
+        '{"category": "FOOD & DINING", "subcategory": "Food Delivery", '
+        f'"confidence": {repr(confidence).replace(chr(39), chr(34))}' + '}'
+    )
+    set_llm_provider(mock)
+    try:
+        result = classify_with_llm(f"UNIQUE {confidence}", 351.0, "upi")
+        assert result.success is False
+        assert result.error == "Invalid confidence from LLM"
+    finally:
+        set_llm_provider(StubLLMProvider())
+
+
+def test_hosted_provider_requires_recorded_consent_before_call():
+    class HostedProvider(MockLLMProvider):
+        is_local = False
+        hosted_data_consent = False
+
+        def __init__(self):
+            super().__init__("should not be returned")
+            self.calls = 0
+
+        def call(self, prompt, temperature=0.1):
+            self.calls += 1
+            return super().call(prompt, temperature)
+
+    provider = HostedProvider()
+    set_llm_provider(provider)
+    try:
+        assert call_llm("Income Rs 12,345", purpose="advisor") is None
+        assert provider.calls == 0
+    finally:
+        set_llm_provider(StubLLMProvider())
+
+
+def test_hosted_provider_receives_only_redacted_prompt():
+    class HostedProvider(MockLLMProvider):
+        is_local = False
+        hosted_data_consent = True
+
+        def __init__(self):
+            super().__init__("ready")
+            self.prompt = None
+
+        def call(self, prompt, temperature=0.1):
+            self.prompt = prompt
+            return super().call(prompt, temperature)
+
+    raw = (
+        "Email alice@example.com UPI alice@okhdfcbank phone 9876543210 "
+        "account ****1234 date 2026-08-02 amount Rs 12,345.67 "
+        "UTR 504123456789 and I spent 5000 yesterday"
+    )
+    provider = HostedProvider()
+    set_llm_provider(provider)
+    try:
+        assert call_llm(raw, purpose="report") == "ready"
+    finally:
+        set_llm_provider(StubLLMProvider())
+    assert provider.prompt == redact_hosted_prompt(raw)
+    assert "alice@example.com" not in provider.prompt
+    assert "alice@okhdfcbank" not in provider.prompt
+    assert "9876543210" not in provider.prompt
+    assert "1234" not in provider.prompt
+    assert "2026-08-02" not in provider.prompt
+    assert "12,345.67" not in provider.prompt
+    assert "504123456789" not in provider.prompt
+    assert "spent 5000" not in provider.prompt
+    assert "Rs <10,000-50,000>" in provider.prompt
 
 
 def test_classify_with_stub_provider():

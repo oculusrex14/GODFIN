@@ -12,6 +12,12 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.encryption import encrypt, decrypt
 from app.core.llm_providers import create_provider, get_available_providers
+from app.core.llm_privacy import (
+    HOSTED_DATA_CONSENT_VERSION,
+    has_hosted_data_consent,
+    is_local_provider,
+    record_hosted_data_consent,
+)
 from app.core.llm_runtime import activate_configuration
 from app.core.llm_service import set_llm_provider
 from app.api.v1.endpoints.license import enforce_feature
@@ -32,6 +38,7 @@ class LLMConfigCreate(BaseModel):
     model: str = Field(..., description="Model identifier")
     api_key: Optional[str] = Field(None, description="API key for OpenAPI auth")
     base_url: Optional[str] = Field(None, description="Custom base URL")
+    hosted_data_consent: bool = False
 
 
 class LLMConfigUpdate(BaseModel):
@@ -39,6 +46,7 @@ class LLMConfigUpdate(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     is_active: Optional[bool] = None
+    hosted_data_consent: Optional[bool] = None
 
 
 class LLMConfigResponse(BaseModel):
@@ -51,6 +59,9 @@ class LLMConfigResponse(BaseModel):
     base_url: Optional[str]
     is_active: bool
     has_api_key: bool
+    is_local: bool
+    hosted_data_consent: bool
+    consent_version: str
     created_at: str
     updated_at: str
 
@@ -94,6 +105,9 @@ def get_llm_config(
         "base_url": config.base_url,
         "is_active": config.is_active,
         "has_api_key": bool(config.api_key),
+        "is_local": is_local_provider(config.provider),
+        "hosted_data_consent": has_hosted_data_consent(config),
+        "consent_version": HOSTED_DATA_CONSENT_VERSION,
         "created_at": config.created_at.isoformat() if config.created_at else None,
         "updated_at": config.updated_at.isoformat() if config.updated_at else None,
     }
@@ -107,6 +121,13 @@ def create_llm_config(
 ):
     """Create a new LLM configuration."""
     enforce_feature(db, "ai_classification")
+    if request.provider not in get_available_providers():
+        raise HTTPException(status_code=422, detail="Unknown AI provider")
+    if not is_local_provider(request.provider) and not request.hosted_data_consent:
+        raise HTTPException(
+            status_code=400,
+            detail="Accept the hosted AI data disclosure before saving this provider",
+        )
     # Deactivate any existing config
     db.query(LLMConfiguration).filter_by(is_active=True).update({"is_active": False})
 
@@ -122,16 +143,24 @@ def create_llm_config(
         base_url=request.base_url,
         is_active=True,
     )
+    if not is_local_provider(request.provider):
+        record_hosted_data_consent(config, True)
     db.add(config)
+
+    # Activate before commit so a broken configuration cannot replace the
+    # currently working provider while appearing active.
+    try:
+        db.flush()
+        activate_configuration(config)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail="The AI configuration could not be activated",
+        ) from exc
     db.commit()
     db.refresh(config)
-
-    # Activate the provider (decrypt key for API use)
-    try:
-        activate_configuration(config)
-        logger.info(f"Activated LLM provider: {config.provider} with model {config.model}")
-    except Exception as e:
-        logger.warning(f"Failed to activate provider: {e}")
+    logger.info("Activated LLM provider: %s with model %s", config.provider, config.model)
 
     return {
         "id": config.id,
@@ -141,6 +170,9 @@ def create_llm_config(
         "base_url": config.base_url,
         "is_active": config.is_active,
         "has_api_key": bool(config.api_key),
+        "is_local": is_local_provider(config.provider),
+        "hosted_data_consent": has_hosted_data_consent(config),
+        "consent_version": HOSTED_DATA_CONSENT_VERSION,
         "created_at": config.created_at.isoformat(),
         "updated_at": config.updated_at.isoformat(),
     }
@@ -175,15 +207,29 @@ def update_llm_config(
                 LLMConfiguration.is_active == True
             ).update({"is_active": False})
 
-    db.commit()
-    db.refresh(config)
+    if request.hosted_data_consent is not None and not is_local_provider(
+        config.provider
+    ):
+        record_hosted_data_consent(config, request.hosted_data_consent)
+    if config.is_active and not has_hosted_data_consent(config):
+        raise HTTPException(
+            status_code=400,
+            detail="Accept the hosted AI data disclosure before activation",
+        )
 
-    # Reactivate provider if config changed
+    # Reactivate before commit so invalid changes roll back atomically.
     if config.is_active:
         try:
+            db.flush()
             activate_configuration(config)
-        except Exception as e:
-            logger.warning(f"Failed to reactivate provider: {e}")
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=422,
+                detail="The AI configuration could not be activated",
+            ) from exc
+    db.commit()
+    db.refresh(config)
 
     return {
         "id": config.id,
@@ -193,6 +239,9 @@ def update_llm_config(
         "base_url": config.base_url,
         "is_active": config.is_active,
         "has_api_key": bool(config.api_key),
+        "is_local": is_local_provider(config.provider),
+        "hosted_data_consent": has_hosted_data_consent(config),
+        "consent_version": HOSTED_DATA_CONSENT_VERSION,
         "created_at": config.created_at.isoformat(),
         "updated_at": config.updated_at.isoformat(),
     }
@@ -264,13 +313,20 @@ def activate_llm_config(
     ).update({"is_active": False})
 
     config.is_active = True
-    db.commit()
-
+    if not has_hosted_data_consent(config):
+        raise HTTPException(
+            status_code=409,
+            detail="Accept the hosted AI data disclosure before activation",
+        )
     # Activate provider
     try:
         activate_configuration(config)
-        logger.info(f"Activated LLM provider: {config.provider}")
-        return {"success": True, "message": "Configuration activated"}
-    except Exception as e:
-        logger.error(f"Failed to activate provider: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to activate: {str(e)}")
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail="The AI configuration could not be activated",
+        ) from exc
+    db.commit()
+    logger.info("Activated LLM provider: %s", config.provider)
+    return {"success": True, "message": "Configuration activated"}

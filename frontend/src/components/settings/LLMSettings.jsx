@@ -61,6 +61,7 @@ function LLMSettings() {
   const [selectedModel, setSelectedModel] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  const [hostedConsent, setHostedConsent] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
@@ -76,6 +77,7 @@ function LLMSettings() {
     setSelectedModel('');
     setApiKey('');
     setBaseUrl('');
+    setHostedConsent(false);
     setTestResult(null);
   }, []);
 
@@ -92,6 +94,7 @@ function LLMSettings() {
     setSelectedModel(config.model);
     setBaseUrl(config.base_url || '');
     setApiKey(''); // Don't show existing API key
+    setHostedConsent(config.hosted_data_consent === true);
     setShowConfigModal(true);
   }, []);
 
@@ -182,6 +185,7 @@ function LLMSettings() {
     setSelectedProvider(provider);
     setSelectedModel('');
     setTestResult(null);
+    setHostedConsent(false);
 
     // Set default auth method
     const providerInfo = providersData?.[provider];
@@ -235,6 +239,10 @@ function LLMSettings() {
       showToast('API key is required for this provider', 'error');
       return;
     }
+    if (providerInfo?.is_local === false && !hostedConsent) {
+      showToast('Review and accept the hosted AI data disclosure', 'error');
+      return;
+    }
 
     const data = {
       provider: selectedProvider,
@@ -242,6 +250,7 @@ function LLMSettings() {
       model: selectedModel,
       api_key: apiKey || undefined,
       base_url: baseUrl || undefined,
+      hosted_data_consent: providerInfo?.is_local === false ? hostedConsent : false,
     };
 
     if (editingConfig) {
@@ -249,7 +258,7 @@ function LLMSettings() {
     } else {
       createMutation.mutate(data);
     }
-  }, [selectedProvider, selectedModel, selectedAuth, apiKey, baseUrl, providersData, editingConfig, updateMutation, createMutation, showToast]);
+  }, [selectedProvider, selectedModel, selectedAuth, apiKey, baseUrl, hostedConsent, providersData, editingConfig, updateMutation, createMutation, showToast]);
 
   // Get tier badge color
   const getTierColor = (tier) => {
@@ -294,12 +303,17 @@ function LLMSettings() {
                 <div className="text-white/90 text-[0.9rem] flex items-center gap-2" style={{ fontWeight: 500 }}>
                   {PROVIDER_NAMES[currentConfig.provider] || currentConfig.provider}
                   <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[0.7rem] rounded-full border border-emerald-400/20">
-                    Active
+                    {!currentConfig.is_local && !currentConfig.hosted_data_consent ? 'Paused' : 'Active'}
                   </span>
                 </div>
                 <div className="text-white/40 text-[0.75rem]">
                   Model: {currentConfig.model} • Auth: {AUTH_METHODS[currentConfig.auth_method]}
                 </div>
+                {!currentConfig.is_local && !currentConfig.hosted_data_consent && (
+                  <div className="mt-1 text-amber-300/70 text-[0.72rem]">
+                    Paused until the hosted-data disclosure is accepted
+                  </div>
+                )}
               </div>
             </div>
 
@@ -543,6 +557,20 @@ function LLMSettings() {
                       Your API key is stored securely and never displayed
                     </p>
                   </div>
+                )}
+
+                {selectedProvider && providersData?.[selectedProvider]?.is_local === false && (
+                  <label className="flex items-start gap-3 rounded-[14px] border border-amber-300/20 bg-amber-400/[0.06] p-3 text-white/55 text-[0.78rem] leading-relaxed">
+                    <input
+                      type="checkbox"
+                      checked={hostedConsent}
+                      onChange={(event) => setHostedConsent(event.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      I understand that GODFIN will send redacted financial context to this provider when I use AI. GODFIN removes account details, payment addresses, phone numbers, references, exact dates, and exact amounts; the provider’s own privacy terms still apply.
+                    </span>
+                  </label>
                 )}
 
                 {/* Test Connection */}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from typing import List, Optional
 
@@ -16,6 +17,7 @@ from app.core.classification_learning import (
 )
 from app.core.classifier import validate_category, validate_subcategory
 from app.core.database import get_db
+from app.core.llm_privacy import sanitize_untrusted_text
 from app.core.llm_service import call_llm
 from app.core.merchant_memory_service import upsert_merchant_memory
 from app.core.taxonomy import TAXONOMY
@@ -64,11 +66,9 @@ REVIEW_CHAT_SYSTEM = """You are a financial transaction classification assistant
 You are helping the user classify one specific transaction. Here are the transaction details:
 
 TRANSACTION:
-- Merchant (raw): {merchant_raw}
-- Merchant (normalized): {merchant_normalized}
+- Vendor text: {merchant_normalized}
 - Amount: Rs {amount}
 - Type: {txn_type}
-- Date: {date}
 - Payment Method: {instrument}
 
 AVAILABLE CATEGORIES AND SUBCATEGORIES:
@@ -106,7 +106,12 @@ def _parse_classification_options(text: str) -> list[dict]:
                     for item in arr:
                         cat = item.get('category')
                         sub = item.get('subcategory')
-                        conf = item.get('confidence', 0.7)
+                        try:
+                            conf = float(item.get('confidence', 0.7))
+                        except (TypeError, ValueError):
+                            continue
+                        if not math.isfinite(conf) or not 0 <= conf <= 1:
+                            continue
                         if cat and validate_category(cat):
                             if sub and not validate_subcategory(cat, sub):
                                 sub = None
@@ -375,18 +380,20 @@ def review_chat(
         raise HTTPException(status_code=404, detail="Transaction not found")
 
     system_prompt = REVIEW_CHAT_SYSTEM.format(
-        merchant_raw=txn.merchant_raw or "Unknown",
-        merchant_normalized=txn.merchant_normalized or "Unknown",
+        merchant_normalized=(
+            "<UNTRUSTED_VENDOR_TEXT>"
+            + sanitize_untrusted_text(txn.merchant_normalized or "Unknown")
+            + "</UNTRUSTED_VENDOR_TEXT>"
+        ),
         amount=f"{txn.amount:,.2f}" if txn.amount else "0",
         txn_type=txn.type or "debit",
-        date=str(txn.date) if txn.date else "Unknown",
         instrument=txn.instrument or "Unknown",
         taxonomy=_build_taxonomy_list(),
     )
 
     # Build full prompt with conversation context
     prompt_parts = [f"System: {system_prompt}\n"]
-    for msg in body.history[-10:]:
+    for msg in body.history[-4:]:
         prompt_parts.append(f"{msg.role.capitalize()}: {msg.content}")
     prompt_parts.append(f"User: {body.message.strip()}")
     prompt_parts.append("Assistant:")

@@ -301,9 +301,9 @@ export default function Reports() {
                 <p className="text-white/70 text-sm">Generate an AI explanation only when you choose</p>
                 <p className="mt-1 text-white/35 text-xs leading-relaxed">
                   Provider: {llmConfig?.provider || 'connected AI'} · {llmConfig?.model || 'configured model'}.
-                  GODFIN will send exact monthly totals, category and merchant aggregates, recurring-payment summaries,
-                  and six months of aggregate trends. It will not send account/card numbers, raw transaction descriptions,
-                  transaction IDs, your PIN, license key, or Gmail credentials.
+                  {llmConfig?.is_local
+                    ? ' The report data stays on this computer and is processed by your local model.'
+                    : ' GODFIN sends redacted amount bands, ratios, counts, categories, and trend direction. It removes merchant names, account/card details, payment addresses, phone numbers, references, exact dates and amounts, raw descriptions, transaction IDs, your PIN, license key, and Gmail credentials.'}
                 </p>
                 <p className="mt-2 text-white/25 text-xs leading-relaxed">
                   The AI adds plain-language commentary only. Verified local calculations remain authoritative.

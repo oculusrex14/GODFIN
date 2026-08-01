@@ -13,12 +13,16 @@ from typing import Optional, Dict, Any, List
 import requests
 
 from app.core.llm_service import LLMClassificationResult
+from app.core.llm_privacy import validate_provider_base_url
 
 logger = logging.getLogger(__name__)
 
 
 class LLMProvider(ABC):
     """Base class for LLM providers."""
+
+    is_local = False
+    hosted_data_consent = False
 
     def __init__(self, model: str, **kwargs):
         self.model = model
@@ -43,6 +47,7 @@ class OllamaLocalProvider(LLMProvider):
     """Local Ollama instance."""
 
     DEFAULT_BASE_URL = "http://localhost:11434"
+    is_local = True
 
     def __init__(self, model: str, base_url: Optional[str] = None, **kwargs):
         super().__init__(model, **kwargs)
@@ -96,6 +101,7 @@ class OllamaCloudProvider(OllamaLocalProvider):
     """Ollama Cloud API (same interface, different base URL)."""
 
     DEFAULT_BASE_URL = "https://api.ollama.com"
+    is_local = False
 
     def __init__(self, model: str, api_key: Optional[str] = None, base_url: Optional[str] = None, **kwargs):
         # Don't pass base_url to parent - set it directly to avoid conflict
@@ -687,6 +693,7 @@ def create_provider(
     provider_class = PROVIDER_MAP.get(provider)
     if not provider_class:
         raise ValueError(f"Unknown provider: {provider}. Available: {list(PROVIDER_MAP.keys())}")
+    validate_provider_base_url(provider, base_url)
 
     return provider_class(
         model=model,
@@ -701,6 +708,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
     return {
         "ollama_local": {
             "name": "Ollama (Local)",
+            "is_local": True,
             "auth_methods": ["none"],
             "requires_auth": False,
             "models": {
@@ -717,6 +725,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "ollama_cloud": {
             "name": "Ollama (Cloud)",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": [
@@ -730,6 +739,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "anthropic": {
             "name": "Anthropic",
+            "is_local": False,
             "auth_methods": ["oauth", "openapi"],
             "requires_auth": True,
             "models": {
@@ -741,6 +751,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "openai": {
             "name": "OpenAI",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -752,6 +763,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "gemini": {
             "name": "Google Gemini",
+            "is_local": False,
             "auth_methods": ["oauth", "openapi"],
             "requires_auth": True,
             "models": {
@@ -763,6 +775,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "moonshot": {
             "name": "Kimi (Moonshot)",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -774,6 +787,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "zai": {
             "name": "GLM (Z.AI)",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -785,6 +799,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "deepseek": {
             "name": "Deepseek",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -796,6 +811,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "qwen": {
             "name": "Qwen",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -807,6 +823,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "minimax": {
             "name": "Minimax",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {

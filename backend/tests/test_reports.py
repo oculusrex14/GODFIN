@@ -296,6 +296,38 @@ def test_detailed_reports_require_connected_ai(auth_client, db_session):
     assert "Connect an AI" in insights.json()["detail"]
 
 
+def test_hosted_reports_require_saved_provider_disclosure_consent(
+    auth_client,
+    db_session,
+):
+    from datetime import UTC, datetime
+
+    from app.models.app_setting import AppSetting
+
+    for key, value in {
+        "license_tier": "pro",
+        "license_status": "active",
+        "license_verified_at": datetime.now(UTC).isoformat(),
+    }.items():
+        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    db_session.add(
+        LLMConfiguration(
+            provider="openai",
+            auth_method="openapi",
+            model="gpt-test",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    response = auth_client.post(
+        "/api/v1/reports/ai/insights",
+        json={"month": "2025-01", "consent": True},
+    )
+    assert response.status_code == 409
+    assert "data disclosure" in response.json()["detail"]
+
+
 def test_detailed_reports_never_mislabel_a_rules_fallback_as_ai(
     auth_client,
     db_session,
@@ -427,7 +459,7 @@ def test_detailed_pdf_endpoint(auth_client, db_session, monkeypatch):
         pdf_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
     assert 'AI REPORT DISCLOSURE' in pdf_text
     assert 'ollama_local / qwen-test' in pdf_text
-    assert 'Data sent to the connected AI' in pdf_text
+    assert 'Data provided to the connected AI' in pdf_text
 
 
 def test_csv_endpoint(auth_client):
