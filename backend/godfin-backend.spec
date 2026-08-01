@@ -17,7 +17,19 @@ datas = [
     (
         str(Path(SPECPATH).resolve().parent / "shared" / "entitlements.json"),
         "shared",
-    )
+    ),
+    (
+        str(Path(SPECPATH).resolve().parent / "shared" / "model-registry.json"),
+        "shared",
+    ),
+    (
+        str(Path(SPECPATH).resolve().parent / "shared" / "model-registry.json.sig"),
+        "shared",
+    ),
+    (
+        str(Path(SPECPATH).resolve().parent / "shared" / "model-registry-public-key.txt"),
+        "shared",
+    ),
 ]
 for package in ("matplotlib", "fastembed"):
     try:

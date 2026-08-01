@@ -106,6 +106,9 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
   const recommendation = profile?.recommendation;
   const model = recommendation?.model;
   const activeChoice = profile?.choice;
+  const registryVerified = profile?.registry?.signature_verified === true;
+  const installedModelVerified = downloadStatus?.signature_verified === true
+    && downloadStatus?.digest_verified === true;
   const downloading = ['downloading', 'cancelling'].includes(downloadStatus?.status);
 
   function selectChoice(choice) {
@@ -160,6 +163,14 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
 
       {activeChoice === 'local' && (
         <div className="rounded-2xl border border-white/[0.1] bg-white/[0.04] p-4 space-y-4">
+          {!registryVerified && (
+            <div role="alert" className="rounded-xl border border-rose-300/25 bg-rose-400/[0.07] p-3 text-rose-100/75 text-sm">
+              GODFIN could not verify its signed model list. Downloads and benchmarks are disabled so an untrusted model cannot be installed.
+              {profile?.registry?.error && (
+                <p className="mt-1 text-rose-100/45 text-xs">{profile.registry.error}</p>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-white/30 text-xs uppercase tracking-wide">Device check</p>
@@ -195,6 +206,8 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
               <p><span className="text-white/65">Estimated model memory:</span> {recommendation.memory_gb} GB</p>
               <p><span className="text-white/65">Expected speed:</span> {recommendation.expected_speed}</p>
               <p><span className="text-white/65">Privacy:</span> {profile.privacy}</p>
+              <p><span className="text-white/65">Signed model list:</span> version {profile.registry.registry_version}</p>
+              <p className="font-mono break-all"><span className="font-sans text-white/65">Expected digest:</span> {recommendation.expected_digest}</p>
             </div>
           )}
 
@@ -229,15 +242,19 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
             </div>
           )}
 
-          {downloadStatus?.status === 'complete' && (
+          {downloadStatus?.status === 'complete' && installedModelVerified && (
             <div className="rounded-xl border border-emerald-300/20 bg-emerald-400/[0.06] p-3">
-              <p className="text-emerald-100/75 text-sm">Model digest verified locally.</p>
-              <p className="mt-1 text-white/25 text-[0.65rem] font-mono break-all">{downloadStatus.digest}</p>
+              <p className="text-emerald-100/75 text-sm">Model matches GODFIN’s signed model list.</p>
+              <div className="mt-2 space-y-1 text-white/35 text-[0.65rem]">
+                <p>Registry {downloadStatus.registry_version} · {downloadStatus.ollama_version || 'Ollama version unavailable'}</p>
+                <p className="font-mono break-all">{downloadStatus.digest}</p>
+                {downloadStatus.accepted_at && <p>Verified {new Date(downloadStatus.accepted_at).toLocaleString()}</p>}
+              </div>
             </div>
           )}
 
           <div className="flex flex-wrap gap-2">
-            {model && profile?.ollama?.installed && !downloading && downloadStatus?.status !== 'complete' && (
+            {model && registryVerified && profile?.ollama?.installed && !downloading && !installedModelVerified && (
               <button
                 type="button"
                 onClick={() => setApprovalOpen(true)}
@@ -247,7 +264,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
                 Review download
               </button>
             )}
-            {downloadStatus?.status === 'complete' && (
+            {downloadStatus?.status === 'complete' && installedModelVerified && (
               <button
                 type="button"
                 onClick={() => benchmarkMutation.mutate(downloadStatus.model)}
@@ -292,6 +309,11 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
             <p className="mt-2 text-white/40 text-sm leading-relaxed">
               Ollama will download {recommendation.label} ({recommendation.size_gb} GB). This can use significant bandwidth and disk space.
             </p>
+            <div className="mt-3 rounded-xl border border-white/[0.1] bg-black/10 p-3 text-white/40 text-xs space-y-1">
+              <p>Signed model list: version {profile.registry.registry_version}</p>
+              <p className="font-mono break-all">Expected digest: {recommendation.expected_digest}</p>
+              <p>GODFIN will remove the model if the downloaded digest does not match.</p>
+            </div>
             <label className="mt-4 flex items-start gap-3 rounded-xl border border-white/[0.1] p-3 text-white/55 text-sm">
               <input
                 type="checkbox"

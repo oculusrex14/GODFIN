@@ -6,14 +6,18 @@ started only after an authenticated user explicitly approves a registry model.
 from __future__ import annotations
 
 import base64
+import hmac
 import json
+import math
 import os
 import platform
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +31,12 @@ BENCHMARK_PROMPT = (
     "verified income and spending totals. Do not calculate or invent amounts."
 )
 MODEL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}:[a-z0-9][a-z0-9._-]{0,63}$")
+DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+MINIMUM_REGISTRY_VERSION = "2026-08-02.1"
+RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))
+BUNDLED_REGISTRY_PATH = RESOURCE_ROOT / "shared" / "model-registry.json"
+BUNDLED_REGISTRY_SIGNATURE_PATH = RESOURCE_ROOT / "shared" / "model-registry.json.sig"
+BUNDLED_REGISTRY_PUBLIC_KEY_PATH = RESOURCE_ROOT / "shared" / "model-registry-public-key.txt"
 
 BUILTIN_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
     "qwen3:1.7b": {
@@ -37,6 +47,7 @@ BUILTIN_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "minimum_ram_gb": 8,
         "official": True,
         "validated": True,
+        "expected_digest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
     },
     "qwen3:4b": {
         "label": "Qwen 3 4B",
@@ -46,6 +57,7 @@ BUILTIN_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "minimum_ram_gb": 12,
         "official": True,
         "validated": True,
+        "expected_digest": "sha256:359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
     },
     "qwen3:8b": {
         "label": "Qwen 3 8B",
@@ -55,6 +67,7 @@ BUILTIN_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "minimum_ram_gb": 24,
         "official": True,
         "validated": True,
+        "expected_digest": "sha256:500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
     },
     "qwen3.6:27b": {
         "label": "Qwen 3.6 27B",
@@ -64,6 +77,7 @@ BUILTIN_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "minimum_ram_gb": 32,
         "official": True,
         "validated": True,
+        "expected_digest": "sha256:a50eda8ed977ab48a12431878896b27ffd5cef552c17af3317d9623b939a7f1e",
     },
     "qwen3.6:35b-a3b": {
         "label": "Qwen 3.6 35B A3B",
@@ -73,6 +87,7 @@ BUILTIN_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "minimum_ram_gb": 48,
         "official": True,
         "validated": True,
+        "expected_digest": "sha256:07d35212591fc27746f0a317c975a6d68754fb38e9053d82e25f06057af28522",
     },
 }
 
@@ -84,6 +99,14 @@ _download_state: dict[str, Any] = {
     "progress": 0,
     "message": "No model download is running.",
     "digest": None,
+    "expected_digest": None,
+    "signature_verified": False,
+    "digest_verified": False,
+    "registry_version": None,
+    "registry_source": None,
+    "ollama_version": None,
+    "approved_at": None,
+    "accepted_at": None,
 }
 
 
@@ -102,40 +125,117 @@ def _validated_registry(payload: Any) -> dict[str, dict[str, Any]]:
             raise ValueError("Invalid model metadata")
         if not metadata.get("official") or not metadata.get("validated"):
             continue
-        validated[model] = {
-            "label": str(metadata.get("label") or model)[:100],
-            "family": str(metadata.get("family") or "qwen")[:50],
+        numeric_values = {
             "size_gb": float(metadata["size_gb"]),
             "memory_gb": float(metadata["memory_gb"]),
             "minimum_ram_gb": float(metadata["minimum_ram_gb"]),
+        }
+        if any(not math.isfinite(value) or value <= 0 for value in numeric_values.values()):
+            raise ValueError("Model registry contains invalid resource requirements")
+        expected_digest = str(metadata.get("expected_digest") or "").lower()
+        if not DIGEST_PATTERN.fullmatch(expected_digest):
+            raise ValueError(f"Model registry is missing a pinned digest for {model}")
+        validated[model] = {
+            "label": str(metadata.get("label") or model)[:100],
+            "family": str(metadata.get("family") or "qwen")[:50],
+            **numeric_values,
             "official": True,
             "validated": True,
-            "expected_digest": metadata.get("expected_digest"),
+            "expected_digest": expected_digest,
         }
     if not validated:
         raise ValueError("Model registry has no validated official models")
     return validated
 
 
-def load_model_registry() -> tuple[dict[str, dict[str, Any]], str, bool]:
-    """Load a signed override when configured, otherwise use the bundled registry."""
-    registry_path = os.getenv("GODFIN_MODEL_REGISTRY_PATH")
-    public_key_value = os.getenv("GODFIN_MODEL_REGISTRY_PUBLIC_KEY")
-    if not registry_path or not public_key_value:
-        return BUILTIN_MODEL_REGISTRY, "bundled", True
-
-    path = Path(registry_path).expanduser()
-    signature_path = path.with_suffix(path.suffix + ".sig")
+def _parse_registry_time(value: Any, field: str) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"Model registry {field} must be an ISO timestamp")
     try:
-        payload = path.read_bytes()
-        signature = base64.b64decode(signature_path.read_text().strip(), validate=True)
-        public_key = Ed25519PublicKey.from_public_bytes(
-            base64.b64decode(public_key_value, validate=True)
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"Model registry {field} is invalid") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"Model registry {field} must include a timezone")
+    return parsed.astimezone(UTC)
+
+
+def _registry_version_key(value: str) -> tuple[int, int, int, int]:
+    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})\.(\d+)", value)
+    if not match:
+        raise ValueError("Model registry version format is invalid")
+    return tuple(int(part) for part in match.groups())
+
+
+def _load_signed_registry(
+    path: Path,
+    signature_path: Path,
+    *,
+    source: str,
+    public_key_path: Path = BUNDLED_REGISTRY_PUBLIC_KEY_PATH,
+    now: datetime | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    payload = path.read_bytes()
+    signature = base64.b64decode(signature_path.read_text().strip(), validate=True)
+    public_key_bytes = base64.b64decode(public_key_path.read_text().strip(), validate=True)
+    if len(public_key_bytes) != 32:
+        raise ValueError("Model registry public key is invalid")
+    Ed25519PublicKey.from_public_bytes(public_key_bytes).verify(signature, payload)
+
+    document = json.loads(payload)
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        raise ValueError("Unsupported model registry schema")
+    version = str(document.get("registry_version") or "")[:100]
+    if not version:
+        raise ValueError("Model registry version is missing")
+    if _registry_version_key(version) < _registry_version_key(MINIMUM_REGISTRY_VERSION):
+        raise ValueError("Model registry rollback was rejected")
+    issued_at = _parse_registry_time(document.get("issued_at"), "issued_at")
+    expires_at = _parse_registry_time(document.get("expires_at"), "expires_at")
+    current = (now or datetime.now(UTC)).astimezone(UTC)
+    if issued_at > current:
+        raise ValueError("Model registry is not active yet")
+    if expires_at <= current:
+        raise ValueError("Model registry has expired")
+
+    return _validated_registry(document), {
+        "source": source,
+        "signature_verified": True,
+        "registry_version": version,
+        "issued_at": issued_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "error": None,
+    }
+
+
+def load_model_registry(
+    *,
+    now: datetime | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Load one authenticated registry. Invalid overrides fail closed."""
+    override = os.getenv("GODFIN_MODEL_REGISTRY_PATH")
+    path = Path(override).expanduser() if override else BUNDLED_REGISTRY_PATH
+    signature_path = path.with_suffix(path.suffix + ".sig")
+    source = "signed_override" if override else "bundled_signed"
+    try:
+        return _load_signed_registry(
+            path,
+            signature_path,
+            source=source,
+            now=now,
         )
-        public_key.verify(signature, payload)
-        return _validated_registry(json.loads(payload)), "signed_override", True
-    except Exception:
-        return BUILTIN_MODEL_REGISTRY, "bundled_fallback", False
+    except Exception as exc:
+        return {}, {
+            "source": source,
+            "signature_verified": False,
+            "registry_version": None,
+            "issued_at": None,
+            "expires_at": None,
+            "error": (
+                "Signed model registry verification failed "
+                f"({type(exc).__name__})."
+            ),
+        }
 
 
 def _total_memory_bytes() -> int:
@@ -218,9 +318,8 @@ def recommend_model(
     available_ram_gb: float,
     disk_free_gb: float,
     acceleration: str,
-    registry: dict[str, dict[str, Any]] | None = None,
+    registry: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    registry = registry or BUILTIN_MODEL_REGISTRY
     candidates: list[str]
     if total_ram_gb < 8:
         candidates = []
@@ -322,13 +421,24 @@ def device_profile() -> dict[str, Any]:
     available_gb = round(available / (1024**3), 1) if available else 0
     disk_free_gb = round(disk.free / (1024**3), 1)
     acceleration = _acceleration()
-    registry, source, verified = load_model_registry()
-    recommendation = recommend_model(
-        total_gb,
-        available_gb,
-        disk_free_gb,
-        acceleration,
-        registry,
+    registry, registry_status = load_model_registry()
+    recommendation = (
+        recommend_model(
+            total_gb,
+            available_gb,
+            disk_free_gb,
+            acceleration,
+            registry,
+        )
+        if registry_status["signature_verified"]
+        else {
+            "model": None,
+            "reason": (
+                "GODFIN could not verify its signed model registry. Local model "
+                "downloads are disabled until the registry is repaired or updated."
+            ),
+            "expected_speed": None,
+        }
     )
     return {
         "os": platform.system(),
@@ -342,8 +452,7 @@ def device_profile() -> dict[str, Any]:
         "ollama": ollama_status(),
         "recommendation": recommendation,
         "registry": {
-            "source": source,
-            "signature_verified": verified,
+            **registry_status,
             "models": registry,
         },
         "privacy": (
@@ -356,9 +465,9 @@ def device_profile() -> dict[str, Any]:
 
 
 def benchmark_model(model: str) -> dict[str, Any]:
-    registry, _, _ = load_model_registry()
-    if model not in registry:
-        raise ValueError("Model is not in GODFIN's validated registry")
+    verification = verify_installed_model(model, remove_on_mismatch=True)
+    if not verification["verified"]:
+        raise ValueError(verification["message"])
     started = time.monotonic()
     response = httpx.post(
         f"{OLLAMA_BASE_URL}/api/generate",
@@ -397,10 +506,120 @@ def _model_digest(model: str) -> str | None:
         response.raise_for_status()
         for item in response.json().get("models", []):
             if (item.get("name") or item.get("model")) == model:
-                return item.get("digest")
+                return _normalize_digest(item.get("digest"))
     except (httpx.HTTPError, ValueError):
         return None
     return None
+
+
+def _normalize_digest(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", normalized):
+        normalized = f"sha256:{normalized}"
+    return normalized if DIGEST_PATTERN.fullmatch(normalized) else None
+
+
+def _ollama_version(executable: str) -> str:
+    try:
+        return subprocess.check_output(
+            [executable, "--version"],
+            text=True,
+            stderr=subprocess.STDOUT,
+            timeout=5,
+        ).strip()[:120]
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def _remove_untrusted_model(executable: str, model: str) -> bool:
+    try:
+        result = subprocess.run(
+            [executable, "rm", model],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def verify_installed_model(
+    model: str,
+    *,
+    remove_on_mismatch: bool = False,
+) -> dict[str, Any]:
+    registry, registry_status = load_model_registry()
+    if not registry_status["signature_verified"]:
+        return {
+            "verified": False,
+            "model": model,
+            "message": "The signed GODFIN model registry could not be verified.",
+            "registry": registry_status,
+        }
+    metadata = registry.get(model)
+    if not metadata:
+        return {
+            "verified": False,
+            "model": model,
+            "message": "Model is not in GODFIN's signed registry.",
+            "registry": registry_status,
+        }
+
+    expected = _normalize_digest(metadata.get("expected_digest"))
+    actual = _model_digest(model)
+    verified = bool(expected and actual and hmac.compare_digest(expected, actual))
+    removed = False
+    if not verified and actual and remove_on_mismatch:
+        executable = shutil.which("ollama")
+        if executable:
+            removed = _remove_untrusted_model(executable, model)
+    if verified:
+        message = "Model digest matches the signed GODFIN registry."
+    elif actual:
+        message = (
+            "Installed model digest does not match the signed GODFIN registry; "
+            + ("the untrusted model was removed." if removed else "remove it before retrying.")
+        )
+    else:
+        message = "The installed model digest could not be read."
+    return {
+        "verified": verified,
+        "model": model,
+        "expected_digest": expected,
+        "digest": actual,
+        "removed": removed,
+        "message": message,
+        "registry": registry_status,
+    }
+
+
+def _persist_model_acceptance(record: dict[str, Any]) -> None:
+    from app.core.database import SessionLocal
+    from app.models.app_setting import AppSetting
+
+    model = str(record.get("model") or "")
+    if not MODEL_NAME_PATTERN.fullmatch(model):
+        raise ValueError("Cannot persist an invalid model acceptance record")
+    key = f"local_ai_acceptance:{model}"[:100]
+    db = SessionLocal()
+    try:
+        setting = db.query(AppSetting).filter_by(key=key).first()
+        encoded = json.dumps(record, separators=(",", ":"), sort_keys=True)
+        if setting is None:
+            db.add(AppSetting(key=key, value=encoded))
+        else:
+            setting.value = encoded
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def _set_download_state(**values: Any) -> None:
@@ -408,7 +627,11 @@ def _set_download_state(**values: Any) -> None:
         _download_state.update(values)
 
 
-def _run_model_pull(executable: str, model: str) -> None:
+def _run_model_pull(
+    executable: str,
+    model: str,
+    approval: dict[str, Any],
+) -> None:
     global _download_process
     try:
         process = subprocess.Popen(
@@ -441,25 +664,59 @@ def _run_model_pull(executable: str, model: str) -> None:
             )
         elif return_code == 0:
             digest = _model_digest(model)
-            if not digest:
+            expected_digest = _normalize_digest(approval.get("expected_digest"))
+            expires_at = _parse_registry_time(approval.get("expires_at"), "expires_at")
+            registry_current = datetime.now(UTC) < expires_at
+            matches = bool(
+                digest
+                and expected_digest
+                and registry_current
+                and hmac.compare_digest(digest, expected_digest)
+            )
+            if not matches:
+                removed = _remove_untrusted_model(executable, model) if digest else False
                 _set_download_state(
                     status="failed",
-                    message="Download finished, but the local model digest could not be verified.",
+                    message=(
+                        "Downloaded model did not match the signed GODFIN registry"
+                        + (" and was removed." if removed else ".")
+                    ),
+                    digest=digest,
+                    expected_digest=expected_digest,
+                    signature_verified=True,
+                    digest_verified=False,
                 )
             else:
+                accepted_at = datetime.now(UTC).isoformat()
+                acceptance = {
+                    **approval,
+                    "model": model,
+                    "digest": digest,
+                    "accepted_at": accepted_at,
+                    "signature_verified": True,
+                }
+                _persist_model_acceptance(acceptance)
                 _set_download_state(
                     status="complete",
                     progress=100,
-                    message="Model downloaded and its local digest was verified.",
+                    message="Model matches the signed GODFIN registry.",
                     digest=digest,
+                    expected_digest=expected_digest,
+                    signature_verified=True,
+                    digest_verified=True,
+                    accepted_at=accepted_at,
                 )
         else:
             _set_download_state(
                 status="failed",
                 message=(output_tail.strip() or "Ollama model download failed.")[-400:],
             )
-    except OSError as exc:
-        _set_download_state(status="failed", message=f"Could not start Ollama: {exc}")
+    except Exception as exc:
+        _set_download_state(
+            status="failed",
+            message=f"Local model setup failed safely: {str(exc)[:240]}",
+            digest_verified=False,
+        )
     finally:
         with _download_lock:
             _download_process = None
@@ -468,9 +725,14 @@ def _run_model_pull(executable: str, model: str) -> None:
 def start_model_pull(model: str, confirmed: bool) -> dict[str, Any]:
     if not confirmed:
         raise ValueError("Explicit download approval is required")
-    registry, _, _ = load_model_registry()
+    registry, registry_status = load_model_registry()
+    if not registry_status["signature_verified"]:
+        raise RuntimeError("GODFIN's signed model registry could not be verified")
     if model not in registry:
-        raise ValueError("Model is not in GODFIN's validated registry")
+        raise ValueError("Model is not in GODFIN's signed validated registry")
+    expected_digest = _normalize_digest(registry[model].get("expected_digest"))
+    if not expected_digest:
+        raise RuntimeError("The selected model has no pinned registry digest")
     executable = shutil.which("ollama")
     if not executable:
         raise RuntimeError("Ollama is not installed")
@@ -478,6 +740,17 @@ def start_model_pull(model: str, confirmed: bool) -> dict[str, Any]:
     with _download_lock:
         if _download_state["status"] in {"queued", "downloading", "cancelling"}:
             raise RuntimeError("Another model download is already running")
+        approved_at = datetime.now(UTC).isoformat()
+        approval = {
+            "model": model,
+            "expected_digest": expected_digest,
+            "registry_version": registry_status["registry_version"],
+            "registry_source": registry_status["source"],
+            "issued_at": registry_status["issued_at"],
+            "expires_at": registry_status["expires_at"],
+            "approved_at": approved_at,
+            "ollama_version": _ollama_version(executable),
+        }
         _download_state.update(
             {
                 "status": "downloading",
@@ -485,11 +758,19 @@ def start_model_pull(model: str, confirmed: bool) -> dict[str, Any]:
                 "progress": 0,
                 "message": f"Starting download for {model}…",
                 "digest": None,
+                "expected_digest": expected_digest,
+                "signature_verified": True,
+                "digest_verified": False,
+                "registry_version": registry_status["registry_version"],
+                "registry_source": registry_status["source"],
+                "ollama_version": approval["ollama_version"],
+                "approved_at": approved_at,
+                "accepted_at": None,
             }
         )
     thread = threading.Thread(
         target=_run_model_pull,
-        args=(executable, model),
+        args=(executable, model, approval),
         daemon=True,
     )
     thread.start()
@@ -510,3 +791,58 @@ def cancel_model_pull() -> dict[str, Any]:
 def get_download_status() -> dict[str, Any]:
     with _download_lock:
         return dict(_download_state)
+
+
+def restore_download_status(db: Any) -> dict[str, Any]:
+    """Re-verify the most recent accepted model after an application restart."""
+    from app.models.app_setting import AppSetting
+
+    current = get_download_status()
+    if current["status"] in {"downloading", "cancelling", "complete"}:
+        return current
+    rows = (
+        db.query(AppSetting)
+        .filter(AppSetting.key.like("local_ai_acceptance:%"))
+        .all()
+    )
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            record = json.loads(row.value)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict) and MODEL_NAME_PATTERN.fullmatch(
+            str(record.get("model") or "")
+        ):
+            records.append(record)
+    records.sort(key=lambda record: str(record.get("accepted_at") or ""), reverse=True)
+    for record in records:
+        verification = verify_installed_model(
+            str(record["model"]),
+            remove_on_mismatch=True,
+        )
+        if verification["verified"]:
+            restored = {
+                **current,
+                **record,
+                "status": "complete",
+                "progress": 100,
+                "message": "Installed model still matches the signed GODFIN registry.",
+                "signature_verified": True,
+                "digest_verified": True,
+            }
+            _set_download_state(**restored)
+            return get_download_status()
+        failed = {
+            **current,
+            **verification,
+            "status": "failed",
+            "progress": 0,
+            "signature_verified": bool(
+                verification.get("registry", {}).get("signature_verified")
+            ),
+            "digest_verified": False,
+        }
+        _set_download_state(**failed)
+        return get_download_status()
+    return current

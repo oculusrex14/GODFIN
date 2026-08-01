@@ -227,18 +227,9 @@ def local_ai_download_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    from app.core.local_ai import get_download_status
+    from app.core.local_ai import restore_download_status
 
-    status = get_download_status()
-    if status.get("status") == "complete" and status.get("model") and status.get("digest"):
-        key = f"local_ai_digest:{status['model']}"[:100]
-        setting = db.query(AppSetting).filter_by(key=key).first()
-        if setting is None:
-            db.add(AppSetting(key=key, value=status["digest"]))
-        else:
-            setting.value = status["digest"]
-        db.commit()
-    return status
+    return restore_download_status(db)
 
 
 @router.post("/local-ai/download", status_code=202)
