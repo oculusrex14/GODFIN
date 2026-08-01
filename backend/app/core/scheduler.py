@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import random
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -11,9 +13,16 @@ logger = logging.getLogger(__name__)
 # Scheduler is optional — only initialize if apscheduler is available
 _scheduler = None
 
-# Track ingestion state to prevent concurrent runs
-_ingestion_lock = False
+# Track ingestion state to prevent concurrent runs within the desktop process.
+_ingestion_lock = threading.Lock()
 _last_ingestion_attempt: Optional[datetime] = None
+_ingestion_retry_attempts = 0
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    """Bounded exponential delay with 0–20% jitter."""
+    base = min(3600.0, 30.0 * (2 ** max(0, attempt - 1)))
+    return base + random.uniform(0, base * 0.2)
 
 
 def _get_scheduler():
@@ -95,15 +104,14 @@ def start_scheduler(db_path: str, backup_dir: str) -> None:
 
     def polling_job():
         """Scheduled job to check for new Gmail transactions."""
-        global _ingestion_lock, _last_ingestion_attempt
+        global _last_ingestion_attempt, _ingestion_retry_attempts
 
         # Prevent concurrent execution
-        if _ingestion_lock:
+        if not _ingestion_lock.acquire(blocking=False):
             logger.info("Skipping scheduled ingestion - another instance is running")
             return
 
         try:
-            _ingestion_lock = True
             _last_ingestion_attempt = datetime.now(timezone.utc)
 
             from app.core.database import SessionLocal
@@ -136,6 +144,7 @@ def start_scheduler(db_path: str, backup_dir: str) -> None:
                     logger.debug(f"Scheduled ingestion complete: no new transactions")
 
                 _update_last_run(success=True, new_transactions=result.created)
+                _ingestion_retry_attempts = 0
 
             finally:
                 db.close()
@@ -143,8 +152,24 @@ def start_scheduler(db_path: str, backup_dir: str) -> None:
         except Exception as e:
             logger.error(f"Scheduled ingestion failed: {e}")
             _update_last_run(success=False, error_message=str(e)[:500])
+            if bool(getattr(e, "retryable", False)):
+                _ingestion_retry_attempts += 1
+                delay = _retry_delay_seconds(_ingestion_retry_attempts)
+                scheduler.add_job(
+                    polling_job,
+                    "date",
+                    run_date=datetime.now(timezone.utc) + timedelta(seconds=delay),
+                    id="polling_retry",
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=60,
+                )
+                logger.warning(
+                    "Scheduled Gmail ingestion will retry in %.1f seconds",
+                    delay,
+                )
         finally:
-            _ingestion_lock = False
+            _ingestion_lock.release()
 
     def weekly_digest_job():
         """Generate and send an explicitly enabled digest from this device."""
@@ -240,6 +265,9 @@ def start_scheduler(db_path: str, backup_dir: str) -> None:
         minutes=initial_frequency,
         id='polling',
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
     )
 
     scheduler.start()

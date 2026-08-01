@@ -332,24 +332,23 @@ export function fetchTaxonomy() {
 }
 
 // Gmail / Ingestion
-export function fetchGmailAuthUrl(useOob = false) {
-  const url = useOob ? '/auth/gmail/url?use_oob=true' : '/auth/gmail/url';
-  return apiFetch(url);
+export function fetchGmailAuthUrl() {
+  return apiFetch('/auth/gmail/url');
 }
 
 export function fetchGmailStatus() {
   return apiFetch('/auth/gmail/status');
 }
 
-export function submitGmailManualCode(code) {
-  return apiFetch('/auth/gmail/manual-code', {
+export function disconnectGmail({ clearData = false, pin = null, confirmation = null } = {}) {
+  return apiFetch('/auth/gmail/disconnect', {
     method: 'POST',
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({
+      clear_data: clearData,
+      pin,
+      confirmation,
+    }),
   });
-}
-
-export function disconnectGmail(clearData = false) {
-  return apiFetch(`/auth/gmail/disconnect?clear_data=${clearData}`, { method: 'POST' });
 }
 
 export function triggerIngestionWithDates({ startDate, endDate }) {

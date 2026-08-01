@@ -212,6 +212,20 @@ def _encrypted_values() -> list[str]:
                         for row in secret_rows
                         if isinstance(row[0], str) and row[0]
                     )
+                gmail_attempts_exist = connection.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name='gmail_oauth_attempts'"
+                ).fetchone()
+                if gmail_attempts_exist:
+                    verifier_rows = connection.execute(
+                        "SELECT code_verifier_encrypted "
+                        "FROM gmail_oauth_attempts WHERE consumed_at IS NULL"
+                    ).fetchall()
+                    values.extend(
+                        row[0]
+                        for row in verifier_rows
+                        if isinstance(row[0], str) and row[0]
+                    )
             finally:
                 connection.close()
         except sqlite3.Error:

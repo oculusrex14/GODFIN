@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+import json
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -20,7 +21,7 @@ from app.core.email_parser import (
     is_whitelisted_sender,
     parse_email_body,
 )
-from app.core.gmail_service import fetch_messages
+from app.core.gmail_service import GmailFetchResult, GmailSyncError, fetch_messages
 from app.core.merchant_memory_service import upsert_merchant_memory
 from app.models.app_setting import AppSetting
 from app.models.transaction import Transaction
@@ -38,6 +39,9 @@ class IngestionResult:
         self.errors = 0
         self.error_details = []
         self.merchant_keys: set[tuple[str, str | None]] = set()
+        self.source_status = "complete"
+        self.retryable = False
+        self.full_resync = False
 
     def to_dict(self):
         return {
@@ -48,7 +52,41 @@ class IngestionResult:
             'skipped_duplicate': self.skipped_duplicate,
             'errors': self.errors,
             'error_details': self.error_details[:10],
+            'source_status': self.source_status,
+            'retryable': self.retryable,
+            'full_resync': self.full_resync,
         }
+
+
+def _record_fetch_status(
+    result: IngestionResult,
+    fetched: GmailFetchResult,
+) -> None:
+    if result.source_status != "partial":
+        result.source_status = fetched.status
+    result.retryable = result.retryable or fetched.retryable
+    if fetched.errors:
+        result.errors += len(fetched.errors)
+        result.error_details.extend(fetched.errors)
+
+
+def _process_message_with_savepoint(
+    db: Session,
+    message: dict,
+    result: IngestionResult,
+) -> None:
+    result.processed += 1
+    try:
+        with db.begin_nested():
+            _process_message(db, message, result)
+    except Exception as exc:
+        result.errors += 1
+        result.error_details.append(
+            f"Message {message.get('id', '?')}: {str(exc)}"
+        )
+        logger.warning(
+            "A Gmail message could not be imported; the rest of the batch will continue"
+        )
 
 
 def _run_post_ingestion_detection(
@@ -94,16 +132,34 @@ def run_ingestion(db: Session, mock_messages: Optional[list] = None) -> Ingestio
         history_setting = db.query(AppSetting).filter_by(key='last_gmail_history_id').first()
         history_id = history_setting.value if history_setting and history_setting.value else None
 
-        messages, new_history_id = fetch_messages(history_id=history_id)
+        try:
+            fetched = fetch_messages(history_id=history_id)
+        except GmailSyncError as exc:
+            if exc.code != "history_expired":
+                raise
+            last_run_setting = db.query(AppSetting).filter_by(
+                key='last_ingestion_run'
+            ).first()
+            fallback_start = date(date.today().year, 1, 1)
+            if last_run_setting and last_run_setting.value:
+                try:
+                    fallback_start = (
+                        datetime.fromisoformat(last_run_setting.value).date()
+                        - timedelta(days=1)
+                    )
+                except ValueError:
+                    pass
+            fetched = fetch_messages(
+                after_date=fallback_start.isoformat(),
+                before_date=(date.today() + timedelta(days=1)).isoformat(),
+                max_results=1000,
+            )
+            result.full_resync = True
+        messages, new_history_id = fetched
+        _record_fetch_status(result, fetched)
 
     for msg in messages:
-        result.processed += 1
-        try:
-            _process_message(db, msg, result)
-        except Exception as e:
-            result.errors += 1
-            result.error_details.append(f"Message {msg.get('id', '?')}: {str(e)}")
-            logger.error(f"Error processing message {msg.get('id')}: {e}")
+        _process_message_with_savepoint(db, msg, result)
 
     if new_history_id and mock_messages is None:
         _update_setting(db, 'last_gmail_history_id', new_history_id)
@@ -227,7 +283,7 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
         classification_source=classification.source,
         is_transfer=classification.is_transfer,
         is_income=(parsed.txn_type == 'credit'),
-        reconciled=True,
+        reconciled=False,
     )
     # Sync is_income with INCOME category classification
     if classification.category == 'INCOME':
@@ -271,20 +327,18 @@ def run_initial_sync(db: Session) -> IngestionResult:
     Run initial sync from start of current year to today.
     Stores the date range for tracking.
     """
-    from datetime import date
-
     # Calculate date range: Jan 1 of current year to today
     today = date.today()
     start_of_year = date(today.year, 1, 1)
 
     after_date = start_of_year.strftime('%Y-%m-%d')
-    before_date = (today.strftime('%Y-%m-%d'))
+    before_date = (today + timedelta(days=1)).strftime('%Y-%m-%d')
 
     # Run ingestion with date range
     result = run_ingestion_with_dates(db, after_date=after_date, before_date=before_date)
 
     # Store the date range
-    date_range = f"{after_date} to {before_date}"
+    date_range = f"{after_date} to {today.isoformat()}"
     _update_setting(db, 'initial_sync_date_range', date_range)
     _update_setting(db, 'initial_sync_completed', 'true')
     db.commit()
@@ -297,7 +351,6 @@ def run_initial_sync_background() -> None:
     Background task version of initial sync. Opens its own DB session
     and writes progress to app_settings for polling.
     """
-    from datetime import date
     from app.core.database import SessionLocal
 
     db = SessionLocal()
@@ -313,30 +366,26 @@ def run_initial_sync_background() -> None:
         today = date.today()
         start_of_year = date(today.year, 1, 1)
         after_date = start_of_year.strftime('%Y-%m-%d')
-        before_date = today.strftime('%Y-%m-%d')
+        before_date = (today + timedelta(days=1)).strftime('%Y-%m-%d')
 
         # Fetch all messages first to get total count
-        messages, new_history_id = fetch_messages(
+        fetched = fetch_messages(
             after_date=after_date,
             before_date=before_date,
             max_results=1000,
         )
+        messages, new_history_id = fetched
 
         total = len(messages)
         _update_setting(db, 'sync_progress_total', str(total))
         db.commit()
 
         result = IngestionResult()
+        _record_fetch_status(result, fetched)
         batch_size = 25
 
         for i, msg in enumerate(messages):
-            result.processed += 1
-            try:
-                _process_message(db, msg, result)
-            except Exception as e:
-                result.errors += 1
-                result.error_details.append(f"Message {msg.get('id', '?')}: {str(e)}")
-                logger.error(f"Error processing message {msg.get('id')}: {e}")
+            _process_message_with_savepoint(db, msg, result)
 
             # Update progress every batch_size messages
             if (i + 1) % batch_size == 0 or (i + 1) == total:
@@ -346,12 +395,16 @@ def run_initial_sync_background() -> None:
         _run_post_ingestion_detection(db, result)
 
         # Finalize
-        date_range = f"{after_date} to {before_date}"
+        date_range = f"{after_date} to {today.isoformat()}"
         _update_setting(db, 'initial_sync_date_range', date_range)
-        _update_setting(db, 'initial_sync_completed', 'true')
-        _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
-        _update_setting(db, 'sync_status', 'completed')
-        _update_setting(db, 'sync_result', str(result.to_dict()))
+        completed = result.source_status in {"complete", "empty"}
+        _update_setting(db, 'initial_sync_completed', 'true' if completed else 'false')
+        if completed:
+            _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
+            if new_history_id:
+                _update_setting(db, 'last_gmail_history_id', new_history_id)
+        _update_setting(db, 'sync_status', 'completed' if completed else 'partial')
+        _update_setting(db, 'sync_result', json.dumps(result.to_dict()))
         _update_setting(db, 'sync_progress_processed', str(total))
         db.commit()
 
@@ -413,20 +466,16 @@ def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) 
             db.commit()
 
             # Fetch messages for this batch
-            messages, _ = fetch_messages(
+            fetched = fetch_messages(
                 after_date=batch_after,
                 before_date=batch_before,
                 max_results=1000,
             )
+            messages, _ = fetched
+            _record_fetch_status(result, fetched)
 
             for msg in messages:
-                result.processed += 1
-                try:
-                    _process_message(db, msg, result)
-                except Exception as e:
-                    result.errors += 1
-                    result.error_details.append(f"Message {msg.get('id', '?')}: {str(e)}")
-                    logger.error(f"Error processing message {msg.get('id')}: {e}")
+                _process_message_with_savepoint(db, msg, result)
 
             # Update progress after each batch
             _update_setting(db, 'ingest_now_processed', str(batch_idx + 1))
@@ -435,12 +484,14 @@ def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) 
         _run_post_ingestion_detection(db, result)
 
         # Finalize
-        _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
+        completed = result.source_status in {"complete", "empty"}
+        if completed:
+            _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
         date_range = f"{start_date_str} to {end_date_str}"
         _update_setting(db, 'last_manual_ingestion_range', date_range)
         _update_setting(db, 'last_manual_ingestion_date', datetime.now(timezone.utc).isoformat())
-        _update_setting(db, 'ingest_now_status', 'completed')
-        _update_setting(db, 'ingest_now_result', str(result.to_dict()))
+        _update_setting(db, 'ingest_now_status', 'completed' if completed else 'partial')
+        _update_setting(db, 'ingest_now_result', json.dumps(result.to_dict()))
         _update_setting(db, 'ingest_now_processed', str(total_batches))
         db.commit()
 
@@ -475,20 +526,16 @@ def run_ingestion_with_dates(
     result = IngestionResult()
 
     # Fetch messages with date range
-    messages, new_history_id = fetch_messages(
+    fetched = fetch_messages(
         after_date=after_date,
         before_date=before_date,
         max_results=1000  # Higher limit for manual sync
     )
+    messages, new_history_id = fetched
+    _record_fetch_status(result, fetched)
 
     for msg in messages:
-        result.processed += 1
-        try:
-            _process_message(db, msg, result)
-        except Exception as e:
-            result.errors += 1
-            result.error_details.append(f"Message {msg.get('id', '?')}: {str(e)}")
-            logger.error(f"Error processing message {msg.get('id')}: {e}")
+        _process_message_with_savepoint(db, msg, result)
 
     _run_post_ingestion_detection(db, result)
 
@@ -498,7 +545,8 @@ def run_ingestion_with_dates(
         _update_setting(db, 'last_manual_ingestion_range', date_range)
         _update_setting(db, 'last_manual_ingestion_date', datetime.now(timezone.utc).isoformat())
 
-    _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
+    if result.source_status in {"complete", "empty"}:
+        _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
     db.commit()
 
     return result

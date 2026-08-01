@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from app.core.ingestion import run_ingestion
 from tests.fixtures.mock_emails import (
     ALL_MOCK_EMAILS,
@@ -129,3 +131,101 @@ def test_gmail_setup_error_is_safe_and_nontechnical(auth_client, monkeypatch):
     assert "not configured" in detail
     assert "client_secret" not in detail
     assert "data/" not in detail
+
+
+def _source_transaction(db_session, *, source: str, suffix: str):
+    from app.models.account import Account
+    from app.models.transaction import Transaction
+
+    account = db_session.query(Account).first()
+    transaction = Transaction(
+        id=f"txn-{source}-{suffix}",
+        date=date(2026, 1, 10),
+        raw_text=f"Synthetic {source} transaction {suffix}",
+        merchant_raw="SYNTHETIC MERCHANT",
+        merchant_normalized="SYNTHETIC MERCHANT",
+        amount=100,
+        type="debit",
+        instrument="upi",
+        account_id=account.id,
+        source=source,
+    )
+    db_session.add(transaction)
+    db_session.commit()
+    return transaction
+
+
+def test_gmail_disconnect_without_deletion_needs_no_pin(auth_client, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: True,
+    )
+    response = auth_client.post("/api/v1/auth/gmail/disconnect", json={})
+    assert response.status_code == 200
+    assert response.json()["deleted_transactions"] == 0
+
+
+def test_gmail_data_deletion_requires_current_pin_and_exact_confirmation(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    gmail_transaction = _source_transaction(db_session, source="gmail", suffix="1")
+    statement_transaction = _source_transaction(
+        db_session, source="statement", suffix="1"
+    )
+    gmail_transaction_id = gmail_transaction.id
+    statement_transaction_id = statement_transaction.id
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.create_backup",
+        lambda db_path, backup_dir: "godfin_backup_test.db",
+    )
+
+    wrong_pin = auth_client.post(
+        "/api/v1/auth/gmail/disconnect",
+        json={
+            "clear_data": True,
+            "pin": "9999",
+            "confirmation": "DELETE GMAIL DATA",
+        },
+    )
+    assert wrong_pin.status_code == 403
+
+    wrong_confirmation = auth_client.post(
+        "/api/v1/auth/gmail/disconnect",
+        json={
+            "clear_data": True,
+            "pin": "1234",
+            "confirmation": "delete",
+        },
+    )
+    assert wrong_confirmation.status_code == 400
+
+    accepted = auth_client.post(
+        "/api/v1/auth/gmail/disconnect",
+        json={
+            "clear_data": True,
+            "pin": "1234",
+            "confirmation": "DELETE GMAIL DATA",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["deleted_transactions"] == 1
+    assert accepted.json()["backup_filename"] == "godfin_backup_test.db"
+
+    from app.models.transaction import Transaction
+    db_session.expire_all()
+    assert db_session.query(Transaction).filter_by(id=gmail_transaction_id).first() is None
+    assert db_session.query(Transaction).filter_by(id=statement_transaction_id).first() is not None
+
+
+def test_retired_manual_oauth_endpoint_is_absent(auth_client):
+    response = auth_client.post(
+        "/api/v1/auth/gmail/manual-code",
+        json={"code": "never-used"},
+    )
+    assert response.status_code == 404

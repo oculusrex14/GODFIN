@@ -9,7 +9,6 @@ import {
 import {
   fetchGmailStatus,
   fetchGmailAuthUrl,
-  submitGmailManualCode,
   disconnectGmail,
   fetchSchedulerStatus,
   startInitialSync,
@@ -21,23 +20,17 @@ import {
 } from '../../api/client';
 import { openExternalUrl } from '../../config/external';
 
-// Detect if we're on localhost or network IP
-function isLocalhost() {
-  if (window.location.protocol === 'godfin:') return true;
-  const hostname = window.location.hostname;
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
-}
-
 function GmailSettings() {
   const queryClient = useQueryClient();
   const [showOAuthModal, setShowOAuthModal] = useState(false);
   const [showDateRangeModal, setShowDateRangeModal] = useState(false);
   const [showDisconnectModal, setShowDisconnectModal] = useState(false);
   const [oauthUrl, setOauthUrl] = useState('');
-  const [manualCode, setManualCode] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [clearDataOnDisconnect, setClearDataOnDisconnect] = useState(false);
+  const [disconnectPin, setDisconnectPin] = useState('');
+  const [disconnectConfirmation, setDisconnectConfirmation] = useState('');
   const [toast, setToast] = useState(null);
   const [autoIngestEnabled, setAutoIngestEnabled] = useState(true);
   const [ingestFrequency, setIngestFrequency] = useState(15);
@@ -104,27 +97,17 @@ function GmailSettings() {
   // Get OAuth URL
   const authUrlMutation = useMutation({
     mutationFn: async () => {
-      // Use out-of-band flow for network access (can't use private IPs in Google OAuth)
-      const useOob = !isLocalhost();
-      console.log('Fetching Gmail auth URL, useOob:', useOob, 'isLocalhost:', isLocalhost());
-      const data = await fetchGmailAuthUrl(useOob);
-      console.log('Got auth response:', data);
+      const data = await fetchGmailAuthUrl();
 
       if (!data.auth_url) {
         throw new Error('No auth URL returned from server');
       }
 
-      if (useOob || data.flow === 'manual') {
-        // Show auth URL for manual code entry
-        setOauthUrl(data.auth_url);
-        setShowOAuthModal(true);
-      } else {
-        setOauthUrl(data.auth_url);
-        setShowOAuthModal(true);
-        setAwaitingOAuth(true);
-        openExternalUrl(data.auth_url);
-        showToast('Complete the Google approval in your browser, then return to GODFIN.', 'info');
-      }
+      setOauthUrl(data.auth_url);
+      setShowOAuthModal(true);
+      setAwaitingOAuth(true);
+      openExternalUrl(data.auth_url);
+      showToast('Complete the Google approval in your browser, then return to GODFIN.', 'info');
     },
     onError: (err) => {
       console.error('Gmail auth error:', err);
@@ -139,18 +122,6 @@ function GmailSettings() {
     setOauthUrl('');
     showToast('Gmail connected successfully!');
   }, [awaitingOAuth, gmailStatus?.connected]);
-
-  // Manual OAuth code submission
-  const manualCodeMutation = useMutation({
-    mutationFn: submitGmailManualCode,
-    onSuccess: () => {
-      setShowOAuthModal(false);
-      setManualCode('');
-      queryClient.invalidateQueries({ queryKey: ['gmailStatus'] });
-      showToast('Gmail connected successfully!');
-    },
-    onError: (err) => showToast(getErrorMessage(err), 'error'),
-  });
 
   // Background initial sync mutation — kicks off and returns immediately
   const initialSyncMutation = useMutation({
@@ -182,7 +153,7 @@ function GmailSettings() {
 
   // When sync completes, invalidate related queries
   useEffect(() => {
-    if (syncStatus?.status === 'completed') {
+    if (['completed', 'partial'].includes(syncStatus?.status)) {
       queryClient.invalidateQueries({ queryKey: ['gmailStatus'] });
       queryClient.invalidateQueries({ queryKey: ['schedulerStatus'] });
     }
@@ -222,7 +193,7 @@ function GmailSettings() {
   useEffect(() => {
     const prev = prevIngestStatusRef.current;
     const curr = ingestProgress?.status;
-    if (prev === 'running' && curr === 'completed') {
+    if (prev === 'running' && ['completed', 'partial'].includes(curr)) {
       setIngestJustCompleted(true);
       queryClient.invalidateQueries({ queryKey: ['reviewQueue'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
@@ -230,7 +201,12 @@ function GmailSettings() {
       queryClient.invalidateQueries({ queryKey: ['schedulerStatus'] });
       queryClient.invalidateQueries({ queryKey: ['gmailStatus'] });
       const r = ingestProgress?.result;
-      if (r) {
+      if (curr === 'partial') {
+        showToast(
+          'Gmail returned only part of the requested range. Imported messages were kept, and the sync position was not advanced. Try again.',
+          'error',
+        );
+      } else if (r) {
         showToast(`Ingestion complete: ${r.created ?? 0} created, ${r.processed ?? 0} processed`, 'success');
       } else {
         showToast('Ingestion complete', 'success');
@@ -248,10 +224,16 @@ function GmailSettings() {
 
   // Disconnect mutation
   const disconnectMutation = useMutation({
-    mutationFn: () => disconnectGmail(clearDataOnDisconnect),
+    mutationFn: () => disconnectGmail({
+      clearData: clearDataOnDisconnect,
+      pin: clearDataOnDisconnect ? disconnectPin : null,
+      confirmation: clearDataOnDisconnect ? disconnectConfirmation : null,
+    }),
     onSuccess: (data) => {
       setShowDisconnectModal(false);
       setClearDataOnDisconnect(false);
+      setDisconnectPin('');
+      setDisconnectConfirmation('');
       queryClient.invalidateQueries({ queryKey: ['gmailStatus'] });
       queryClient.invalidateQueries({ queryKey: ['schedulerStatus'] });
       queryClient.invalidateQueries({ queryKey: ['ingestSettings'] });
@@ -265,11 +247,6 @@ function GmailSettings() {
 
   const handleConnect = () => {
     authUrlMutation.mutate();
-  };
-
-  const handleManualCodeSubmit = () => {
-    if (!manualCode.trim()) return;
-    manualCodeMutation.mutate(manualCode.trim());
   };
 
   const handleInitialSync = () => {
@@ -299,6 +276,16 @@ function GmailSettings() {
   };
 
   const handleDisconnect = () => {
+    if (clearDataOnDisconnect) {
+      if (!/^\d{4,8}$/.test(disconnectPin)) {
+        showToast('Enter your current PIN to delete Gmail-imported data.', 'error');
+        return;
+      }
+      if (disconnectConfirmation !== 'DELETE GMAIL DATA') {
+        showToast('Type DELETE GMAIL DATA exactly to confirm deletion.', 'error');
+        return;
+      }
+    }
     disconnectMutation.mutate();
   };
 
@@ -485,6 +472,16 @@ function GmailSettings() {
               <div className="mt-3 pt-3 border-t border-slate-700/30 flex items-center gap-2 text-xs text-red-400">
                 <AlertCircle className="h-3 w-3" />
                 <span>Sync failed: {syncStatus.error}</span>
+              </div>
+            )}
+
+            {syncStatus?.status === 'partial' && (
+              <div className="mt-3 pt-3 border-t border-slate-700/30 flex items-start gap-2 text-xs text-amber-300">
+                <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                <span>
+                  Gmail returned a partial result. Imported messages were kept,
+                  but GODFIN did not advance the sync position. Run the sync again.
+                </span>
               </div>
             )}
 
@@ -782,14 +779,15 @@ function GmailSettings() {
             ) : (
             <div className="space-y-4">
               <p className="text-slate-400 text-sm">
-                Choose one of the following methods to connect your Gmail account:
+                Google opens in your browser. Approve read-only access, then return
+                to GODFIN; this window updates automatically.
               </p>
 
-              {/* Method 1: Open in browser */}
               <div className="bg-slate-700/50 rounded-lg p-4">
-                <div className="text-white text-sm font-medium mb-2">Method 1: Open in Browser</div>
+                <div className="text-white text-sm font-medium mb-2">Secure browser approval</div>
                 <p className="text-slate-400 text-xs mb-3">
-                  Opens Google OAuth in a new tab. After authorization, you&apos;ll be redirected back.
+                  GODFIN asks only to read supported bank-alert emails. It cannot
+                  send, edit, or delete your email.
                 </p>
                 <button
                   onClick={() => {
@@ -804,34 +802,6 @@ function GmailSettings() {
                   <ExternalLink className="h-4 w-4" />
                   Open OAuth Page
                 </button>
-              </div>
-
-              {/* Method 2: Manual code entry */}
-              <div className="bg-slate-700/50 rounded-lg p-4">
-                <div className="text-white text-sm font-medium mb-2">Method 2: Manual Code</div>
-                <p className="text-slate-400 text-xs mb-3">
-                  If the redirect doesn&apos;t work, paste the authorization code here.
-                </p>
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    value={manualCode}
-                    onChange={(e) => setManualCode(e.target.value)}
-                    placeholder="Paste authorization code"
-                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm placeholder:text-slate-500"
-                  />
-                  <button
-                    onClick={handleManualCodeSubmit}
-                    disabled={!manualCode.trim() || manualCodeMutation.isPending}
-                    className="w-full px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-colors disabled:opacity-50 text-sm"
-                  >
-                    {manualCodeMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-                    ) : (
-                      'Submit Code'
-                    )}
-                  </button>
-                </div>
               </div>
             </div>
             )}
@@ -999,6 +969,40 @@ function GmailSettings() {
               </label>
             </div>
 
+            {clearDataOnDisconnect && (
+              <div className="space-y-3 mb-4" data-testid="gmail-delete-confirmation">
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+                  Only Gmail-imported transactions will be removed. Statement uploads,
+                  manually entered transactions, accounts, and settings are preserved.
+                  GODFIN creates a safety backup first.
+                </div>
+                <label className="block">
+                  <span className="block text-xs text-slate-400 mb-1">Current PIN</span>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="current-password"
+                    value={disconnectPin}
+                    onChange={(event) => setDisconnectPin(event.target.value.replace(/\D/g, '').slice(0, 8))}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-white"
+                    placeholder="Enter your PIN"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-slate-400 mb-1">
+                    Type DELETE GMAIL DATA
+                  </span>
+                  <input
+                    type="text"
+                    value={disconnectConfirmation}
+                    onChange={(event) => setDisconnectConfirmation(event.target.value)}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-white"
+                    placeholder="DELETE GMAIL DATA"
+                  />
+                </label>
+              </div>
+            )}
+
             <div className="flex gap-3">
               <button
                 onClick={() => setShowDisconnectModal(false)}
@@ -1008,7 +1012,13 @@ function GmailSettings() {
               </button>
               <button
                 onClick={handleDisconnect}
-                disabled={disconnectMutation.isPending}
+                disabled={
+                  disconnectMutation.isPending ||
+                  (clearDataOnDisconnect && (
+                    !/^\d{4,8}$/.test(disconnectPin) ||
+                    disconnectConfirmation !== 'DELETE GMAIL DATA'
+                  ))
+                }
                 className="flex-1 px-4 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors disabled:opacity-50 text-sm"
               >
                 {disconnectMutation.isPending ? (

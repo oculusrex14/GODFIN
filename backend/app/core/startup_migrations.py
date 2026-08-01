@@ -13,7 +13,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 4
+CURRENT_SCHEMA_REVISION = 5
 
 _RECURRING_PATTERN_COLUMNS = {
     "confidence": "REAL NOT NULL DEFAULT 0",
