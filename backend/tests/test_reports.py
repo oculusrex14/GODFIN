@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import io
 import json
 import uuid
 from datetime import date
 
+import pdfplumber
+
 from app.core.reporting import (
     generate_category_chart,
     generate_daily_chart,
-    generate_financial_insights,
+    generate_deterministic_insights,
     generate_trend_chart,
     month_label_of,
     prepare_detailed_report,
@@ -171,9 +174,9 @@ def test_insights_high_savings():
         'category_comparison': [],
         'recurring_total': 0,
     }
-    insights = generate_financial_insights(detailed, [])
+    insights = generate_deterministic_insights(detailed, [])
     assert insights['available'] is True
-    assert insights['source'] in ('heuristic', 'llm')
+    assert insights['source'] == 'heuristic'
     assert 'executive_summary' in insights
     assert len(insights['sections']) >= 2
     assert 'Savings Health' in [s['title'] for s in insights['sections']]
@@ -191,7 +194,7 @@ def test_insights_no_data():
         'category_comparison': [],
         'recurring_total': 0,
     }
-    insights = generate_financial_insights(detailed, [])
+    insights = generate_deterministic_insights(detailed, [])
     assert insights['available'] is False
     assert insights['source'] == 'none'
     assert 'not enough' in insights['executive_summary'].lower() or 'no transactions' in insights['executive_summary'].lower()
@@ -250,7 +253,10 @@ def test_insights_endpoint(auth_client, db_session, monkeypatch):
         lambda *args, **kwargs: _valid_llm_report(),
     )
 
-    resp = auth_client.get('/api/v1/reports/insights?month=2025-01')
+    resp = auth_client.post(
+        '/api/v1/reports/ai/insights',
+        json={'month': '2025-01', 'consent': True},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert 'month' in data
@@ -259,6 +265,9 @@ def test_insights_endpoint(auth_client, db_session, monkeypatch):
     assert 'sections' in data['insights']
     assert data['insights']['source'] == 'llm'
     assert data['llm']['model'] == 'qwen-test'
+    assert data['consent']['provided'] is True
+    assert data['generated_at']
+    assert 'raw transaction descriptions' in data['data_disclosure']['not_shared']
 
 
 def test_detailed_reports_require_connected_ai(auth_client, db_session):
@@ -274,8 +283,14 @@ def test_detailed_reports_require_connected_ai(auth_client, db_session):
         db_session.query(AppSetting).filter_by(key=key).one().value = value
     db_session.commit()
 
-    insights = auth_client.get('/api/v1/reports/insights?month=2025-01')
-    detailed_pdf = auth_client.get('/api/v1/reports/pdf/detailed?month=2025-01')
+    insights = auth_client.post(
+        '/api/v1/reports/ai/insights',
+        json={'month': '2025-01', 'consent': True},
+    )
+    detailed_pdf = auth_client.post(
+        '/api/v1/reports/pdf/detailed',
+        json={'month': '2025-01', 'consent': True},
+    )
     assert insights.status_code == 409
     assert detailed_pdf.status_code == 409
     assert "Connect an AI" in insights.json()["detail"]
@@ -311,18 +326,67 @@ def test_detailed_reports_never_mislabel_a_rules_fallback_as_ai(
         raise RuntimeError("model is offline")
 
     monkeypatch.setattr("app.core.reporting.call_llm", unavailable)
-    response = auth_client.get('/api/v1/reports/insights?month=2025-01')
+    response = auth_client.post(
+        '/api/v1/reports/ai/insights',
+        json={'month': '2025-01', 'consent': True},
+    )
     assert response.status_code == 502
     assert "did not return a usable report" in response.json()["detail"]
 
 
-def test_summary_pdf_endpoint(auth_client):
+def test_summary_pdf_endpoint(auth_client, db_session, monkeypatch):
+    _add_txn(
+        db_session,
+        'SALARY',
+        75000,
+        date(2025, 1, 1),
+        category='INCOME',
+        txn_type='credit',
+    )
+    db_session.commit()
+
+    def forbidden_ai_call(*_args, **_kwargs):
+        raise AssertionError('standard summary must never call an LLM')
+
+    monkeypatch.setattr('app.core.reporting.call_llm', forbidden_ai_call)
     resp = auth_client.get('/api/v1/reports/pdf/summary?month=2025-01')
     assert resp.status_code == 200
     assert resp.headers['content-type'] == 'application/pdf'
     assert len(resp.content) > 100
     # PDF magic bytes
     assert resp.content[:5] == b'%PDF-'
+
+
+def test_ai_report_requires_explicit_consent(auth_client, db_session, monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.models.app_setting import AppSetting
+
+    for key, value in {
+        'license_tier': 'pro',
+        'license_status': 'active',
+        'license_verified_at': datetime.now(UTC).isoformat(),
+    }.items():
+        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    _activate_test_llm(db_session)
+    calls = []
+    monkeypatch.setattr(
+        'app.core.reporting.call_llm',
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    insights = auth_client.post(
+        '/api/v1/reports/ai/insights',
+        json={'month': '2025-01', 'consent': False},
+    )
+    detailed_pdf = auth_client.post(
+        '/api/v1/reports/pdf/detailed',
+        json={'month': '2025-01', 'consent': False},
+    )
+
+    assert insights.status_code == 400
+    assert detailed_pdf.status_code == 400
+    assert calls == []
 
 
 def test_detailed_pdf_endpoint(auth_client, db_session, monkeypatch):
@@ -350,12 +414,20 @@ def test_detailed_pdf_endpoint(auth_client, db_session, monkeypatch):
         "app.core.reporting.call_llm",
         lambda *args, **kwargs: _valid_llm_report(),
     )
-    resp = auth_client.get('/api/v1/reports/pdf/detailed?month=2025-01')
+    resp = auth_client.post(
+        '/api/v1/reports/pdf/detailed',
+        json={'month': '2025-01', 'consent': True},
+    )
     assert resp.status_code == 200
     assert resp.headers['content-type'] == 'application/pdf'
     assert len(resp.content) > 100
     # PDF magic bytes
     assert resp.content[:5] == b'%PDF-'
+    with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+        pdf_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert 'AI REPORT DISCLOSURE' in pdf_text
+    assert 'ollama_local / qwen-test' in pdf_text
+    assert 'Data sent to the connected AI' in pdf_text
 
 
 def test_csv_endpoint(auth_client):

@@ -8,7 +8,6 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 
 import requests
@@ -16,15 +15,6 @@ import requests
 from app.core.llm_service import LLMClassificationResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class LLMResponse:
-    """Standardized LLM response."""
-    success: bool
-    content: Optional[str] = None
-    error: Optional[str] = None
-    usage: Optional[Dict[str, Any]] = None
 
 
 class LLMProvider(ABC):
@@ -598,14 +588,21 @@ class QwenProvider(LLMProvider):
             data = response.json()
 
             output = data.get("output", {})
-            text = output.get("text", "")
-
-            return LLMResponse(
-                success=True,
-                content=text,
-                usage=data.get("usage", {})
-            )
+            if not isinstance(output, dict):
+                return None
+            text = output.get("text")
+            if not isinstance(text, str):
+                choices = output.get("choices", [])
+                if isinstance(choices, list) and choices:
+                    first = choices[0] if isinstance(choices[0], dict) else {}
+                    message = first.get("message", {})
+                    text = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(text, str):
+                return None
+            text = text.strip()
+            return text or None
         except Exception as e:
+            logger.warning("Qwen request failed: %s", e)
             return None
 
     def test_connection(self) -> tuple[bool, str]:

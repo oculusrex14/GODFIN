@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { format, subMonths } from 'date-fns';
 import {
@@ -14,7 +14,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  fetchReportSummary, fetchReportDetailed, fetchReportInsights,
+  fetchReportSummary, fetchReportDetailed, generateReportInsights,
   downloadMonthlyReportPDF, downloadCSV, fetchLicenseStatus, downloadFinancialYearPack,
   fetchLLMConfig,
 } from '../api/client';
@@ -118,6 +118,7 @@ function MarkdownCard({ children, className = '' }) {
 export default function Reports() {
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [contentReady, setContentReady] = useState(false);
+  const [aiReportData, setAIReportData] = useState(null);
   const now = new Date();
   const [fyStart, setFyStart] = useState(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1);
   const d = new Date(month + '-01');
@@ -148,13 +149,13 @@ export default function Reports() {
   });
   const insightsEnabled = license?.features?.includes('advanced_reports') === true;
   const llmConnected = Boolean(llmConfig?.is_active);
-  const { data: insightsData, isLoading: insightsLoading } = useQuery({
-    queryKey: ['reportInsights', month],
-    queryFn: () => fetchReportInsights(month),
-    staleTime: 5 * 60 * 1000,
-    enabled: insightsEnabled && llmConnected,
+  const insightsMutation = useMutation({
+    mutationFn: requestedMonth => generateReportInsights(requestedMonth),
+    onSuccess: data => setAIReportData(data),
   });
 
+  const insightsData = aiReportData?.month === month ? aiReportData : null;
+  const insightsLoading = insightsMutation.isPending;
   const insights = insightsData?.insights;
   const comparison = detailed?.category_comparison || [];
 
@@ -169,7 +170,7 @@ export default function Reports() {
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Reports</h1>
-          <p className="text-white/30 text-[0.8rem]">Monthly financial reports with AI insights & PDF export</p>
+          <p className="text-white/30 text-[0.8rem]">Deterministic reports with optional, consented AI analysis</p>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => setMonth(prev)} className="text-white/30 hover:text-white/60 transition-colors p-1"><ChevronLeft size={18} /></button>
@@ -277,6 +278,46 @@ export default function Reports() {
             <div className="h-4 bg-white/5 rounded animate-pulse w-3/4" />
             <div className="h-4 bg-white/5 rounded animate-pulse w-1/2" />
             <div className="h-4 bg-white/5 rounded animate-pulse w-2/3" />
+          </div>
+        ) : insightsMutation.isError && !insights ? (
+          <div className="rounded-xl bg-rose-400/[0.05] border border-rose-400/[0.14] p-5 text-center">
+            <p className="text-rose-200/75 text-sm">The connected AI could not create this report.</p>
+            <p className="mx-auto mt-1 max-w-xl text-white/30 text-xs">
+              {insightsMutation.error?.message || 'Check the model connection and try again.'}
+            </p>
+            <GlassButton
+              variant="secondary"
+              className="mt-4"
+              onClick={() => insightsMutation.mutate(month)}
+            >
+              Try again
+            </GlassButton>
+          </div>
+        ) : !insights ? (
+          <div className="rounded-xl bg-cyan-400/[0.04] border border-cyan-300/[0.12] p-5">
+            <div className="flex items-start gap-3">
+              <ShieldCheck size={18} className="mt-0.5 shrink-0 text-[#54E1D0]/80" />
+              <div>
+                <p className="text-white/70 text-sm">Generate an AI explanation only when you choose</p>
+                <p className="mt-1 text-white/35 text-xs leading-relaxed">
+                  Provider: {llmConfig?.provider || 'connected AI'} · {llmConfig?.model || 'configured model'}.
+                  GODFIN will send exact monthly totals, category and merchant aggregates, recurring-payment summaries,
+                  and six months of aggregate trends. It will not send account/card numbers, raw transaction descriptions,
+                  transaction IDs, your PIN, license key, or Gmail credentials.
+                </p>
+                <p className="mt-2 text-white/25 text-xs leading-relaxed">
+                  The AI adds plain-language commentary only. Verified local calculations remain authoritative.
+                </p>
+                <GlassButton
+                  variant="secondary"
+                  className="mt-4"
+                  icon={<Sparkles size={14} />}
+                  onClick={() => insightsMutation.mutate(month)}
+                >
+                  I agree — generate AI insights
+                </GlassButton>
+              </div>
+            </div>
           </div>
         ) : !insights?.available && insights?.source === 'none' ? (
           <p className="text-white/30 text-sm text-center py-4">No transactions recorded for this period.</p>
@@ -541,15 +582,21 @@ export default function Reports() {
             icon={<Download size={14} />}
             onClick={() => downloadMonthlyReportPDF('detailed', month)}
             disabled={!llmConnected}
-            title={llmConnected ? 'Download the report with connected-AI commentary' : 'Connect an AI in Settings first'}
+            title={llmConnected ? 'Generate and download the report with connected-AI commentary' : 'Connect an AI in Settings first'}
           >
-            Detailed AI PDF
+            Generate &amp; Download AI PDF
           </GlassButton>
           <GlassButton variant="secondary" icon={<FileSpreadsheet size={14} />} onClick={() => downloadCSV(month)}>Export CSV</GlassButton>
         </div>
         {!llmConnected && !llmLoading && (
           <p className="mt-2 text-amber-200/45 text-xs">
             Connect an AI in Settings to create the detailed report. Summary PDF and data exports remain available.
+          </p>
+        )}
+        {llmConnected && (
+          <p className="mt-2 max-w-3xl text-white/25 text-xs leading-relaxed">
+            Clicking the AI PDF button sends the same disclosed monthly aggregates shown above to
+            {` ${llmConfig?.provider || 'your connected provider'}`} for this one report. Standard PDF and CSV exports never call an AI.
           </p>
         )}
         <div className="mt-5 pt-5 border-t border-white/[0.07]">

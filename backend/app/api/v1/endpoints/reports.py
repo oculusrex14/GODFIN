@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -13,8 +14,8 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.reporting import (
     DetailedReportUnavailable,
+    generate_ai_financial_insights,
     generate_detailed_pdf,
-    generate_financial_insights,
     generate_summary_pdf,
     prepare_detailed_report,
     prepare_summary_report,
@@ -25,6 +26,12 @@ from app.models.transaction import Transaction
 from app.models.llm_config import LLMConfiguration
 
 router = APIRouter()
+AI_REPORT_CONSENT_VERSION = "2026-08-02"
+
+
+class AIReportRequest(BaseModel):
+    month: str | None = Field(default=None, pattern=r'^\d{4}-\d{2}$')
+    consent: bool
 
 
 def _default_month(db: Session) -> str:
@@ -103,9 +110,38 @@ def report_detailed(
     return prepare_detailed_report(db, month)
 
 
-@router.get("/insights")
-def report_insights(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+def _ai_report_metadata(llm_config: LLMConfiguration) -> dict:
+    return {
+        'generated_at': datetime.now(UTC).isoformat(),
+        'llm': {
+            'provider': llm_config.provider,
+            'model': llm_config.model,
+        },
+        'consent': {
+            'provided': True,
+            'version': AI_REPORT_CONSENT_VERSION,
+            'action': 'generate_ai_financial_report',
+        },
+        'data_disclosure': {
+            'shared': [
+                'exact monthly income, spending, and savings totals',
+                'category and merchant aggregate totals',
+                'recurring-payment summaries',
+                'six months of aggregate income and spending trends',
+            ],
+            'not_shared': [
+                'account or card numbers',
+                'raw transaction descriptions',
+                'transaction IDs or account IDs',
+                'PIN, license key, or Gmail credentials',
+            ],
+        },
+    }
+
+
+@router.post("/ai/insights")
+def report_ai_insights(
+    body: AIReportRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -113,6 +149,11 @@ def report_insights(
     from app.api.v1.endpoints.license import enforce_feature
 
     enforce_feature(db, "advanced_reports")
+    if body.consent is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="Explicit consent is required before data is sent to an AI provider",
+        )
     llm_config = db.query(LLMConfiguration).filter_by(is_active=True).first()
     if not llm_config:
         raise HTTPException(
@@ -122,26 +163,19 @@ def report_insights(
                 "Standard totals and exports remain available without AI."
             ),
         )
-    if month is None:
-        month = _default_month(db)
+    month = body.month or _default_month(db)
     from app.core.reporting import _get_spending_trend
     detailed = prepare_detailed_report(db, month)
     trend = _get_spending_trend(db, month)
     try:
-        insights = generate_financial_insights(
-            detailed,
-            trend,
-            require_llm=True,
-        )
+        insights = generate_ai_financial_insights(detailed, trend)
     except DetailedReportUnavailable as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    metadata = _ai_report_metadata(llm_config)
     return {
         'month': month,
         'insights': insights,
-        'llm': {
-            'provider': llm_config.provider,
-            'model': llm_config.model,
-        },
+        **metadata,
     }
 
 
@@ -317,18 +351,23 @@ def report_financial_year_pack(
     )
 
 
-@router.get("/pdf/detailed")
+@router.post("/pdf/detailed")
 def report_pdf_detailed(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+    body: AIReportRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     from app.api.v1.endpoints.license import enforce_feature
 
     enforce_feature(db, "advanced_reports")
-    if month is None:
-        month = _default_month(db)
-    if not db.query(LLMConfiguration).filter_by(is_active=True).first():
+    if body.consent is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="Explicit consent is required before data is sent to an AI provider",
+        )
+    month = body.month or _default_month(db)
+    llm_config = db.query(LLMConfiguration).filter_by(is_active=True).first()
+    if not llm_config:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -338,7 +377,11 @@ def report_pdf_detailed(
         )
 
     try:
-        pdf_bytes = generate_detailed_pdf(db, month, require_llm=True)
+        pdf_bytes = generate_detailed_pdf(
+            db,
+            month,
+            ai_metadata=_ai_report_metadata(llm_config),
+        )
     except DetailedReportUnavailable as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

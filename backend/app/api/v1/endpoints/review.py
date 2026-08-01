@@ -393,7 +393,7 @@ def review_chat(
 
     full_prompt = '\n'.join(prompt_parts)
 
-    response = call_llm(full_prompt, temperature=0.4)
+    response = call_llm(full_prompt, temperature=0.4, purpose="review")
     if response is None:
         raise HTTPException(
             status_code=503,

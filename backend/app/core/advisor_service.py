@@ -217,7 +217,7 @@ def chat(db: Session, user_message: str, conversation_history: list) -> Optional
 
     full_prompt = '\n'.join(prompt_parts)
 
-    response = call_llm(full_prompt, temperature=0.5)
+    response = call_llm(full_prompt, temperature=0.5, purpose="advisor")
     if not response:
         return None
 

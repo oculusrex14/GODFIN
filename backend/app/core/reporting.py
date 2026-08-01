@@ -471,7 +471,7 @@ def _empty_chart(message: str, plt=None) -> bytes:
 
 # --- Financial Insights (structured professional report) ---
 
-# Insight schema (returned by generate_financial_insights):
+# Insight schema (returned by deterministic and explicitly requested AI reports):
 # {
 #   "available": bool,            # whether an LLM-authored report was produced
 #   "source": "llm" | "heuristic",
@@ -833,41 +833,39 @@ def month_label_of(detailed: dict) -> str:
         return 'this month'
 
 
-def generate_financial_insights(
-    detailed: dict,
-    trend: list,
-    *,
-    require_llm: bool = False,
-) -> dict:
-    """Produce a structured professional financial report.
-
-    Tries the LLM first (rich, advisor-quality narrative). Falls back to a
-    deterministic heuristic report built from the numbers for non-AI callers.
-    AI-labelled reports can require a real LLM response so a heuristic result is
-    never presented as model-authored.
-    """
+def _empty_insights(detailed: dict) -> dict:
     month_label = month_label_of(detailed)
+    return {
+        'available': False,
+        'source': 'none',
+        'executive_summary': f"No transactions recorded for {month_label}. Ingest Gmail alerts or "
+                             f"upload a statement to populate this report.",
+        'sections': [],
+        'highlights': [],
+        'recommendations': [],
+    }
 
-    # Not enough data → return a minimal empty-state report
+
+def generate_deterministic_insights(detailed: dict, trend: list) -> dict:
+    """Build reproducible commentary without crossing an AI boundary."""
     if detailed.get('total_spend', 0) == 0 and detailed.get('total_income', 0) == 0 \
             and detailed.get('transaction_count', 0) == 0:
-        if require_llm:
-            raise DetailedReportUnavailable(
-                f"No recorded activity is available for {month_label}."
-            )
-        return {
-            'available': False,
-            'source': 'none',
-            'executive_summary': f"No transactions recorded for {month_label}. Ingest Gmail alerts or "
-                                 f"upload a statement to populate this report.",
-            'sections': [],
-            'highlights': [],
-            'recommendations': [],
-        }
+        return _empty_insights(detailed)
+    return _heuristic_insights(detailed, trend)
+
+
+def generate_ai_financial_insights(detailed: dict, trend: list) -> dict:
+    """Generate an explicitly requested AI report with no heuristic fallback."""
+    month_label = month_label_of(detailed)
+    if detailed.get('total_spend', 0) == 0 and detailed.get('total_income', 0) == 0 \
+            and detailed.get('transaction_count', 0) == 0:
+        raise DetailedReportUnavailable(
+            f"No recorded activity is available for {month_label}."
+        )
 
     prompt = _build_insights_prompt(detailed, trend, month_label)
     try:
-        raw = call_llm(prompt, temperature=0.5)
+        raw = call_llm(prompt, temperature=0.5, purpose="report")
     except Exception as e:
         logger.warning(f"LLM insights call failed: {e}")
         raw = None
@@ -879,14 +877,12 @@ def generate_financial_insights(
             parsed['source'] = 'llm'
             parsed.setdefault('executive_summary', '')
             return parsed
-        logger.warning("LLM insights returned unparseable JSON; falling back to heuristic")
+        logger.warning("LLM insights returned unparseable JSON")
 
-    if require_llm:
-        raise DetailedReportUnavailable(
-            "The connected AI did not return a usable report. Check the model "
-            "connection and try again; no AI commentary was generated."
-        )
-    return _heuristic_insights(detailed, trend)
+    raise DetailedReportUnavailable(
+        "The connected AI did not return a usable report. Check the model "
+        "connection and try again; no AI commentary was generated."
+    )
 
 
 # --- PDF Generation ---
@@ -1190,7 +1186,11 @@ class ReportPDF(FPDF):
         self.ln(1)
         self.set_font('Helvetica', 'I', 7)
         self.set_text_color(100, 116, 139)
-        label = 'AI-generated analysis' if source == 'llm' else 'Statistical analysis (LLM unavailable)'
+        label = (
+            'AI-generated analysis'
+            if source == 'llm'
+            else 'Deterministic analysis from verified GODFIN calculations'
+        )
         self.cell(0, 4, label, new_x='LMARGIN', new_y='NEXT')
 
 
@@ -1198,7 +1198,7 @@ def generate_summary_pdf(db: Session, month: str) -> bytes:
     summary = prepare_summary_report(db, month)
     trend = _get_spending_trend(db, month)
     detailed = prepare_detailed_report(db, month)
-    insights = generate_financial_insights(detailed, trend)
+    insights = generate_deterministic_insights(detailed, trend)
 
     # Generate charts
     cat_chart = generate_category_chart(summary['all_categories'])
@@ -1273,15 +1273,13 @@ def generate_detailed_pdf(
     db: Session,
     month: str,
     *,
-    require_llm: bool = False,
+    ai_metadata: dict,
 ) -> bytes:
+    if not ai_metadata or not ai_metadata.get('consent', {}).get('provided'):
+        raise ValueError("AI report metadata with explicit consent is required")
     detailed = prepare_detailed_report(db, month)
     trend = _get_spending_trend(db, month)
-    insights = generate_financial_insights(
-        detailed,
-        trend,
-        require_llm=require_llm,
-    )
+    insights = generate_ai_financial_insights(detailed, trend)
 
     # Generate all charts
     cat_chart = generate_category_chart(detailed['all_categories'])
@@ -1308,6 +1306,25 @@ def generate_detailed_pdf(
     sr_color = ReportPDF.TONE_COLORS.get(_tone_for_savings(sr), (255, 255, 255))
     pdf.stat_line('Savings Rate', f'{sr}%' if sr is not None else 'N/A', value_color=sr_color)
     pdf.stat_line('Transactions', str(detailed['transaction_count']))
+    pdf.ln(4)
+
+    pdf.section_label('AI Report Disclosure')
+    provider = ai_metadata.get('llm', {})
+    pdf.stat_line(
+        'Provider',
+        _sanitize_pdf_text(
+            f"{provider.get('provider', 'AI')} / {provider.get('model', 'configured model')}"
+        ),
+    )
+    pdf.stat_line(
+        'Generated',
+        _sanitize_pdf_text(ai_metadata.get('generated_at', 'timestamp unavailable')),
+    )
+    shared = ai_metadata.get('data_disclosure', {}).get('shared', [])
+    pdf.render_markdown(
+        "Data sent to the connected AI:\n" + "\n".join(f"- {item}" for item in shared),
+        font_size=8,
+    )
     pdf.ln(4)
 
     # Category chart

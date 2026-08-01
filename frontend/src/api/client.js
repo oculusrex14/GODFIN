@@ -605,9 +605,11 @@ export function fetchReportDetailed(month) {
   return apiFetch(`/reports/detailed${qs}`);
 }
 
-export function fetchReportInsights(month) {
-  const qs = month ? `?month=${month}` : '';
-  return apiFetch(`/reports/insights${qs}`);
+export function generateReportInsights(month) {
+  return apiFetch('/reports/ai/insights', {
+    method: 'POST',
+    body: JSON.stringify({ month: month || null, consent: true }),
+  });
 }
 
 export function fetchReportTransactions(params = {}) {
@@ -954,7 +956,16 @@ export async function downloadCSV(month) {
 
 export async function downloadMonthlyReportPDF(type, month) {
   const qs = month ? `?month=${month}` : '';
-  const blob = await apiFetch(`/reports/pdf/${type}${qs}`, { responseType: 'blob' });
+  const blob = await apiFetch(
+    type === 'detailed' ? '/reports/pdf/detailed' : `/reports/pdf/${type}${qs}`,
+    type === 'detailed'
+      ? {
+          method: 'POST',
+          body: JSON.stringify({ month: month || null, consent: true }),
+          responseType: 'blob',
+        }
+      : { responseType: 'blob' },
+  );
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -1122,7 +1133,7 @@ export const auditApi = {
 export const reportsApi = {
   summary: fetchReportSummary,
   detailed: fetchReportDetailed,
-  insights: fetchReportInsights,
+  generateInsights: generateReportInsights,
   transactions: fetchReportTransactions,
   comparison: fetchMonthlyComparison,
   downloadCSV,

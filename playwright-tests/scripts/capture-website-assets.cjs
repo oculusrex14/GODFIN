@@ -217,10 +217,11 @@ const baseResponses = {
       { category: 'Shopping', current: 6370, average: 7100 },
     ],
   },
-  '/reports/insights': {
+  '/reports/ai/insights': {
+    month: '2026-07',
     insights: {
       available: true,
-      source: 'heuristic',
+      source: 'llm',
       executive_summary:
         'Verified income covered included spending, with ₹26,680 left in this review window.',
       highlights: [
@@ -233,6 +234,9 @@ const baseResponses = {
         'Review the two unclassified transactions before finalizing July.',
       ],
     },
+    llm: { provider: 'ollama_local', model: 'qwen-test' },
+    consent: { provided: true, version: '2026-08-02' },
+    generated_at: '2026-08-02T00:00:00Z',
   },
 };
 
@@ -255,8 +259,8 @@ function responseFor(pathname) {
   if (pathname.startsWith('/reports/detailed')) {
     return baseResponses['/reports/detailed'];
   }
-  if (pathname.startsWith('/reports/insights')) {
-    return baseResponses['/reports/insights'];
+  if (pathname.startsWith('/reports/ai/insights')) {
+    return baseResponses['/reports/ai/insights'];
   }
   return {};
 }

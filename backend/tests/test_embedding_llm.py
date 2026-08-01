@@ -4,6 +4,7 @@ import pickle
 
 import numpy as np
 import pytest
+import requests
 
 from app.core.embedding_service import (
     EMBEDDING_FORMAT_MAGIC,
@@ -20,7 +21,9 @@ from app.core.llm_service import (
     build_prompt,
     classify_with_llm,
     set_llm_provider,
+    call_llm,
 )
+from app.core.llm_providers import QwenProvider
 from app.models.merchant_memory import MerchantMemory
 
 
@@ -142,8 +145,10 @@ def test_stub_provider_returns_none():
 class MockLLMProvider(LLMProvider):
     def __init__(self, response):
         self._response = response
+        self.model = 'mock-model'
 
-    def call(self, prompt):
+    def call(self, prompt, temperature=0.1):
+        del prompt, temperature
         return self._response
 
 
@@ -179,6 +184,109 @@ def test_classify_with_stub_provider():
     result = classify_with_llm('SOMETHING', 100.0, 'upi')
     assert result.success is False
     assert result.error == "No LLM provider configured"
+
+
+class _FakeHTTPResponse:
+    def __init__(self, payload=None, error=None):
+        self._payload = payload
+        self._error = error
+
+    def raise_for_status(self):
+        if self._error:
+            raise self._error
+
+    def json(self):
+        return self._payload
+
+
+def test_qwen_provider_returns_text(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        'post',
+        lambda *args, **kwargs: _FakeHTTPResponse(
+            {'output': {'text': '  valid response  '}, 'usage': {'tokens': 4}}
+        ),
+    )
+
+    provider = QwenProvider(model='qwen-test', api_key='test-key')
+    assert provider.call('hello') == 'valid response'
+
+
+@pytest.mark.parametrize(
+    'payload',
+    [
+        {'output': {'text': ''}},
+        {'output': {'text': None}},
+        {'output': []},
+        {'unexpected': 'shape'},
+    ],
+)
+def test_qwen_provider_rejects_empty_or_malformed_responses(monkeypatch, payload):
+    monkeypatch.setattr(
+        requests,
+        'post',
+        lambda *args, **kwargs: _FakeHTTPResponse(payload),
+    )
+
+    provider = QwenProvider(model='qwen-test', api_key='test-key')
+    assert provider.call('hello') is None
+
+
+@pytest.mark.parametrize(
+    'error',
+    [
+        requests.Timeout('timeout'),
+        requests.HTTPError('401 unauthorized'),
+        requests.HTTPError('429 rate limited'),
+    ],
+)
+def test_qwen_provider_returns_none_for_transport_failures(monkeypatch, error):
+    monkeypatch.setattr(
+        requests,
+        'post',
+        lambda *args, **kwargs: _FakeHTTPResponse(error=error),
+    )
+
+    provider = QwenProvider(model='qwen-test', api_key='test-key')
+    assert provider.call('hello') is None
+
+
+def test_provider_contract_rejects_object_results():
+    provider = MockLLMProvider({'content': 'not text'})
+    set_llm_provider(provider)
+    try:
+        assert call_llm('hello', purpose='report') is None
+    finally:
+        set_llm_provider(StubLLMProvider())
+
+
+def test_circuit_breakers_are_isolated_by_purpose_and_provider():
+    class CountingProvider(MockLLMProvider):
+        def __init__(self, response):
+            super().__init__(response)
+            self.calls = 0
+
+        def call(self, prompt, temperature=0.1):
+            self.calls += 1
+            return super().call(prompt, temperature)
+
+    failing = CountingProvider(None)
+    set_llm_provider(failing)
+    for _ in range(4):
+        assert call_llm('report', purpose='report') is None
+    report_calls = failing.calls
+    assert report_calls == 3
+
+    assert call_llm('advisor', purpose='advisor') is None
+    assert failing.calls == report_calls + 1
+
+    healthy = CountingProvider('ready')
+    set_llm_provider(healthy)
+    try:
+        assert call_llm('report', purpose='report') == 'ready'
+        assert healthy.calls == 1
+    finally:
+        set_llm_provider(StubLLMProvider())
 
 
 # --- Integration: embedding in merchant_memory ---
