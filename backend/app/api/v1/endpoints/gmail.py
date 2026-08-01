@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import json
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -28,7 +29,6 @@ from app.core.ingestion import (
     run_ingestion_with_dates_background,
     run_initial_sync, run_initial_sync_background,
 )
-from app.core.scheduler import _set_manual_ingestion_running
 from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 
@@ -500,8 +500,16 @@ def get_sync_status(
 # --- Ingest with Date Range ---
 
 class DateRangeRequest(BaseModel):
-    start_date: str  # YYYY-MM-DD
-    end_date: str    # YYYY-MM-DD
+    start_date: date
+    end_date: date
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.start_date >= self.end_date:
+            raise ValueError("Start date must be before end date")
+        if self.end_date > date.today():
+            raise ValueError("End date cannot be in the future")
+        return self
 
 
 @router.post("/ingest/gmail/range")
@@ -516,30 +524,16 @@ def trigger_ingestion_range(
     if not is_connected():
         raise HTTPException(status_code=400, detail="Gmail not connected")
 
-    # Validate dates
-    try:
-        from datetime import date, datetime
-        start = datetime.strptime(request.start_date, '%Y-%m-%d').date()
-        end = datetime.strptime(request.end_date, '%Y-%m-%d').date()
-
-        if start >= end:
-            raise HTTPException(status_code=400, detail="Start date must be before end date")
-
-        today = date.today()
-        if end > today:
-            raise HTTPException(status_code=400, detail="End date cannot be in the future")
-
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    start = request.start_date
+    end = request.end_date
 
     try:
         # Convert to Gmail query format (before_date is exclusive)
-        from datetime import timedelta
         end_plus_one = (end + timedelta(days=1)).strftime('%Y-%m-%d')
 
         result = run_ingestion_with_dates(
             db,
-            after_date=request.start_date,
+            after_date=start.isoformat(),
             before_date=end_plus_one,
             is_manual=True
         )
@@ -547,7 +541,7 @@ def trigger_ingestion_range(
         return {
             "success": True,
             "result": result.to_dict(),
-            "date_range": f"{request.start_date} to {request.end_date}",
+            "date_range": f"{start.isoformat()} to {end.isoformat()}",
             "message": f"Ingestion complete. Processed {result.processed}, created {result.created}.",
         }
     except Exception as e:
@@ -571,21 +565,8 @@ def start_ingestion_range_background(
     if not is_connected():
         raise HTTPException(status_code=400, detail="Gmail not connected")
 
-    # Validate dates
-    try:
-        from datetime import date as date_cls, datetime as dt_cls, timedelta
-        start = dt_cls.strptime(request.start_date, '%Y-%m-%d').date()
-        end = dt_cls.strptime(request.end_date, '%Y-%m-%d').date()
-
-        if start >= end:
-            raise HTTPException(status_code=400, detail="Start date must be before end date")
-
-        today = date_cls.today()
-        if end > today:
-            raise HTTPException(status_code=400, detail="End date cannot be in the future")
-
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    start = request.start_date
+    end = request.end_date
 
     # Check if already running
     status_setting = db.query(AppSetting).filter_by(key='ingest_now_status').first()
@@ -593,10 +574,13 @@ def start_ingestion_range_background(
         return {"success": True, "message": "Ingestion already in progress", "already_running": True}
 
     # end_date is inclusive in the UI, so add 1 day for the query
-    from datetime import timedelta
     end_plus_one = (end + timedelta(days=1)).strftime('%Y-%m-%d')
 
-    background_tasks.add_task(run_ingestion_with_dates_background, request.start_date, end_plus_one)
+    background_tasks.add_task(
+        run_ingestion_with_dates_background,
+        start.isoformat(),
+        end_plus_one,
+    )
 
     return {"success": True, "message": "Ingestion started"}
 

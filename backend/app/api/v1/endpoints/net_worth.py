@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Literal
-
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.api.v1.endpoints.license import enforce_feature
@@ -23,6 +21,18 @@ from app.core.net_worth import (
 from app.models.app_setting import AppSetting
 from app.models.net_worth import NetWorthItem, NetWorthQuote
 from app.core.time import utcnow_naive
+from app.schemas.financial import (
+    CurrencyCode,
+    MAX_EXCHANGE_RATE,
+    NetWorthAssetClass,
+    NetWorthItemType,
+    NetWorthValuationMode,
+    NonNegativeMoney,
+    PositiveExchangeRate,
+    PositiveFiniteNumber,
+    require_positive_finite,
+    reject_explicit_nulls,
+)
 
 router = APIRouter()
 TWELVE_DATA_API = "https://api.twelvedata.com"
@@ -32,14 +42,14 @@ ILLQUID_CLASSES = {"property", "land", "gem", "private_asset", "other"}
 
 class NetWorthItemCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    item_type: Literal["asset", "liability"]
-    asset_class: str = Field(min_length=1, max_length=32)
-    valuation_mode: Literal["manual", "market"] = "manual"
+    item_type: NetWorthItemType
+    asset_class: NetWorthAssetClass
+    valuation_mode: NetWorthValuationMode = "manual"
     symbol: str | None = Field(default=None, max_length=40)
-    quantity: float = Field(default=1, gt=0)
-    currency: str = Field(default="INR", pattern=r"^[A-Za-z]{3}$")
-    manual_value: float | None = Field(default=None, ge=0)
-    exchange_rate_to_base: float = Field(default=1, gt=0)
+    quantity: PositiveFiniteNumber = 1
+    currency: CurrencyCode = "INR"
+    manual_value: NonNegativeMoney | None = None
+    exchange_rate_to_base: PositiveExchangeRate = 1
     valuation_source: str | None = Field(default=None, max_length=120)
     source_url: str | None = Field(default=None, max_length=500)
     valued_at: date | None = None
@@ -49,14 +59,14 @@ class NetWorthItemCreate(BaseModel):
 
 class NetWorthItemUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    item_type: Literal["asset", "liability"] | None = None
-    asset_class: str | None = Field(default=None, min_length=1, max_length=32)
-    valuation_mode: Literal["manual", "market"] | None = None
+    item_type: NetWorthItemType | None = None
+    asset_class: NetWorthAssetClass | None = None
+    valuation_mode: NetWorthValuationMode | None = None
     symbol: str | None = Field(default=None, max_length=40)
-    quantity: float | None = Field(default=None, gt=0)
-    currency: str | None = Field(default=None, pattern=r"^[A-Za-z]{3}$")
-    manual_value: float | None = Field(default=None, ge=0)
-    exchange_rate_to_base: float | None = Field(default=None, gt=0)
+    quantity: PositiveFiniteNumber | None = None
+    currency: CurrencyCode | None = None
+    manual_value: NonNegativeMoney | None = None
+    exchange_rate_to_base: PositiveExchangeRate | None = None
     valuation_source: str | None = Field(default=None, max_length=120)
     source_url: str | None = Field(default=None, max_length=500)
     valued_at: date | None = None
@@ -64,10 +74,26 @@ class NetWorthItemUpdate(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
 
+    @model_validator(mode="after")
+    def reject_null_required_fields(self):
+        return reject_explicit_nulls(
+            self,
+            {
+                "name",
+                "item_type",
+                "asset_class",
+                "valuation_mode",
+                "quantity",
+                "currency",
+                "exchange_rate_to_base",
+                "is_active",
+            },
+        )
+
 
 class MarketDataConfig(BaseModel):
     api_key: str | None = Field(default=None, max_length=200)
-    base_currency: str = Field(default="INR", pattern=r"^[A-Za-z]{3}$")
+    base_currency: CurrencyCode = "INR"
 
 
 def _authorize(db: Session) -> None:
@@ -111,6 +137,11 @@ def _validate_item_payload(
                 "Property, land, gems, private assets, and unsupported items "
                 "require a valuation source, valuation date, and review/expiry date."
             ),
+        )
+    if valued_at and expires_on and expires_on < valued_at:
+        raise HTTPException(
+            status_code=400,
+            detail="The review/expiry date cannot be before the valuation date.",
         )
 
 
@@ -305,7 +336,10 @@ def refresh_quote(
                 raise ValueError(
                     str(price_payload.get("message") or "Quote was unavailable.")
                 )
-            unit_price = float(price_payload["price"])
+            unit_price = require_positive_finite(
+                float(price_payload["price"]),
+                field_name="Quote price",
+            )
             base_currency = get_base_currency(db)
             rate = 1.0
             if item.currency != base_currency:
@@ -324,7 +358,11 @@ def refresh_quote(
                             or "Currency conversion was unavailable."
                         )
                     )
-                rate = float(rate_payload["rate"])
+                rate = require_positive_finite(
+                    float(rate_payload["rate"]),
+                    field_name="Exchange rate",
+                    maximum=MAX_EXCHANGE_RATE,
+                )
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=502,

@@ -6,6 +6,11 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.taxonomy import TAXONOMY
+from app.schemas.financial import (
+    ManualTransactionInstrument,
+    PositiveMoney,
+    TransactionType,
+)
 
 VALID_CATEGORIES = set(TAXONOMY.keys())
 
@@ -14,14 +19,14 @@ class TransactionCreate(BaseModel):
     date: date
     time: Optional[datetime_time] = None
     merchant_raw: str = Field(..., min_length=1, max_length=255)
-    amount: float = Field(..., gt=0)
-    type: str = Field(..., pattern=r"^(debit|credit)$")
-    instrument: str = Field(default="manual", max_length=20)
-    account_id: str
+    amount: PositiveMoney
+    type: TransactionType
+    instrument: ManualTransactionInstrument = "manual"
+    account_id: str = Field(min_length=1, max_length=36)
     category: Optional[str] = None
-    subcategory: Optional[str] = None
-    notes: Optional[str] = None
-    tags: Optional[str] = None
+    subcategory: Optional[str] = Field(default=None, max_length=50)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    tags: Optional[str] = Field(default=None, max_length=500)
 
     @field_validator("category")
     @classmethod
@@ -35,9 +40,9 @@ class TransactionCreate(BaseModel):
 
 class TransactionUpdate(BaseModel):
     category: Optional[str] = None
-    subcategory: Optional[str] = None
-    notes: Optional[str] = None
-    tags: Optional[str] = None
+    subcategory: Optional[str] = Field(default=None, max_length=50)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    tags: Optional[str] = Field(default=None, max_length=500)
 
     @field_validator("category")
     @classmethod

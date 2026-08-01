@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, Float, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Date, Float, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -16,6 +16,37 @@ class NetWorthItem(Base):
     __table_args__ = (
         Index("ix_net_worth_items_type", "item_type"),
         Index("ix_net_worth_items_asset_class", "asset_class"),
+        CheckConstraint(
+            "item_type IN ('asset', 'liability')",
+            name="ck_net_worth_items_type",
+        ),
+        CheckConstraint(
+            "asset_class IN ('cash', 'stock', 'etf', 'mutual_fund', 'crypto', "
+            "'bond', 'metal', 'property', 'land', 'gem', 'private_asset', "
+            "'debt', 'other')",
+            name="ck_net_worth_items_asset_class",
+        ),
+        CheckConstraint(
+            "valuation_mode IN ('manual', 'market')",
+            name="ck_net_worth_items_valuation_mode",
+        ),
+        CheckConstraint(
+            "quantity > 0 AND quantity <= 1000000000000000",
+            name="ck_net_worth_items_quantity_range",
+        ),
+        CheckConstraint(
+            "manual_value IS NULL OR "
+            "(manual_value >= 0 AND manual_value <= 1000000000000000)",
+            name="ck_net_worth_items_manual_value_range",
+        ),
+        CheckConstraint(
+            "exchange_rate_to_base > 0 AND exchange_rate_to_base <= 1000000000",
+            name="ck_net_worth_items_exchange_rate",
+        ),
+        CheckConstraint(
+            "length(currency) = 3 AND currency = upper(currency)",
+            name="ck_net_worth_items_currency_shape",
+        ),
     )
 
     id: Mapped[str] = mapped_column(

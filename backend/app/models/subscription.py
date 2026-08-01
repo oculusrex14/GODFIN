@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, Float, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, Date, Float, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -13,6 +13,20 @@ from app.core.time import utcnow_naive
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
+    __table_args__ = (
+        CheckConstraint(
+            "amount > 0 AND amount <= 1000000000000000",
+            name="ck_subscriptions_amount_range",
+        ),
+        CheckConstraint(
+            "currency IN ('INR', 'USD', 'EUR', 'GBP')",
+            name="ck_subscriptions_currency",
+        ),
+        CheckConstraint(
+            "frequency IN ('monthly', 'quarterly', 'annual')",
+            name="ck_subscriptions_frequency",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(100), nullable=False)

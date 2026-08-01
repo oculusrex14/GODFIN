@@ -144,3 +144,160 @@ def test_additive_migration_enforces_one_active_audit_per_period(tmp_path):
 
     assert rows == [("new", "draft"), ("old", "discarded")]
     assert index == ("uq_audit_sessions_active_period",)
+
+
+def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE subscriptions (
+                id TEXT PRIMARY KEY, amount REAL NOT NULL,
+                currency TEXT NOT NULL, frequency TEXT NOT NULL
+            );
+            CREATE TABLE income_sources (
+                id TEXT PRIMARY KEY, expected_amount REAL,
+                frequency TEXT NOT NULL
+            );
+            CREATE TABLE goals (
+                id TEXT PRIMARY KEY, target_amount REAL NOT NULL,
+                current_saved REAL NOT NULL, annual_return_rate REAL NOT NULL,
+                minimum_flexible_floor REAL NOT NULL,
+                pressure_level TEXT NOT NULL
+            );
+            CREATE TABLE goal_contributions (
+                id TEXT PRIMARY KEY, amount REAL NOT NULL,
+                entry_type TEXT NOT NULL
+            );
+            CREATE TABLE net_worth_items (
+                id TEXT PRIMARY KEY, item_type TEXT NOT NULL,
+                asset_class TEXT NOT NULL, valuation_mode TEXT NOT NULL,
+                quantity REAL NOT NULL, manual_value REAL,
+                exchange_rate_to_base REAL NOT NULL, currency TEXT NOT NULL
+            );
+            CREATE TABLE transactions (
+                id TEXT PRIMARY KEY, amount REAL NOT NULL,
+                type TEXT NOT NULL, confidence REAL, status TEXT NOT NULL,
+                semantic_type TEXT NOT NULL
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        trigger_names = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' "
+                "AND name LIKE 'trg_%_financial_guard_%'"
+            )
+        }
+        assert len(trigger_names) == 12
+
+        connection.execute(
+            "INSERT INTO subscriptions VALUES (?, ?, ?, ?)",
+            ("valid-sub", 499, "INR", "monthly"),
+        )
+        connection.execute(
+            "INSERT INTO income_sources VALUES (?, ?, ?)",
+            ("valid-income", 75000, "monthly"),
+        )
+        connection.execute(
+            "INSERT INTO goals VALUES (?, ?, ?, ?, ?, ?)",
+            ("valid-goal", 100000, 0, 0.05, 5000, "moderate"),
+        )
+        connection.execute(
+            "INSERT INTO goal_contributions VALUES (?, ?, ?)",
+            ("valid-contribution", 1000, "deposit"),
+        )
+        connection.execute(
+            "INSERT INTO goal_contributions VALUES (?, ?, ?)",
+            ("valid-withdrawal", -250, "withdrawal"),
+        )
+        connection.execute(
+            "INSERT INTO net_worth_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("valid-item", "asset", "cash", "manual", 1, 1000, 1, "INR"),
+        )
+        connection.execute(
+            "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)",
+            ("valid-transaction", 100, "debit", 0.9, "settled", "expense"),
+        )
+
+        invalid_inserts = [
+            (
+                "INSERT INTO subscriptions VALUES (?, ?, ?, ?)",
+                ("bad-sub", float("inf"), "INR", "monthly"),
+            ),
+            (
+                "INSERT INTO income_sources VALUES (?, ?, ?)",
+                ("bad-income", -1, "monthly"),
+            ),
+            (
+                "INSERT INTO goals VALUES (?, ?, ?, ?, ?, ?)",
+                ("bad-goal", 100000, -1, 0.05, 5000, "moderate"),
+            ),
+            (
+                "INSERT INTO goal_contributions VALUES (?, ?, ?)",
+                ("bad-contribution", 0, "deposit"),
+            ),
+            (
+                "INSERT INTO goal_contributions VALUES (?, ?, ?)",
+                ("bad-deposit-sign", -100, "deposit"),
+            ),
+            (
+                "INSERT INTO goal_contributions VALUES (?, ?, ?)",
+                ("bad-withdrawal-sign", 100, "withdrawal"),
+            ),
+            (
+                "INSERT INTO net_worth_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("bad-item", "asset", "invented", "manual", 1, 1000, 1, "INR"),
+            ),
+            (
+                "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)",
+                ("bad-transaction", 100, "sideways", 0.9, "settled", "expense"),
+            ),
+        ]
+        for statement, parameters in invalid_inserts:
+            with pytest.raises(
+                sqlite3.IntegrityError,
+                match="GODFIN financial invariant failed",
+            ):
+                connection.execute(statement, parameters)
+
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="GODFIN financial invariant failed: transactions",
+        ):
+            connection.execute(
+                "UPDATE transactions SET confidence=2 WHERE id=?",
+                ("valid-transaction",),
+            )
+    finally:
+        connection.close()
+
+
+def test_fresh_schema_declares_financial_check_constraints(db_engine):
+    expected = {
+        "ck_transactions_amount_range",
+        "ck_subscriptions_amount_range",
+        "ck_income_sources_expected_amount_range",
+        "ck_goals_target_amount_range",
+        "ck_goal_contributions_amount_range",
+        "ck_net_worth_items_manual_value_range",
+    }
+    with db_engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    schema = "\n".join(row[0] or "" for row in rows)
+
+    assert expected.issubset(
+        {name for name in expected if name in schema}
+    )

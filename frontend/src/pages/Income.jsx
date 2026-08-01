@@ -153,7 +153,8 @@ function AddIncomeModal({ open, onClose, editSource = null }) {
             value={expectedAmount}
             onChange={(e) => setExpectedAmount(e.target.value)}
             placeholder="e.g., 50000"
-            min="0"
+            min="0.01"
+            step="0.01"
           />
           <div>
             <label className="block text-white/40 text-[0.75rem] mb-1.5" style={{ fontWeight: 400 }}>Frequency</label>

@@ -6,18 +6,18 @@ from pydantic import BaseModel, Field
 
 
 class ReviewResolve(BaseModel):
-    category: str = Field(..., min_length=1)
-    subcategory: Optional[str] = None
+    category: str = Field(..., min_length=1, max_length=50)
+    subcategory: Optional[str] = Field(default=None, max_length=50)
 
 
 class BatchResolveItem(BaseModel):
-    id: str
-    category: str = Field(..., min_length=1)
-    subcategory: Optional[str] = None
+    id: str = Field(min_length=1, max_length=36)
+    category: str = Field(..., min_length=1, max_length=50)
+    subcategory: Optional[str] = Field(default=None, max_length=50)
 
 
 class BatchResolveRequest(BaseModel):
-    items: list[BatchResolveItem]
+    items: list[BatchResolveItem] = Field(min_length=1, max_length=200)
 
 
 class ReviewStats(BaseModel):

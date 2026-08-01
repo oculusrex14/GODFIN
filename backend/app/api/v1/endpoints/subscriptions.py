@@ -10,8 +10,7 @@ from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -23,6 +22,13 @@ from app.core.product_depth import (
 )
 from app.models.subscription import Subscription
 from app.models.subscription_suggestion import SubscriptionSuggestion
+from app.schemas.financial import (
+    PositiveMoney,
+    SubscriptionDecision,
+    SubscriptionFrequency,
+    SupportedSubscriptionCurrency,
+    reject_explicit_nulls,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -83,27 +89,34 @@ def _to_inr(amount: float, currency: str, rates: dict) -> float:
 
 
 class SubscriptionCreate(BaseModel):
-    name: str
-    amount: float
-    currency: str = "INR"
-    frequency: str = "monthly"
-    category: Optional[str] = None
-    subcategory: Optional[str] = None
-    next_payment_date: Optional[str] = None
-    notes: Optional[str] = None
+    name: str = Field(min_length=1, max_length=100)
+    amount: PositiveMoney
+    currency: SupportedSubscriptionCurrency = "INR"
+    frequency: SubscriptionFrequency = "monthly"
+    category: Optional[str] = Field(default=None, max_length=50)
+    subcategory: Optional[str] = Field(default=None, max_length=50)
+    next_payment_date: Optional[date] = None
+    notes: Optional[str] = Field(default=None, max_length=255)
     is_active: bool = True
 
 
 class SubscriptionUpdate(BaseModel):
-    name: Optional[str] = None
-    amount: Optional[float] = None
-    currency: Optional[str] = None
-    frequency: Optional[str] = None
-    category: Optional[str] = None
-    subcategory: Optional[str] = None
-    next_payment_date: Optional[str] = None
-    notes: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    amount: Optional[PositiveMoney] = None
+    currency: Optional[SupportedSubscriptionCurrency] = None
+    frequency: Optional[SubscriptionFrequency] = None
+    category: Optional[str] = Field(default=None, max_length=50)
+    subcategory: Optional[str] = Field(default=None, max_length=50)
+    next_payment_date: Optional[date] = None
+    notes: Optional[str] = Field(default=None, max_length=255)
     is_active: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self):
+        return reject_explicit_nulls(
+            self,
+            {"name", "amount", "currency", "frequency", "is_active"},
+        )
 
 
 class SubscriptionResponse(BaseModel):
@@ -132,8 +145,8 @@ class SubscriptionStatsResponse(BaseModel):
 
 
 class SubscriptionSuggestionDecision(BaseModel):
-    decision: str
-    snooze_days: int = 7
+    decision: SubscriptionDecision
+    snooze_days: int = Field(default=7, ge=1, le=90)
 
 
 def _suggestion_response(suggestion: SubscriptionSuggestion) -> dict:
@@ -208,28 +221,15 @@ async def create_subscription(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    valid_frequencies = ["monthly", "quarterly", "annual"]
-    if body.frequency not in valid_frequencies:
-        raise HTTPException(status_code=400, detail=f"Frequency must be one of: {', '.join(valid_frequencies)}")
-
-    valid_currencies = ["INR", "USD", "EUR", "GBP"]
-    currency = (body.currency or "INR").upper()
-    if currency not in valid_currencies:
-        raise HTTPException(status_code=400, detail=f"Currency must be one of: {', '.join(valid_currencies)}")
-
-    next_date = None
-    if body.next_payment_date:
-        next_date = date.fromisoformat(body.next_payment_date)
-
     sub = Subscription(
         id=str(uuid.uuid4()),
         name=body.name,
         amount=body.amount,
-        currency=currency,
+        currency=body.currency,
         frequency=body.frequency,
         category=body.category,
         subcategory=body.subcategory,
-        next_payment_date=next_date,
+        next_payment_date=body.next_payment_date,
         notes=body.notes,
         is_active=body.is_active,
     )
@@ -322,12 +322,6 @@ def update_subscription_suggestion(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    if body.decision not in {"confirm", "ignore", "snooze"}:
-        raise HTTPException(
-            status_code=400, detail="Decision must be confirm, ignore, or snooze"
-        )
-    if not 1 <= body.snooze_days <= 90:
-        raise HTTPException(status_code=400, detail="Snooze must be 1–90 days")
     suggestion = (
         db.query(SubscriptionSuggestion).filter_by(id=suggestion_id).first()
     )
@@ -385,19 +379,6 @@ async def update_subscription(
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     data = body.model_dump(exclude_unset=True)
-    if "next_payment_date" in data and data["next_payment_date"]:
-        data["next_payment_date"] = date.fromisoformat(data["next_payment_date"])
-
-    if "currency" in data and data["currency"]:
-        data["currency"] = data["currency"].upper()
-        if data["currency"] not in ["INR", "USD", "EUR", "GBP"]:
-            raise HTTPException(status_code=400, detail="Currency must be one of: INR, USD, EUR, GBP")
-
-    if "frequency" in data:
-        valid = ["monthly", "quarterly", "annual"]
-        if data["frequency"] not in valid:
-            raise HTTPException(status_code=400, detail=f"Frequency must be one of: {', '.join(valid)}")
-
     for field, value in data.items():
         setattr(sub, field, value)
 

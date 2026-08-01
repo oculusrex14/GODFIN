@@ -20,6 +20,7 @@ from app.core.feature_flags import (
 from app.core.license import license_status
 from app.models.app_setting import AppSetting
 from app.models.behavior_insight import BehaviorInsightPreference
+from app.schemas.financial import PositiveMoney
 
 router = APIRouter()
 
@@ -30,7 +31,7 @@ class InsightPreferenceUpdate(BaseModel):
 
 
 class BehaviorConfigUpdate(BaseModel):
-    monthly_budget: float | None = Field(default=None, gt=0)
+    monthly_budget: PositiveMoney | None = None
 
 
 def _authorize(db: Session) -> None:

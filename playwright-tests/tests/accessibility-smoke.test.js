@@ -36,6 +36,10 @@ test('PIN and beginner tutorial support keyboard, touch, and accessible names', 
   await page.getByRole('button', { name: 'Open navigation menu' }).click();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  const learningSection = page.getByRole('button', { name: 'Setup & Learning' });
+  await expect(learningSection).toHaveAttribute('aria-expanded', 'false');
+  await learningSection.click();
+  await expect(learningSection).toHaveAttribute('aria-expanded', 'true');
   await page.getByRole('button', { name: 'Learn GODFIN' }).click();
   await expect(
     page.getByRole('heading', { name: 'Finance basics, one calm step at a time' }),

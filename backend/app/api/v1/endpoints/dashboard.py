@@ -17,6 +17,7 @@ from app.core.transaction_semantics import (
 )
 from app.models.transaction import Transaction
 from app.schemas.dashboard import DashboardStats
+from app.schemas.financial import YearMonth
 
 router = APIRouter()
 
@@ -58,7 +59,7 @@ def dashboard_months(
 
 @router.get("/stats", response_model=DashboardStats)
 def dashboard_stats(
-    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    month: YearMonth,
     period: str = Query("full", pattern=r"^(full|week_1|week_2|week_3|week_4|first_half|second_half)$"),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -131,7 +132,7 @@ def dashboard_stats(
 
 @router.get("/category-breakdown")
 def category_breakdown(
-    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    month: YearMonth,
     period: str = Query("full", pattern=r"^(full|week_1|week_2|week_3|week_4|first_half|second_half)$"),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -192,7 +193,7 @@ def _get_period_dates(month_start: date, month_end: date, period: str) -> tuple[
 @router.get("/spending-trend")
 def spending_trend(
     months: int = Query(6, ge=1, le=12),
-    month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    month: Optional[YearMonth] = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):

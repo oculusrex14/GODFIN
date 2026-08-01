@@ -32,6 +32,14 @@ from app.models.goal_contribution import (
 )
 from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
+from app.schemas.financial import (
+    ExpectedAnnualReturnRate,
+    GoalContributionType,
+    GoalPressureLevel,
+    NonNegativeMoney,
+    PastOrTodayDate,
+    PositiveMoney,
+)
 
 router = APIRouter()
 
@@ -40,31 +48,29 @@ router = APIRouter()
 
 class GoalCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    target_amount: float = Field(..., gt=0)
-    deadline_date: str = Field(..., pattern=r'^\d{4}-\d{2}-\d{2}$')
-    pressure_level: str = Field(default='moderate', pattern=r'^(minimal|moderate|aggressive)$')
-    current_saved: float = Field(default=0, ge=0)
-    annual_return_rate: float = Field(default=0, ge=0, le=0.5)
-    minimum_flexible_floor: float = Field(default=5000, ge=0)
+    target_amount: PositiveMoney
+    deadline_date: date
+    pressure_level: GoalPressureLevel = 'moderate'
+    current_saved: NonNegativeMoney = 0
+    annual_return_rate: ExpectedAnnualReturnRate = 0
+    minimum_flexible_floor: NonNegativeMoney = 5000
 
 
 class GoalUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
-    target_amount: Optional[float] = Field(None, gt=0)
-    current_saved: Optional[float] = Field(None, ge=0)
-    deadline_date: Optional[str] = Field(None, pattern=r'^\d{4}-\d{2}-\d{2}$')
-    pressure_level: Optional[str] = Field(None, pattern=r'^(minimal|moderate|aggressive)$')
-    annual_return_rate: Optional[float] = Field(None, ge=0, le=0.5)
-    minimum_flexible_floor: Optional[float] = Field(None, ge=0)
+    target_amount: Optional[PositiveMoney] = None
+    current_saved: Optional[NonNegativeMoney] = None
+    deadline_date: Optional[date] = None
+    pressure_level: Optional[GoalPressureLevel] = None
+    annual_return_rate: Optional[ExpectedAnnualReturnRate] = None
+    minimum_flexible_floor: Optional[NonNegativeMoney] = None
     is_active: Optional[bool] = None
 
 
 class GoalContributionCreate(BaseModel):
-    amount: float = Field(..., gt=0)
-    entry_type: str = Field(..., pattern=r"^(deposit|withdrawal)$")
-    contribution_date: Optional[str] = Field(
-        None, pattern=r"^\d{4}-\d{2}-\d{2}$"
-    )
+    amount: PositiveMoney
+    entry_type: GoalContributionType
+    contribution_date: Optional[PastOrTodayDate] = None
     note: Optional[str] = Field(None, max_length=255)
     idempotency_key: Optional[str] = Field(None, min_length=1, max_length=100)
 
@@ -74,7 +80,7 @@ class GoalContributionVoid(BaseModel):
 
 
 class GoalSuggestionDecision(BaseModel):
-    goal_id: Optional[str] = None
+    goal_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
 
 
 # --- Goals ---
@@ -119,7 +125,7 @@ def create_goal(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    deadline = date.fromisoformat(body.deadline_date)
+    deadline = body.deadline_date
     if deadline <= date.today():
         raise HTTPException(status_code=400, detail="Deadline must be in the future")
 
@@ -189,7 +195,9 @@ def update_goal(
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
     if body.deadline_date is not None:
-        goal.deadline_date = date.fromisoformat(body.deadline_date)
+        if body.deadline_date <= date.today():
+            raise HTTPException(status_code=400, detail="Deadline must be in the future")
+        goal.deadline_date = body.deadline_date
     if body.pressure_level is not None:
         goal.pressure_level = body.pressure_level
     if body.annual_return_rate is not None:
@@ -239,11 +247,7 @@ def create_goal_contribution(
             goal,
             amount=body.amount,
             entry_type=body.entry_type,
-            contribution_date=(
-                date.fromisoformat(body.contribution_date)
-                if body.contribution_date
-                else date.today()
-            ),
+            contribution_date=body.contribution_date or date.today(),
             note=body.note,
             idempotency_key=body.idempotency_key,
         )

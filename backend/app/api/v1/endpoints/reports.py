@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -30,13 +30,14 @@ from app.core.llm_privacy import has_hosted_data_consent, is_local_provider
 from app.models.account import Account
 from app.models.transaction import Transaction
 from app.models.llm_config import LLMConfiguration
+from app.schemas.financial import YearMonth
 
 router = APIRouter()
 AI_REPORT_CONSENT_VERSION = "2026-08-02"
 
 
 class AIReportRequest(BaseModel):
-    month: str | None = Field(default=None, pattern=r'^\d{4}-\d{2}$')
+    month: YearMonth | None = None
     consent: bool
 
 
@@ -97,7 +98,7 @@ def _transaction_export_row(
 
 @router.get("/summary")
 def report_summary(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+    month: YearMonth | None = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -108,7 +109,7 @@ def report_summary(
 
 @router.get("/detailed")
 def report_detailed(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+    month: YearMonth | None = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -203,7 +204,7 @@ def report_ai_insights(
 
 @router.get("/pdf/summary")
 def report_pdf_summary(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+    month: YearMonth | None = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -223,7 +224,7 @@ def report_pdf_summary(
 
 @router.get("/csv")
 def report_csv(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+    month: YearMonth | None = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):

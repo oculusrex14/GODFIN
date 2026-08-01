@@ -7,7 +7,7 @@ import re
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -25,6 +25,7 @@ from app.core.taxonomy import TAXONOMY
 from app.models.audit_log import AuditLog
 from app.models.transaction import Transaction
 from app.schemas.review import BatchResolveRequest, ReviewResolve, ReviewStats
+from app.schemas.financial import ChatRole, FiniteUnitInterval
 
 logger = logging.getLogger(__name__)
 
@@ -34,24 +35,24 @@ router = APIRouter()
 # --- Review Chat models ---
 
 class ReviewChatMessage(BaseModel):
-    role: str  # "user" or "assistant"
-    content: str
+    role: ChatRole
+    content: str = Field(min_length=1, max_length=4000)
 
 
 class ReviewChatRequest(BaseModel):
-    message: str
-    history: List[ReviewChatMessage] = []
+    message: str = Field(min_length=1, max_length=2000)
+    history: List[ReviewChatMessage] = Field(default_factory=list, max_length=20)
 
 
 class ClassificationOption(BaseModel):
-    category: str
-    subcategory: Optional[str] = None
-    confidence: Optional[float] = None
+    category: str = Field(min_length=1, max_length=50)
+    subcategory: Optional[str] = Field(default=None, max_length=50)
+    confidence: Optional[FiniteUnitInterval] = None
 
 
 class ReviewChatResponse(BaseModel):
     reply: str
-    options: List[ClassificationOption] = []
+    options: List[ClassificationOption] = Field(default_factory=list, max_length=3)
 
 
 def _build_taxonomy_list() -> str:
@@ -279,6 +280,13 @@ def batch_resolve(
 
             if not validate_category(item.category):
                 errors.append(f"{item.id}: invalid category {item.category}")
+                continue
+            if item.subcategory and not validate_subcategory(
+                item.category, item.subcategory
+            ):
+                errors.append(
+                    f"{item.id}: invalid subcategory {item.subcategory}"
+                )
                 continue
 
             old_category = txn.category

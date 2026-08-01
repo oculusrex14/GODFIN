@@ -6,8 +6,8 @@ import uuid
 from datetime import date, datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -15,26 +15,39 @@ from app.core.database import get_db
 from app.core.transaction_semantics import verified_income_clause
 from app.models.income_source import IncomeSource
 from app.models.transaction import Transaction
+from app.schemas.financial import (
+    IncomeFrequency,
+    PositiveMoney,
+    YearMonth,
+    reject_explicit_nulls,
+)
 
 router = APIRouter()
 
 
 class IncomeSourceCreate(BaseModel):
-    source_name: str
-    expected_amount: Optional[float] = None
-    frequency: str = "monthly"  # monthly, quarterly, annual, one_time
-    next_expected_date: Optional[str] = None  # YYYY-MM-DD, defaults to start of next period
+    source_name: str = Field(min_length=1, max_length=100)
+    expected_amount: Optional[PositiveMoney] = None
+    frequency: IncomeFrequency = "monthly"
+    next_expected_date: Optional[date] = None
     enforce_current_month: bool = False  # If true, apply to current month income
     is_active: bool = True
 
 
 class IncomeSourceUpdate(BaseModel):
-    source_name: Optional[str] = None
-    expected_amount: Optional[float] = None
-    frequency: Optional[str] = None
-    next_expected_date: Optional[str] = None
+    source_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    expected_amount: Optional[PositiveMoney] = None
+    frequency: Optional[IncomeFrequency] = None
+    next_expected_date: Optional[date] = None
     enforce_current_month: Optional[bool] = None
     is_active: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self):
+        return reject_explicit_nulls(
+            self,
+            {"source_name", "frequency", "enforce_current_month", "is_active"},
+        )
 
 
 class IncomeSourceResponse(BaseModel):
@@ -103,7 +116,7 @@ def _source_to_response(source: IncomeSource) -> IncomeSourceResponse:
 @router.get("", response_model=IncomeSourceListResponse)
 def list_income_sources(
     is_active: Optional[bool] = None,
-    frequency: Optional[str] = None,
+    frequency: Optional[IncomeFrequency] = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -130,17 +143,8 @@ def create_income_source(
     _user: bool = Depends(get_current_user),
 ):
     """Create a new income source."""
-    valid_frequencies = ["monthly", "quarterly", "annual", "one_time"]
-    if body.frequency not in valid_frequencies:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid frequency. Must be one of: {', '.join(valid_frequencies)}"
-        )
-
-    next_expected_date = None
-    if body.next_expected_date:
-        next_expected_date = date.fromisoformat(body.next_expected_date)
-    elif body.frequency in ["monthly", "quarterly", "annual"] and body.expected_amount:
+    next_expected_date = body.next_expected_date
+    if next_expected_date is None and body.frequency in ["monthly", "quarterly", "annual"] and body.expected_amount:
         next_expected_date = _calculate_default_next_date(body.frequency)
 
     source = IncomeSource(
@@ -162,7 +166,7 @@ def create_income_source(
 
 @router.get("/stats", response_model=IncomeStatsResponse)
 def get_income_stats(
-    month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    month: Optional[YearMonth] = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -293,17 +297,6 @@ def update_income_source(
         raise HTTPException(status_code=404, detail="Income source not found")
 
     update_data = body.model_dump(exclude_unset=True)
-
-    if "frequency" in update_data:
-        valid_frequencies = ["monthly", "quarterly", "annual", "one_time"]
-        if update_data["frequency"] not in valid_frequencies:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid frequency. Must be one of: {', '.join(valid_frequencies)}"
-            )
-
-    if "next_expected_date" in update_data and update_data["next_expected_date"]:
-        update_data["next_expected_date"] = date.fromisoformat(update_data["next_expected_date"])
 
     for field, value in update_data.items():
         setattr(source, field, value)

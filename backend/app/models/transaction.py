@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime, time
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, Date, Float, ForeignKey, Index, Integer, String, Text, Time
+from sqlalchemy import Boolean, CheckConstraint, Date, Float, ForeignKey, Index, Integer, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -24,6 +24,29 @@ class Transaction(Base):
         Index("ix_transactions_email_message_id", "email_message_id"),
         Index("ix_transactions_checksum_source", "checksum_source"),
         Index("ix_transactions_checksum_canonical", "checksum_canonical"),
+        CheckConstraint(
+            "amount > 0 AND amount <= 1000000000000000",
+            name="ck_transactions_amount_range",
+        ),
+        CheckConstraint(
+            "type IN ('debit', 'credit')",
+            name="ck_transactions_type",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="ck_transactions_confidence",
+        ),
+        CheckConstraint(
+            "status IN ('settled', 'pending', 'deleted', 'reversed', "
+            "'reversal', 'voided')",
+            name="ck_transactions_status",
+        ),
+        CheckConstraint(
+            "semantic_type IN ('unknown', 'expense', 'income', "
+            "'internal_transfer', 'refund', 'reimbursement', 'reversal', "
+            "'cashback', 'adjustment', 'excluded')",
+            name="ck_transactions_semantic_type",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))

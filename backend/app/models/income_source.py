@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, Float, String
+from sqlalchemy import Boolean, CheckConstraint, Date, Float, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -13,6 +13,18 @@ from app.core.time import utcnow_naive
 
 class IncomeSource(Base):
     __tablename__ = "income_sources"
+    __table_args__ = (
+        CheckConstraint(
+            "expected_amount IS NULL OR "
+            "(expected_amount > 0 AND expected_amount <= 1000000000000000)",
+            name="ck_income_sources_expected_amount_range",
+        ),
+        CheckConstraint(
+            "frequency IN ('monthly', 'quarterly', 'annual', 'one_time', "
+            "'biweekly', 'irregular')",
+            name="ck_income_sources_frequency",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     source_name: Mapped[str] = mapped_column(String(100), nullable=False)
