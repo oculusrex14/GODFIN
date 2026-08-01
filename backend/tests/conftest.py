@@ -79,9 +79,9 @@ def auth_client(client):
     from app.core.auth import _active_tokens
     _active_tokens.clear()
 
-    resp = client.post("/api/v1/auth/set-pin", json={"pin": "1234"})
+    resp = client.post("/api/v1/auth/set-pin", json={"pin": "4826"})
     assert resp.status_code == 200, f"set-pin failed: {resp.text}"
-    resp = client.post("/api/v1/auth/verify-pin", json={"pin": "1234"})
+    resp = client.post("/api/v1/auth/verify-pin", json={"pin": "4826"})
     assert resp.status_code == 200, f"verify-pin failed: {resp.text}"
     token = resp.json()["token"]
     client.headers["Authorization"] = f"Bearer {token}"

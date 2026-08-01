@@ -4,16 +4,17 @@ import os
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user, verify_pin_hash
+from app.core.auth import get_current_user
 from app.core.backup import create_backup, list_backups
 from app.core.config import settings as app_config
 from app.core.database import get_db
 from app.core.encryption import SecretDecryptionError, decrypt, get_encryption_health
 from app.core.license import license_status
+from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 from app.models.classification_rule import ClassificationRule
 from app.models.llm_config import LLMConfiguration
@@ -70,17 +71,6 @@ def _set_existing_setting(db: Session, key: str, value: str) -> None:
     if setting is None:
         raise HTTPException(status_code=500, detail="Required application setting is missing")
     setting.value = value
-
-
-def _require_current_pin(db: Session, pin: str | None) -> None:
-    if not pin:
-        raise HTTPException(
-            status_code=403,
-            detail="Enter your current PIN to make this security change",
-        )
-    pin_setting = db.query(AppSetting).filter_by(key="pin_hash").first()
-    if not pin_setting or not verify_pin_hash(pin, pin_setting.value):
-        raise HTTPException(status_code=403, detail="Incorrect PIN")
 
 
 @router.get("/health")
@@ -190,11 +180,17 @@ def update_timezone(
 @router.put("/preferences/network-access")
 def update_network_access(
     body: SensitiveToggleUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     if body.enabled:
-        _require_current_pin(db, body.current_pin)
+        require_current_pin(
+            db,
+            body.current_pin,
+            client_ip_from_request(request),
+            missing_detail="Enter your current PIN to make this security change",
+        )
     value = "true" if body.enabled else "false"
     _set_existing_setting(db, "allow_network_access", value)
     db.commit()
@@ -208,11 +204,17 @@ def update_network_access(
 @router.put("/preferences/developer-mode")
 def update_developer_mode(
     body: SensitiveToggleUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     if body.enabled:
-        _require_current_pin(db, body.current_pin)
+        require_current_pin(
+            db,
+            body.current_pin,
+            client_ip_from_request(request),
+            missing_detail="Enter your current PIN to make this security change",
+        )
     value = "true" if body.enabled else "false"
     _set_existing_setting(db, "developer_mode", value)
     db.commit()
@@ -537,14 +539,13 @@ def update_personal_classifier(
 @router.post("/classification-memory/reset")
 def reset_classification_memory(
     body: ClassificationMemoryReset,
+    request: Request,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     from app.core.classification_learning import reset_learning_memory
 
-    pin_setting = db.query(AppSetting).filter_by(key="pin_hash").first()
-    if not pin_setting or not verify_pin_hash(body.pin, pin_setting.value):
-        raise HTTPException(status_code=403, detail="Incorrect PIN")
+    require_current_pin(db, body.pin, client_ip_from_request(request))
     backup_filename = create_backup(DB_PATH, _get_backup_dir(db))
     result = reset_learning_memory(db)
     db.commit()
@@ -558,16 +559,13 @@ def reset_classification_memory(
 @router.post("/reset-data", status_code=200)
 def reset_all_data(
     body: ResetDataRequest,
+    request: Request,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Reset all transaction and dynamic data. PIN-protected."""
     # 1. Verify PIN
-    pin_setting = db.query(AppSetting).filter_by(key='pin_hash').first()
-    if not pin_setting or not pin_setting.value:
-        raise HTTPException(status_code=400, detail='No PIN set')
-    if not verify_pin_hash(body.pin, pin_setting.value):
-        raise HTTPException(status_code=403, detail='Incorrect PIN')
+    require_current_pin(db, body.pin, client_ip_from_request(request))
 
     # 2. Create backup first (safety net)
     backup_filename = None

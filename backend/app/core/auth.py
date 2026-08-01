@@ -20,6 +20,10 @@ _active_tokens: dict[str, tuple[float, float]] = {}
 TOKEN_EXPIRY_SECONDS = int(os.environ.get("GODFIN_SESSION_TTL_SECONDS", 30 * 24 * 60 * 60))
 MAX_ACTIVE_SESSIONS = int(os.environ.get("GODFIN_MAX_SESSIONS", 3))
 LEGACY_TOKEN_KEY = "auth_token"
+PIN_HASH_ALGORITHM = "pbkdf2-sha256"
+PIN_HASH_VERSION = 1
+PIN_HASH_ITERATIONS = 600_000
+LEGACY_PIN_HASH_ITERATIONS = 100_000
 
 
 def _utcnow() -> datetime:
@@ -33,21 +37,60 @@ def hash_token(token: str) -> str:
 
 def hash_pin(pin: str) -> str:
     salt = os.urandom(16)
-    digest = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, 100_000)
-    return salt.hex() + ":" + digest.hex()
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        pin.encode(),
+        salt,
+        PIN_HASH_ITERATIONS,
+    )
+    return (
+        f"{PIN_HASH_ALGORITHM}${PIN_HASH_VERSION}${PIN_HASH_ITERATIONS}"
+        f"${salt.hex()}${digest.hex()}"
+    )
 
 
 def verify_pin_hash(pin: str, stored: str) -> bool:
-    if not stored or ":" not in stored:
+    if not stored:
         return False
+    iterations = LEGACY_PIN_HASH_ITERATIONS
     try:
-        salt_hex, hash_hex = stored.split(":", 1)
+        if stored.startswith(f"{PIN_HASH_ALGORITHM}$"):
+            algorithm, version_text, iterations_text, salt_hex, hash_hex = stored.split(
+                "$",
+                4,
+            )
+            if algorithm != PIN_HASH_ALGORITHM or int(version_text) != PIN_HASH_VERSION:
+                return False
+            iterations = int(iterations_text)
+            if not 100_000 <= iterations <= 2_000_000:
+                return False
+        elif ":" in stored:
+            salt_hex, hash_hex = stored.split(":", 1)
+        else:
+            return False
         salt = bytes.fromhex(salt_hex)
         expected = bytes.fromhex(hash_hex)
-    except ValueError:
+        if len(salt) != 16 or len(expected) != 32:
+            return False
+    except (TypeError, ValueError):
         return False
-    actual = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, 100_000)
+    actual = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, iterations)
     return hmac.compare_digest(actual, expected)
+
+
+def pin_hash_needs_upgrade(stored: str) -> bool:
+    """Return True for legacy or weaker versioned PIN hashes."""
+    if not stored.startswith(f"{PIN_HASH_ALGORITHM}$"):
+        return True
+    try:
+        algorithm, version_text, iterations_text, _salt, _digest = stored.split("$", 4)
+        return (
+            algorithm != PIN_HASH_ALGORITHM
+            or int(version_text) != PIN_HASH_VERSION
+            or int(iterations_text) < PIN_HASH_ITERATIONS
+        )
+    except (TypeError, ValueError):
+        return True
 
 
 def purge_expired_sessions(db: Session, *, now: Optional[datetime] = None) -> int:

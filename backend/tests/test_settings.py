@@ -109,7 +109,7 @@ def test_settings_health_card_payload(auth_client):
 def test_network_access_toggle_requires_restart(auth_client):
     resp = auth_client.put(
         '/api/v1/settings/preferences/network-access',
-        json={'enabled': True, 'current_pin': '1234'},
+        json={'enabled': True, 'current_pin': '4826'},
     )
     assert resp.status_code == 200
     assert resp.json()['restart_required'] is True
@@ -139,7 +139,7 @@ def test_developer_mode_enable_requires_current_pin(auth_client):
     )
     accepted = auth_client.put(
         '/api/v1/settings/preferences/developer-mode',
-        json={'enabled': True, 'current_pin': '1234'},
+        json={'enabled': True, 'current_pin': '4826'},
     )
 
     assert missing.status_code == 403
@@ -228,7 +228,7 @@ def test_reset_data_success(auth_client, db_session):
 
     # Backups are covered with a real temporary SQLite file above; this API
     # fixture uses a shared in-memory database and must not touch the user's DB.
-    resp = auth_client.post('/api/v1/settings/reset-data', json={'pin': '1234', 'create_backup': False})
+    resp = auth_client.post('/api/v1/settings/reset-data', json={'pin': '4826', 'create_backup': False})
     assert resp.status_code == 200
     data = resp.json()
     assert data['success'] is True

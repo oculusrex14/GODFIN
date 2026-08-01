@@ -10,7 +10,7 @@ from app.core.database import Base
 
 
 class PinAttempt(Base):
-    """Persistent failed-PIN counter keyed by the direct client address."""
+    """Persistent counter keyed by a source address or local-device scope."""
 
     __tablename__ = "pin_attempts"
 

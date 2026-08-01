@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user, hash_token, verify_pin_hash
+from app.core.auth import get_current_user, hash_token
 from app.core.backup import create_backup
 from app.core.config import settings as app_config
 from app.core.database import get_db
@@ -29,6 +29,7 @@ from app.core.ingestion import (
     run_initial_sync, run_initial_sync_background,
 )
 from app.core.scheduler import _set_manual_ingestion_running
+from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 
 logger = logging.getLogger(__name__)
@@ -306,6 +307,7 @@ def _delete_gmail_transactions(db: Session) -> int:
 
 @router.post("/auth/gmail/disconnect")
 def gmail_disconnect(
+    request: Request,
     body: GmailDisconnectRequest = Body(default=GmailDisconnectRequest()),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -315,11 +317,11 @@ def gmail_disconnect(
         deleted_count = 0
         backup_filename = None
         if body.clear_data:
-            pin_setting = db.query(AppSetting).filter_by(key="pin_hash").first()
-            if not body.pin or not pin_setting or not verify_pin_hash(
-                body.pin, pin_setting.value
-            ):
-                raise HTTPException(status_code=403, detail="Incorrect PIN")
+            require_current_pin(
+                db,
+                body.pin,
+                client_ip_from_request(request),
+            )
             if body.confirmation != "DELETE GMAIL DATA":
                 raise HTTPException(
                     status_code=400,

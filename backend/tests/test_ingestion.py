@@ -199,7 +199,7 @@ def test_gmail_data_deletion_requires_current_pin_and_exact_confirmation(
         "/api/v1/auth/gmail/disconnect",
         json={
             "clear_data": True,
-            "pin": "1234",
+            "pin": "4826",
             "confirmation": "delete",
         },
     )
@@ -209,7 +209,7 @@ def test_gmail_data_deletion_requires_current_pin_and_exact_confirmation(
         "/api/v1/auth/gmail/disconnect",
         json={
             "clear_data": True,
-            "pin": "1234",
+            "pin": "4826",
             "confirmation": "DELETE GMAIL DATA",
         },
     )
