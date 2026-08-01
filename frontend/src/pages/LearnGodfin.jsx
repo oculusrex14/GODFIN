@@ -119,10 +119,11 @@ const LESSONS = [
   {
     title: 'Plans and optional AI',
     icon: Bot,
-    summary: 'Lifetime plans unlock released app features. Hosted AI credits are always separate.',
+    summary: 'Lifetime plans unlock released app features. AI remains optional.',
     points: [
       'A paid plan can be active on up to three of your devices.',
-      'Private AI on your computer does not use GODFIN credits.',
+      'GODFIN does not currently sell hosted AI credits.',
+      'You can use private AI on your computer or connect your own supported provider.',
       'AI may explain calculated results, but your saved records remain the source of every total.',
     ],
     example: 'You can change AI mode later in Settings without affecting imports, rules, budgets, or reports.',

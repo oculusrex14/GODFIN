@@ -98,18 +98,17 @@ export default function DocsPage() {
             <h3>Is GODFIN cloud software?</h3>
             <p>
               No. The desktop app and its SQLite database run locally. The
-              website handles accounts, downloads, purchases, licenses, and
-              optional hosted AI credits.
+              website handles accounts, downloads, purchases, and licenses.
             </p>
             <h3>Is there a subscription?</h3>
             <p>
-              No software subscription. Pro and Max are lifetime licenses;
-              credit packs are optional one-time purchases.
+              No software subscription. Pro and Max are lifetime licenses.
+              GODFIN does not currently sell hosted AI credit packs.
             </p>
             <h3>Can I use my own AI key?</h3>
             <p>
-              Yes. A supported provider key bypasses GODFIN credits and is
-              encrypted on your device.
+              Yes. A supported provider key is encrypted on your device. You
+              can also use a supported local model or continue without AI.
             </p>
           </article>
         </div>

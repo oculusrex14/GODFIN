@@ -3,7 +3,6 @@ import Link from "next/link";
 
 import { PurchaseButton } from "@/components/purchase-button";
 import { ENTITLEMENTS } from "@/lib/entitlements";
-import type { ProductCode } from "@/lib/products";
 import { formattedLicensePrice } from "@/lib/regional-pricing";
 
 export const metadata: Metadata = {
@@ -55,17 +54,6 @@ const plans = [
   },
 ];
 
-const creditPacks: Array<{
-  name: string;
-  price: string;
-  credits: string;
-  product: ProductCode;
-}> = [
-  { name: "Starter", price: "₹249", credits: "500", product: "credits_starter" },
-  { name: "Regular", price: "₹499", credits: "1,200", product: "credits_regular" },
-  { name: "Power", price: "₹999", credits: "3,000", product: "credits_power" },
-];
-
 export default function PricingPage() {
   const checkoutEnabled = process.env.CHECKOUT_ENABLED === "true";
   return (
@@ -77,9 +65,9 @@ export default function PricingPage() {
           </div>
           <h1>Own the app. Add AI only when it helps.</h1>
           <p>
-            Core stays free. Pro and Max are lifetime desktop licenses. Optional
-            credit packs are one-time purchases, and your own AI key bypasses
-            GODFIN credits entirely.
+            Core stays free. Pro and Max are lifetime desktop licenses. Private
+            local AI and your own supported provider key are optional and are
+            never bundled into the license price.
           </p>
         </div>
       </section>
@@ -135,32 +123,19 @@ export default function PricingPage() {
         <div className="shell">
           <div className="section-head">
             <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
-              Optional top-ups
+              Optional AI
             </div>
-            <h2>AI credit packs</h2>
+            <h2>Use AI without a GODFIN subscription.</h2>
             <p>
-              Credits cover hosted AI operations. Local rules, fuzzy matching,
-              and your own provider key keep working without them.
+              GODFIN does not currently sell hosted AI credits. You can run a
+              supported model privately on your computer, connect your own
+              provider key, or continue without AI.
             </p>
           </div>
-          <div className="credit-grid">
-            {creditPacks.map(({ name, price, credits, product }) => (
-              <article className="credit-card" key={name}>
-                <h3>{name}</h3>
-                <strong>{credits} credits</strong>
-                <p className="lead" style={{ fontSize: 14 }}>
-                  {price} · one time
-                </p>
-                <PurchaseButton product={product} enabled={checkoutEnabled}>
-                  Buy {name}
-                </PurchaseButton>
-              </article>
-            ))}
-          </div>
           <div className="callout">
-            AI credits are not a subscription and are never bundled into a
-            lifetime plan. Purchased top-ups remain available until used.
-            Local AI and bring-your-own provider keys use no GODFIN credits.
+            AI never determines authoritative totals. Imports, classification
+            rules, budgets, calculations, and deterministic reports remain
+            available without an LLM.
           </div>
         </div>
       </section>

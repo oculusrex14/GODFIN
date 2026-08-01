@@ -35,8 +35,7 @@ export default function PrivacyPage() {
           <p>
             The GODFIN website processes account identifiers, email address,
             purchase records, license status, device activation hashes, download
-            access, optional AI credit balances, and separately submitted
-            waitlist details.
+            access, and separately submitted waitlist details.
           </p>
 
           <h2>2. Website services</h2>

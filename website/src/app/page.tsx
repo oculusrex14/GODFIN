@@ -118,7 +118,7 @@ const productChapters = [
     icon: HardDrive,
     eyebrow: "06 · Local boundary",
     title: "Your finance database stays on your computer.",
-    body: "Statements, transaction history, category memory, goals, and reports remain in local SQLite. The website handles accounts, purchases, licenses, downloads, and optional credit balances.",
+    body: "Statements, transaction history, category memory, goals, and reports remain on your computer. The website handles accounts, purchases, licenses, activations, and downloads.",
     bullets: [
       "No remote app database",
       "Local backups under your control",
@@ -321,7 +321,7 @@ export default function HomePage() {
             <h2>The website sells the license. The app holds the money data.</h2>
             <p>
               Website accounts store only what is needed for purchases,
-              licenses, downloads, and AI credits. Your app database remains on
+              licenses, device activations, and downloads. Your app database remains on
               your device.
             </p>
           </div>
@@ -339,8 +339,8 @@ export default function HomePage() {
               <ShieldCheck color="#c9f36b" />
               <strong>GODFIN website</strong>
               <p>
-                Account email, purchase records, license status, downloads, and
-                optional credit balance. No transaction ledger.
+                Account email, purchase records, license status, activations,
+                and downloads. No transaction ledger.
               </p>
             </div>
           </div>

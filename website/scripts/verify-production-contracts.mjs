@@ -35,11 +35,29 @@ for (const tier of ["free", "pro", "max"]) {
 const products = await text("src/lib/products.ts");
 assert.match(products, /pro:[\s\S]*?amount:\s*499900[\s\S]*?credits:\s*0/);
 assert.match(products, /max:[\s\S]*?amount:\s*999900[\s\S]*?credits:\s*0/);
+assert.doesNotMatch(products, /credits_(starter|regular|power)\s*:/);
+assert.match(products, /isRetiredHostedCreditCode/);
 
 const checkout = await text("src/app/api/checkout/route.ts");
 assert.match(checkout, /mode:\s*"payment"/);
 assert.doesNotMatch(checkout, /mode:\s*"subscription"/);
 assert.match(checkout, /stripePriceIdForEnvironment/);
+assert.match(checkout, /isRetiredHostedCreditCode/);
+assert.match(checkout, /status:\s*410/);
+
+for (const publicPage of [
+  "src/app/pricing/page.tsx",
+  "src/app/docs/page.tsx",
+  "src/app/terms/page.tsx",
+  "src/app/account/page.tsx",
+]) {
+  const page = await text(publicPage);
+  assert.doesNotMatch(
+    page,
+    /Buy (Starter|Regular|Power)|Purchased top-ups|AI top-up balance/,
+    `${publicPage} must not market or display unusable hosted-credit products.`,
+  );
+}
 
 const webhook = await text("src/app/api/webhook/route.ts");
 assert.match(webhook, /webhooks\.constructEvent/);

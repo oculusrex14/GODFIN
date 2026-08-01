@@ -13,7 +13,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
   title: "Account",
-  description: "Manage GODFIN licenses, AI credits, and downloads.",
+  description: "Manage GODFIN licenses, device activations, and downloads.",
 };
 
 export const dynamic = "force-dynamic";
@@ -52,7 +52,6 @@ export default async function AccountPage({
     currency: string;
     created_at: string;
   }> = [];
-  let balance = 0;
   let activations: Array<{
     id: string;
     license_id: string;
@@ -65,7 +64,7 @@ export default async function AccountPage({
   let checkoutProductCode: string | null = null;
 
   if (supabase && user) {
-    const [licenseResult, purchaseResult, creditResult, activationResult] = await Promise.all([
+    const [licenseResult, purchaseResult, activationResult] = await Promise.all([
       supabase
         .from("licenses")
         .select("id,tier,key_last4,kind,status,issued_at")
@@ -76,10 +75,6 @@ export default async function AccountPage({
         .order("created_at", { ascending: false })
         .limit(20),
       supabase
-        .from("credit_balances")
-        .select("balance")
-        .maybeSingle(),
-      supabase
         .from("license_activations")
         .select("id,license_id,device_label,app_version,activated_at,last_seen_at")
         .is("deactivated_at", null)
@@ -87,7 +82,6 @@ export default async function AccountPage({
     ]);
     licenses = licenseResult.data || [];
     purchases = purchaseResult.data || [];
-    balance = creditResult.data?.balance || 0;
     activations = activationResult.data || [];
 
     if (
@@ -135,8 +129,8 @@ export default async function AccountPage({
           </div>
           <h1>{user ? "Your GODFIN account" : "Licenses without a subscription"}</h1>
           <p>
-            This account stores purchases, licenses, downloads, and AI credits.
-            Your desktop transaction database is not synced here.
+            This account stores purchases, licenses, device activations, and
+            downloads. Your desktop transaction database is not synced here.
           </p>
         </div>
       </section>
@@ -178,7 +172,7 @@ export default async function AccountPage({
                 <div>
                   <strong>{user.email}</strong>
                   <div style={{ color: "var(--muted)", fontSize: 13 }}>
-                    AI top-up balance: {balance.toLocaleString("en-IN")} credits
+                    Website account only · financial records stay in the desktop app
                   </div>
                 </div>
                 <div style={{ marginLeft: "auto" }}>

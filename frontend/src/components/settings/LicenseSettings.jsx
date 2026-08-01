@@ -121,9 +121,9 @@ export default function LicenseSettings() {
             <div className="rounded-[12px] bg-white/[0.03] p-3">
               <div className="text-white/25 text-[0.63rem] uppercase">Hosted AI</div>
               <div className="mt-1 text-white/55 text-[0.72rem]">
-                No recurring credits included · {license.topup_credits.toLocaleString('en-IN')} purchased
+                No hosted credits are bundled or sold in this release.
               </div>
-              <div className="mt-1 text-white/25 text-[0.65rem]">Local AI and your own provider key use no GODFIN credits.</div>
+              <div className="mt-1 text-white/25 text-[0.65rem]">Local AI and your own supported provider key remain optional.</div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

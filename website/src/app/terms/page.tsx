@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Terms",
-  description: "Terms for GODFIN Core, Pro, Max, and one-time AI credit packs.",
+  description: "Terms for GODFIN Core, Pro, and Max lifetime licenses.",
 };
 
 export default function TermsPage() {
@@ -46,12 +46,12 @@ export default function TermsPage() {
             any individual device. There is no recurring software fee.
           </p>
 
-          <h2>4. AI credits</h2>
+          <h2>4. Optional AI</h2>
           <p>
-            AI credit packs are one-time purchases for eligible hosted
-            operations. Lifetime licenses include zero recurring hosted AI
-            credits. Local AI and your own supported provider key bypass the
-            hosted credit system. Purchased credits have no cash value.
+            Lifetime licenses include no hosted AI service or recurring AI
+            allowance. GODFIN does not currently sell hosted AI credit packs.
+            You may use supported local models or your own supported provider
+            key, subject to that provider&apos;s terms and charges.
           </p>
 
           <h2>5. Payments and refunds</h2>
@@ -76,7 +76,7 @@ export default function TermsPage() {
           <h2>7. Availability</h2>
           <p>
             The local app is designed to remain useful offline. Website
-            licensing, downloads, email, hosted AI, and third-party integrations
+            licensing, downloads, email, and third-party integrations
             can experience downtime or provider changes. We will use reasonable
             care but do not promise uninterrupted service.
           </p>

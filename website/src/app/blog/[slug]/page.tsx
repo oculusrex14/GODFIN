@@ -13,11 +13,11 @@ const articles = {
       ],
       [
         "Keep commerce separate",
-        "The website needs an email address, a purchase record, a license state, and optional credit balance. It does not need a copy of the user’s ledger. Separating these systems narrows both the security surface and the meaning of consent.",
+        "The website needs an email address, a purchase record, a license state, and device activation records. It does not need a copy of the user’s ledger. Separating these systems narrows both the security surface and the meaning of consent.",
       ],
       [
         "Make network features optional",
-        "Gmail ingestion, hosted AI, license checks, and updates can improve the product without becoming prerequisites for local bookkeeping. When the network disappears, the local rules and records should remain useful.",
+        "Gmail ingestion, optional AI provider connections, license checks, and updates can improve the product without becoming prerequisites for local bookkeeping. When the network disappears, the local rules and records should remain useful.",
       ],
     ],
   },

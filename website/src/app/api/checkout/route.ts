@@ -3,11 +3,11 @@ import { NextResponse } from "next/server";
 import { siteUrl } from "@/lib/env";
 import {
   isProductCode,
+  isRetiredHostedCreditCode,
   PRODUCTS,
-  stripePriceId,
   stripePriceIdForEnvironment,
 } from "@/lib/products";
-import { isLicenseProduct, regionalPrice } from "@/lib/regional-pricing";
+import { regionalPrice } from "@/lib/regional-pricing";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe";
 
@@ -36,16 +36,21 @@ export async function POST(request: Request) {
       product?: unknown;
       country?: unknown;
     };
+    if (isRetiredHostedCreditCode(body.product)) {
+      return NextResponse.json(
+        {
+          message:
+            "Hosted AI credit packs are not available because GODFIN does not operate a hosted credit-consumption service.",
+        },
+        { status: 410 },
+      );
+    }
     if (!isProductCode(body.product)) {
       return NextResponse.json({ message: "Unknown product." }, { status: 400 });
     }
     const product = PRODUCTS[body.product];
-    const licensePrice = isLicenseProduct(body.product)
-      ? regionalPrice(body.product, body.country)
-      : null;
-    const priceId = licensePrice
-      ? stripePriceIdForEnvironment(licensePrice.priceEnv)
-      : stripePriceId(body.product);
+    const licensePrice = regionalPrice(body.product, body.country);
+    const priceId = stripePriceIdForEnvironment(licensePrice.priceEnv);
 
     const session = await stripe().checkout.sessions.create({
       mode: "payment",
@@ -60,8 +65,8 @@ export async function POST(request: Request) {
       metadata: {
         product_code: product.code,
         user_id: user.id,
-        pricing_country: licensePrice?.country || "IN",
-        pricing_version: licensePrice?.priceVersion || "india-credit-packs-v1",
+        pricing_country: licensePrice.country,
+        pricing_version: licensePrice.priceVersion,
       },
       success_url: `${siteUrl()}/account?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl()}/pricing?checkout=cancelled`,
