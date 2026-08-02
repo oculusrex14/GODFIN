@@ -9,7 +9,7 @@ import {
 import {
   fetchSubscriptions, createSubscription, updateSubscription, deleteSubscription,
   fetchSubscriptionStats, fetchSubscriptionSuggestions, scanSubscriptionSuggestions,
-  decideSubscriptionSuggestion, fetchSubscriptionReminders,
+  decideSubscriptionSuggestion, fetchSubscriptionReminders, refreshExchangeRates,
 } from '../api/client';
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
@@ -39,7 +39,7 @@ const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP'];
 
 export default function Subscriptions() {
   const queryClient = useQueryClient();
-  const { showToast } = useToast();
+  const { addToast: showToast } = useToast();
   const [addOpen, setAddOpen] = useState(false);
   const [editSub, setEditSub] = useState(null);
   const [form, setForm] = useState({
@@ -78,6 +78,21 @@ export default function Subscriptions() {
   const scanMutation = useMutation({
     mutationFn: scanSubscriptionSuggestions,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['subscriptionSuggestions'] }),
+  });
+
+  const rateRefreshMutation = useMutation({
+    mutationFn: refreshExchangeRates,
+    onSuccess: (result) => {
+      invalidate();
+      if (result?.fx?.status === 'unavailable') {
+        showToast('Could not refresh rates while offline. Saved rates remain unchanged.', 'error');
+      } else if (result?.fx?.status === 'not_required') {
+        showToast('No foreign-currency subscriptions need rates');
+      } else {
+        showToast(`Saved verified rates for ${result?.updated || 0} subscription${result?.updated === 1 ? '' : 's'}`);
+      }
+    },
+    onError: (err) => showToast(err?.message || 'Could not refresh currency rates', 'error'),
   });
 
   const suggestionMutation = useMutation({
@@ -139,6 +154,13 @@ export default function Subscriptions() {
   // Get exchange rates from stats response
   const exchangeRates = stats?.exchange_rates || {};
   const usdRate = exchangeRates.USD;
+  const fx = stats?.fx;
+  const rateSummary = [
+    usdRate ? `$1 = ${formatINR(usdRate)}` : null,
+    exchangeRates.EUR ? `€1 = ${formatINR(exchangeRates.EUR)}` : null,
+    exchangeRates.GBP ? `£1 = ${formatINR(exchangeRates.GBP)}` : null,
+  ].filter(Boolean).join(' · ');
+  const rateWarning = fx?.status === 'unavailable' || fx?.stale;
 
   return (
     <div>
@@ -173,19 +195,40 @@ export default function Subscriptions() {
       )}
 
       {/* Exchange Rate Banner */}
-      {usdRate && (
+      {fx && fx.status !== 'not_required' && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.07 }}
-          className="flex items-center gap-2 mb-4 px-4 py-2 rounded-[12px] bg-blue-400/[0.06] border border-blue-400/[0.1]"
+          className={`flex items-start gap-2 mb-4 px-4 py-2 rounded-[12px] border ${
+            rateWarning
+              ? 'bg-amber-400/[0.06] border-amber-400/[0.12]'
+              : 'bg-blue-400/[0.06] border-blue-400/[0.1]'
+          }`}
         >
-          <ArrowRightLeft size={13} className="text-blue-400/60" />
-          <span className="text-white/40 text-[0.7rem]">
-            Live rates: $1 = {formatINR(usdRate)}
-            {exchangeRates.EUR && <> · €1 = {formatINR(exchangeRates.EUR)}</>}
-            {exchangeRates.GBP && <> · £1 = {formatINR(exchangeRates.GBP)}</>}
-          </span>
+          <ArrowRightLeft size={13} className={rateWarning ? 'mt-0.5 text-amber-200/60' : 'mt-0.5 text-blue-400/60'} />
+          {fx?.status === 'unavailable' ? (
+            <span className="flex-1 text-amber-100/50 text-[0.7rem] leading-relaxed">
+              Currency conversion is temporarily unavailable. INR totals are hidden instead of estimated. {fx.unavailable_reason}
+            </span>
+          ) : (
+            <span className={`flex-1 text-[0.7rem] leading-relaxed ${rateWarning ? 'text-amber-100/50' : 'text-white/40'}`}>
+              {fx.status === 'stored' ? 'Saved verified rates' : 'Verified reference rates'}{rateSummary && `: ${rateSummary}`}
+              {fx?.as_of && <> · As of {fx.as_of}</>}
+              {fx?.provider && <> · {fx.provider}</>}
+              {fx?.stale && <> · Older rate—refresh when online</>}
+            </span>
+          )}
+          <button
+            type="button"
+            aria-label="Refresh currency rates"
+            onClick={() => rateRefreshMutation.mutate()}
+            disabled={rateRefreshMutation.isPending}
+            className="min-h-9 shrink-0 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2.5 text-[0.68rem] text-white/45 transition hover:bg-white/[0.08] hover:text-white/70 disabled:opacity-40"
+          >
+            <RefreshCw size={12} className={`mr-1 inline ${rateRefreshMutation.isPending ? 'animate-spin' : ''}`} />
+            Refresh rates
+          </button>
         </motion.div>
       )}
 
@@ -331,10 +374,13 @@ export default function Subscriptions() {
                     <p className="text-white/70 text-[0.85rem] tabular-nums">
                       {formatCurrency(sub.amount, sub.currency || 'INR')}
                     </p>
-                    {sub.currency && sub.currency !== 'INR' && sub.amount_inr && (
+                    {sub.currency && sub.currency !== 'INR' && sub.amount_inr != null && (
                       <p className="text-white/30 text-[0.65rem] tabular-nums">
                         ≈ {formatINR(sub.amount_inr)}
                       </p>
+                    )}
+                    {sub.currency && sub.currency !== 'INR' && sub.amount_inr == null && (
+                      <p className="text-amber-200/35 text-[0.6rem]">INR conversion unavailable</p>
                     )}
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -385,8 +431,11 @@ export default function Subscriptions() {
                     <p className="text-white/40 text-[0.85rem] tabular-nums">
                       {formatCurrency(sub.amount, sub.currency || 'INR')}
                     </p>
-                    {sub.currency && sub.currency !== 'INR' && sub.amount_inr && (
+                    {sub.currency && sub.currency !== 'INR' && sub.amount_inr != null && (
                       <p className="text-white/25 text-[0.6rem] tabular-nums">≈ {formatINR(sub.amount_inr)}</p>
+                    )}
+                    {sub.currency && sub.currency !== 'INR' && sub.amount_inr == null && (
+                      <p className="text-amber-200/30 text-[0.6rem]">INR conversion unavailable</p>
                     )}
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -493,11 +542,11 @@ export default function Subscriptions() {
                   </div>
                 </div>
                 {/* Live conversion preview */}
-                {form.currency !== 'INR' && form.amount && usdRate && (
+                {form.currency !== 'INR' && form.amount && exchangeRates[form.currency] && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-[10px] bg-blue-400/[0.06] border border-blue-400/[0.1]">
                     <ArrowRightLeft size={12} className="text-blue-400/50" />
                     <span className="text-white/50 text-[0.75rem]">
-                      ≈ {formatINR(parseFloat(form.amount) * (exchangeRates[form.currency] || 1))} /mo
+                      ≈ {formatINR(parseFloat(form.amount) * exchangeRates[form.currency])} /mo
                     </span>
                   </div>
                 )}
@@ -610,11 +659,11 @@ export default function Subscriptions() {
                     </select>
                   </div>
                 </div>
-                {editForm.currency !== 'INR' && editForm.amount && usdRate && (
+                {editForm.currency !== 'INR' && editForm.amount && exchangeRates[editForm.currency] && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-[10px] bg-blue-400/[0.06] border border-blue-400/[0.1]">
                     <ArrowRightLeft size={12} className="text-blue-400/50" />
                     <span className="text-white/50 text-[0.75rem]">
-                      ≈ {formatINR(parseFloat(editForm.amount) * (exchangeRates[editForm.currency] || 1))} /mo
+                      ≈ {formatINR(parseFloat(editForm.amount) * exchangeRates[editForm.currency])} /mo
                     </span>
                   </div>
                 )}

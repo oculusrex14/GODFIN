@@ -12,9 +12,18 @@ from app.models.app_setting import AppSetting
 @pytest.fixture(autouse=True)
 def _fixed_subscription_rates(monkeypatch):
     from app.api.v1.endpoints import subscriptions
+    from app.core.fx import FxRateSnapshot
 
-    async def fixed_rates():
-        return {"INR": 1.0, "USD": 85.0, "EUR": 92.0, "GBP": 107.0}
+    async def fixed_rates(_currencies, **_kwargs):
+        return FxRateSnapshot(
+            rates_to_inr={"INR": 1.0, "USD": 85.0, "EUR": 92.0, "GBP": 107.0},
+            as_of=date.today(),
+            provider="Deterministic test provider",
+            source_url="https://example.invalid/rates",
+            age_days=0,
+            stale=False,
+            status="available",
+        )
 
     monkeypatch.setattr(subscriptions, "_fetch_exchange_rates", fixed_rates)
 
@@ -43,7 +52,9 @@ def _activate_max(db) -> None:
     db.commit()
 
 
-@pytest.mark.parametrize("amount", [-1, 0, -0.0, float("nan"), float("inf"), float("-inf"), 1e16])
+@pytest.mark.parametrize(
+    "amount", [-1, 0, -0.0, float("nan"), float("inf"), float("-inf"), 1e16]
+)
 def test_subscription_rejects_unsafe_amounts(auth_client, amount):
     response = _raw_json_request(
         auth_client,
@@ -156,9 +167,7 @@ def test_income_sources_reject_unsafe_expected_amounts(auth_client, path, amount
         ("next_expected_date", "2026-02-30"),
     ],
 )
-def test_primary_income_source_rejects_invalid_semantics(
-    auth_client, field, value
-):
+def test_primary_income_source_rejects_invalid_semantics(auth_client, field, value):
     payload = {
         "source_name": "Income boundary fixture",
         "expected_amount": 1000,
@@ -239,9 +248,7 @@ def test_goal_rejects_unsafe_values(auth_client, field, value):
     }
     payload[field] = value
 
-    response = _raw_json_request(
-        auth_client, "POST", "/api/v1/goals", payload
-    )
+    response = _raw_json_request(auth_client, "POST", "/api/v1/goals", payload)
 
     assert response.status_code == 422, response.text
 
@@ -325,9 +332,7 @@ def test_goal_contribution_rejects_unsafe_amount(auth_client, amount):
         ("valued_at", "2026-02-30"),
     ],
 )
-def test_net_worth_rejects_unsafe_values(
-    auth_client, db_session, field, value
-):
+def test_net_worth_rejects_unsafe_values(auth_client, db_session, field, value):
     _activate_max(db_session)
     payload = {
         "name": "Net worth boundary fixture",
@@ -341,9 +346,7 @@ def test_net_worth_rejects_unsafe_values(
     }
     payload[field] = value
 
-    response = _raw_json_request(
-        auth_client, "POST", "/api/v1/net-worth", payload
-    )
+    response = _raw_json_request(auth_client, "POST", "/api/v1/net-worth", payload)
 
     assert response.status_code == 422, response.text
 
@@ -385,9 +388,7 @@ def test_net_worth_accepts_current_iso_currency(auth_client, db_session):
     assert response.json()["currency"] == "JPY"
 
 
-def test_net_worth_update_rejects_non_finite_quantity(
-    auth_client, db_session
-):
+def test_net_worth_update_rejects_non_finite_quantity(auth_client, db_session):
     _activate_max(db_session)
     created = auth_client.post(
         "/api/v1/net-worth",
@@ -425,9 +426,7 @@ def test_net_worth_update_rejects_non_finite_quantity(
         "is_active",
     ],
 )
-def test_net_worth_update_rejects_null_required_fields(
-    auth_client, db_session, field
-):
+def test_net_worth_update_rejects_null_required_fields(auth_client, db_session, field):
     _activate_max(db_session)
     created = auth_client.post(
         "/api/v1/net-worth",
@@ -496,18 +495,14 @@ def test_net_worth_rejects_non_finite_provider_quote(
     )
     assert created.status_code == 201, created.text
 
-    response = auth_client.post(
-        f"/api/v1/net-worth/{created.json()['id']}/refresh"
-    )
+    response = auth_client.post(f"/api/v1/net-worth/{created.json()['id']}/refresh")
 
     assert response.status_code == 502, response.text
     assert db_session.query(NetWorthQuote).count() == 0
 
 
 @pytest.mark.parametrize("amount", [float("nan"), float("inf"), 0, -1, 1e16])
-def test_manual_transaction_rejects_unsafe_amount(
-    auth_client, db_session, amount
-):
+def test_manual_transaction_rejects_unsafe_amount(auth_client, db_session, amount):
     account = db_session.query(Account).first()
     assert account is not None
     response = _raw_json_request(
@@ -566,9 +561,7 @@ def test_gmail_range_rejects_invalid_dates_before_connection_check(
 
 
 @pytest.mark.parametrize("monthly_budget", [0, -1, float("nan"), float("inf"), 1e16])
-def test_behavior_budget_rejects_unsafe_amount(
-    auth_client, db_session, monthly_budget
-):
+def test_behavior_budget_rejects_unsafe_amount(auth_client, db_session, monthly_budget):
     _activate_max(db_session)
     response = _raw_json_request(
         auth_client,
@@ -591,8 +584,7 @@ def test_behavior_budget_rejects_unsafe_amount(
             "/api/v1/review/batch-resolve",
             {
                 "items": [
-                    {"id": str(index), "category": "HOUSING"}
-                    for index in range(201)
+                    {"id": str(index), "category": "HOUSING"} for index in range(201)
                 ]
             },
         ),
@@ -623,9 +615,7 @@ def test_semantic_enums_and_collection_bounds_reject_invalid_payloads(
         ),
     ],
 )
-def test_financial_text_bounds_reject_oversized_payloads(
-    auth_client, path, payload
-):
+def test_financial_text_bounds_reject_oversized_payloads(auth_client, path, payload):
     response = auth_client.post(path, json=payload)
 
     assert response.status_code == 422, response.text

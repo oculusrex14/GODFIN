@@ -27,7 +27,7 @@ import { GlassButton } from '../components/GlassButton';
 import { useToast } from '../context/ToastContext';
 
 function displayValue(metric) {
-  if (metric.value == null) return 'Not available';
+  if (!metric.available || metric.value == null) return 'Not ready yet';
   if (metric.unit === '%') return `${metric.value}%`;
   if (metric.unit === 'months') return `${metric.value} months`;
   return `${metric.value} / 100`;
@@ -102,6 +102,20 @@ export default function BehaviorInsights() {
             </div>
           </div>
 
+          {data?.coverage && (
+            <div className="rounded-[18px] border border-white/[0.09] bg-white/[0.035] p-4">
+              <p className="text-white/55 text-sm">
+                Based on the previous six finished calendar months
+              </p>
+              <p className="mt-1 text-white/28 text-xs leading-relaxed">
+                {data.period} · {data.coverage.observed_months} of 6 months contain usable activity · {data.coverage.included_transactions} included transactions
+              </p>
+              <p className="mt-2 text-white/22 text-[0.68rem] leading-relaxed">
+                {data.coverage.note}
+              </p>
+            </div>
+          )}
+
           <section>
             <div className="mb-3 flex items-center gap-2">
               <Heart size={16} className="text-rose-200/55" />
@@ -114,15 +128,21 @@ export default function BehaviorInsights() {
               {data?.reflections?.map((reflection) => (
                 <article key={reflection.key} className="rounded-[18px] border border-[#54E1D0]/[0.13] bg-[#17C3B2]/[0.035] p-4">
                   <h3 className="text-white/78 text-sm font-medium">{reflection.title}</h3>
-                  <p className="mt-2 text-white/48 text-sm leading-relaxed">{reflection.observation}</p>
-                  <div className="mt-4 rounded-xl border border-white/[0.07] bg-black/10 p-3">
-                    <p className="flex items-start gap-2 text-white/55 text-xs leading-relaxed">
-                      <Lightbulb size={14} className="mt-0.5 shrink-0 text-[#A6E22E]/70" />
-                      {reflection.question}
-                    </p>
-                    <p className="mt-2 pl-[22px] text-white/30 text-[0.7rem] leading-relaxed">{reflection.action}</p>
-                  </div>
-                  <p className="mt-3 text-white/22 text-[0.63rem]">{reflection.evidence} · {reflection.confidence} confidence</p>
+                  <p className={`mt-2 text-sm leading-relaxed ${reflection.available ? 'text-white/48' : 'text-amber-100/45'}`}>
+                    {reflection.observation}
+                  </p>
+                  {reflection.available && (
+                    <div className="mt-4 rounded-xl border border-white/[0.07] bg-black/10 p-3">
+                      <p className="flex items-start gap-2 text-white/55 text-xs leading-relaxed">
+                        <Lightbulb size={14} className="mt-0.5 shrink-0 text-[#A6E22E]/70" />
+                        {reflection.question}
+                      </p>
+                      <p className="mt-2 pl-[22px] text-white/30 text-[0.7rem] leading-relaxed">{reflection.action}</p>
+                    </div>
+                  )}
+                  <p className="mt-3 text-white/22 text-[0.63rem]">
+                    {reflection.evidence}{reflection.available ? ` · ${reflection.confidence} confidence` : ' · More history needed'}
+                  </p>
                 </article>
               ))}
             </div>
@@ -183,7 +203,9 @@ export default function BehaviorInsights() {
                       />
                     </div>
                     <p className="mt-1 text-white/25 text-[0.68rem]">
-                      {metric.difficulty === 'easy' ? 'Easy to read' : metric.difficulty === 'intermediate' ? 'A little more detail' : 'Deeper measure'} · {metric.confidence} confidence
+                      {metric.available
+                        ? `${metric.difficulty === 'easy' ? 'Easy to read' : metric.difficulty === 'intermediate' ? 'A little more detail' : 'Deeper measure'} · ${metric.confidence} confidence`
+                        : 'Waiting for enough reliable information'}
                     </p>
                   </div>
                   <button
@@ -201,6 +223,11 @@ export default function BehaviorInsights() {
                   {displayValue(metric)}
                 </div>
                 <p className="mt-2 text-white/30 text-xs leading-relaxed">{metric.meaning}</p>
+                {!metric.available && metric.unavailable_reason && (
+                  <p className="mt-3 rounded-xl border border-amber-300/[0.12] bg-amber-300/[0.04] px-3 py-2 text-amber-100/45 text-[0.7rem] leading-relaxed">
+                    {metric.unavailable_reason}
+                  </p>
+                )}
                 <div className="mt-4 flex gap-2">
                   <input
                     value={notes[metric.key] ?? metric.correction_note ?? ''}

@@ -779,6 +779,10 @@ export function fetchExchangeRates() {
   return apiFetch('/subscriptions/exchange-rates');
 }
 
+export function refreshExchangeRates() {
+  return apiFetch('/subscriptions/exchange-rates/refresh', { method: 'POST' });
+}
+
 export function scanSubscriptionSuggestions() {
   return apiFetch('/subscriptions/suggestions/scan', { method: 'POST' });
 }

@@ -1,4 +1,5 @@
 """Small, additive migration guard for GODFIN's local SQLite lifecycle."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -13,7 +14,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 8
+CURRENT_SCHEMA_REVISION = 9
 
 _RECURRING_PATTERN_COLUMNS = {
     "confidence": "REAL NOT NULL DEFAULT 0",
@@ -27,13 +28,42 @@ _TRANSACTION_COLUMNS = {
     "semantic_type": "TEXT NOT NULL DEFAULT 'unknown'",
 }
 
+_SUBSCRIPTION_FX_COLUMNS = {
+    "fx_rate_to_inr": "NUMERIC",
+    "fx_rate_source": "TEXT",
+    "fx_rate_source_url": "TEXT",
+    "fx_rate_as_of": "DATE",
+    "fx_rate_fetched_at": "DATETIME",
+}
+
 _FINANCIAL_GUARDS = {
     "subscriptions": (
-        {"amount", "currency", "frequency"},
+        {
+            "amount",
+            "currency",
+            "frequency",
+            "fx_rate_to_inr",
+            "fx_rate_source",
+            "fx_rate_source_url",
+            "fx_rate_as_of",
+            "fx_rate_fetched_at",
+        },
         "typeof(NEW.amount) IN ('integer', 'real') "
         "AND NEW.amount > 0 AND NEW.amount <= 1000000000000000 "
         "AND NEW.currency IN ('INR', 'USD', 'EUR', 'GBP') "
-        "AND NEW.frequency IN ('monthly', 'quarterly', 'annual')"
+        "AND NEW.frequency IN ('monthly', 'quarterly', 'annual') "
+        "AND ((NEW.fx_rate_to_inr IS NULL "
+        "AND NEW.fx_rate_source IS NULL "
+        "AND NEW.fx_rate_source_url IS NULL "
+        "AND NEW.fx_rate_as_of IS NULL "
+        "AND NEW.fx_rate_fetched_at IS NULL) OR "
+        "(typeof(NEW.fx_rate_to_inr) IN ('integer', 'real') "
+        "AND NEW.fx_rate_to_inr > 0 "
+        "AND NEW.fx_rate_to_inr <= 1000000000 "
+        "AND length(NEW.fx_rate_source) > 0 "
+        "AND length(NEW.fx_rate_source_url) > 0 "
+        "AND NEW.fx_rate_as_of IS NOT NULL "
+        "AND NEW.fx_rate_fetched_at IS NOT NULL))",
     ),
     "income_sources": (
         {"expected_amount", "frequency"},
@@ -42,7 +72,7 @@ _FINANCIAL_GUARDS = {
         "AND NEW.expected_amount > 0 "
         "AND NEW.expected_amount <= 1000000000000000)) "
         "AND NEW.frequency IN ('monthly', 'quarterly', 'annual', "
-        "'one_time', 'biweekly', 'irregular')"
+        "'one_time', 'biweekly', 'irregular')",
     ),
     "goals": (
         {
@@ -63,7 +93,7 @@ _FINANCIAL_GUARDS = {
         "AND typeof(NEW.minimum_flexible_floor) IN ('integer', 'real') "
         "AND NEW.minimum_flexible_floor >= 0 "
         "AND NEW.minimum_flexible_floor <= 1000000000000000 "
-        "AND NEW.pressure_level IN ('minimal', 'moderate', 'aggressive')"
+        "AND NEW.pressure_level IN ('minimal', 'moderate', 'aggressive')",
     ),
     "goal_contributions": (
         {"amount", "entry_type"},
@@ -71,7 +101,7 @@ _FINANCIAL_GUARDS = {
         "AND NEW.amount >= -1000000000000000 "
         "AND NEW.amount <= 1000000000000000 "
         "AND ((NEW.entry_type = 'deposit' AND NEW.amount > 0) "
-        "OR (NEW.entry_type = 'withdrawal' AND NEW.amount < 0))"
+        "OR (NEW.entry_type = 'withdrawal' AND NEW.amount < 0))",
     ),
     "net_worth_items": (
         {
@@ -98,7 +128,7 @@ _FINANCIAL_GUARDS = {
         "AND NEW.exchange_rate_to_base > 0 "
         "AND NEW.exchange_rate_to_base <= 1000000000 "
         "AND length(NEW.currency) = 3 "
-        "AND NEW.currency = upper(NEW.currency)"
+        "AND NEW.currency = upper(NEW.currency)",
     ),
     "transactions": (
         {"amount", "type", "confidence", "status", "semantic_type"},
@@ -112,7 +142,7 @@ _FINANCIAL_GUARDS = {
         "'reversal', 'voided') "
         "AND NEW.semantic_type IN ('unknown', 'expense', 'income', "
         "'internal_transfer', 'refund', 'reimbursement', 'reversal', "
-        "'cashback', 'adjustment', 'excluded')"
+        "'cashback', 'adjustment', 'excluded')",
     ),
 }
 
@@ -128,16 +158,12 @@ def _install_financial_guards(connection: sqlite3.Connection) -> None:
             continue
         columns = {
             row[1]
-            for row in connection.execute(
-                f'PRAGMA table_info("{table}")'
-            ).fetchall()
+            for row in connection.execute(f'PRAGMA table_info("{table}")').fetchall()
         }
         if not required_columns.issubset(columns):
             continue
         for operation in ("INSERT", "UPDATE"):
-            trigger_name = (
-                f"trg_{table}_financial_guard_{operation.lower()}"
-            )
+            trigger_name = f"trg_{table}_financial_guard_{operation.lower()}"
             connection.execute(
                 f'''CREATE TRIGGER IF NOT EXISTS "{trigger_name}"
                     BEFORE {operation} ON "{table}"
@@ -161,8 +187,7 @@ def read_schema_revision(db_path: str) -> int:
         connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
         try:
             has_settings = connection.execute(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type='table' AND name='app_settings'"
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_settings'"
             ).fetchone()
             if not has_settings:
                 return 0
@@ -203,6 +228,7 @@ def apply_additive_schema_updates(db_path: str) -> None:
         for table, columns in (
             ("recurring_patterns", _RECURRING_PATTERN_COLUMNS),
             ("transactions", _TRANSACTION_COLUMNS),
+            ("subscriptions", _SUBSCRIPTION_FX_COLUMNS),
         ):
             exists = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -223,8 +249,7 @@ def apply_additive_schema_updates(db_path: str) -> None:
                     )
 
         audit_table = connection.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type='table' AND name='audit_sessions'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='audit_sessions'"
         ).fetchone()
         if audit_table:
             # Older releases could leave both the previous finalized session

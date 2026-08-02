@@ -66,10 +66,13 @@ def test_current_schema_does_not_create_redundant_backup(
     finally:
         connection.close()
 
-    assert backup_before_schema_update(
-        str(db_path),
-        str(tmp_path / "backups"),
-    ) is None
+    assert (
+        backup_before_schema_update(
+            str(db_path),
+            str(tmp_path / "backups"),
+        )
+        is None
+    )
 
 
 def test_additive_migration_adds_transaction_semantic_column(tmp_path):
@@ -93,14 +96,49 @@ def test_additive_migration_adds_transaction_semantic_column(tmp_path):
     connection = sqlite3.connect(db_path)
     try:
         columns = {
-            row[1]: row
-            for row in connection.execute("PRAGMA table_info(transactions)")
+            row[1]: row for row in connection.execute("PRAGMA table_info(transactions)")
         }
     finally:
         connection.close()
 
     assert columns["semantic_type"][3] == 1
     assert columns["semantic_type"][4] == "'unknown'"
+
+
+def test_additive_migration_adds_subscription_fx_provenance_columns(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "CREATE TABLE subscriptions ("
+            "id TEXT PRIMARY KEY, amount REAL NOT NULL, "
+            "currency TEXT NOT NULL, frequency TEXT NOT NULL"
+            ")"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        columns = {
+            row[1]: row
+            for row in connection.execute("PRAGMA table_info(subscriptions)")
+        }
+    finally:
+        connection.close()
+
+    assert {
+        "fx_rate_to_inr",
+        "fx_rate_source",
+        "fx_rate_source_url",
+        "fx_rate_as_of",
+        "fx_rate_fetched_at",
+    }.issubset(columns)
+    assert columns["fx_rate_to_inr"][3] == 0
 
 
 def test_additive_migration_enforces_one_active_audit_per_period(tmp_path):
@@ -202,7 +240,8 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
         assert len(trigger_names) == 12
 
         connection.execute(
-            "INSERT INTO subscriptions VALUES (?, ?, ?, ?)",
+            "INSERT INTO subscriptions "
+            "(id, amount, currency, frequency) VALUES (?, ?, ?, ?)",
             ("valid-sub", 499, "INR", "monthly"),
         )
         connection.execute(
@@ -232,8 +271,15 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
 
         invalid_inserts = [
             (
-                "INSERT INTO subscriptions VALUES (?, ?, ?, ?)",
+                "INSERT INTO subscriptions "
+                "(id, amount, currency, frequency) VALUES (?, ?, ?, ?)",
                 ("bad-sub", float("inf"), "INR", "monthly"),
+            ),
+            (
+                "INSERT INTO subscriptions "
+                "(id, amount, currency, frequency, fx_rate_to_inr) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("bad-fx-provenance", 499, "USD", "monthly", 80),
             ),
             (
                 "INSERT INTO income_sources VALUES (?, ?, ?)",
@@ -287,6 +333,7 @@ def test_fresh_schema_declares_financial_check_constraints(db_engine):
     expected = {
         "ck_transactions_amount_range",
         "ck_subscriptions_amount_range",
+        "ck_subscriptions_fx_provenance_complete",
         "ck_income_sources_expected_amount_range",
         "ck_goals_target_amount_range",
         "ck_goal_contributions_amount_range",
@@ -298,6 +345,4 @@ def test_fresh_schema_declares_financial_check_constraints(db_engine):
         ).fetchall()
     schema = "\n".join(row[0] or "" for row in rows)
 
-    assert expected.issubset(
-        {name for name in expected if name in schema}
-    )
+    assert expected.issubset({name for name in expected if name in schema})

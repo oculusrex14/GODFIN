@@ -81,6 +81,12 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
         privacy: 'Prompts stay on this computer.',
         installer_url: 'https://ollama.com/download',
         ollama: { installed: false },
+        registry: {
+          signature_verified: true,
+          registry_version: '2026.08.01.1',
+          source: 'bundled',
+          error: null,
+        },
         recommendation: {
           label: 'Qwen 4B',
           reason: 'A comfortable fit for this computer.',
@@ -88,6 +94,7 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
           size_gb: 2.5,
           memory_gb: 6,
           expected_speed: 'Responsive for short explanations',
+          expected_digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         },
         recommendations: [],
       },
@@ -128,6 +135,15 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
         top_merchants: [],
       },
       '/behavior-insights': {
+        calculation_version: 'behavior-insights-v2.0',
+        window_months: 6,
+        period: '2026-01-01 through 2026-06-30',
+        coverage: {
+          observed_months: 6,
+          included_transactions: 42,
+          current_month_excluded: true,
+          note: 'Only finished calendar months are considered. Missing imports can still change a result.',
+        },
         policy: 'These observations stay on this computer and are never used to judge you.',
         monthly_budget: null,
         reflections: [{
@@ -137,25 +153,99 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
           question: 'Were these useful, or did some happen without much thought?',
           action: 'Try pausing for ten seconds before the next small purchase.',
           evidence: '8 recorded purchases',
+          available: true,
+          unavailable_reason: null,
           confidence: 'high',
         }],
-        metrics: [{
-          key: 'savings-consistency',
-          label: 'How regularly you keep money aside',
-          value: 68,
-          unit: 'score',
-          meaning: 'Shows whether saving happens in most months.',
-          formula: 'Months with savings ÷ months reviewed',
-          inputs: 'Recorded income and spending',
-          period: 'Last 6 complete months',
-          provenance: 'Calculated locally',
-          caveat: 'Missing activity can change this result.',
-          confidence: 'medium',
-          difficulty: 'Easy',
-          hidden: false,
-          user_note: '',
-        }],
+        metrics: [
+          {
+            key: 'savings-consistency',
+            label: 'How regularly you keep money aside',
+            value: 68,
+            unit: 'score',
+            meaning: 'Shows whether saving happens in most months.',
+            formula: 'Months with savings ÷ months reviewed',
+            inputs: 'Recorded income and spending',
+            period: '2026-01-01 through 2026-06-30',
+            provenance: 'Calculated locally',
+            caveat: 'Missing activity can change this result.',
+            available: true,
+            unavailable_reason: null,
+            sample_size: 6,
+            minimum_sample: 2,
+            confidence: 'medium',
+            difficulty: 'easy',
+            hidden: false,
+            user_note: '',
+          },
+          {
+            key: 'routine-stability',
+            label: 'How similar your active money days are each week',
+            value: null,
+            unit: 'score',
+            meaning: 'Compares the number of days with money activity from week to week.',
+            formula: 'Variation in active days across full weeks',
+            inputs: 'Transaction dates',
+            period: '2026-01-01 through 2026-06-30',
+            provenance: 'Calculated locally',
+            caveat: 'Missing activity can change this result.',
+            available: false,
+            unavailable_reason: 'At least 8 full calendar weeks with recorded activity are needed before showing a routine score.',
+            sample_size: 1,
+            minimum_sample: 8,
+            confidence: 'insufficient',
+            difficulty: 'advanced',
+            hidden: false,
+            user_note: '',
+          },
+        ],
       },
+      '/subscriptions': [{
+        id: 'usd-fixture',
+        name: 'USD service',
+        amount: 10,
+        currency: 'USD',
+        amount_inr: null,
+        conversion_status: 'unavailable',
+        conversion_as_of: null,
+        conversion_provider: 'European Central Bank reference rates via Frankfurter',
+        conversion_stale: null,
+        conversion_unavailable_reason: 'Live currency rates are temporarily unavailable.',
+        frequency: 'monthly',
+        category: 'Software',
+        subcategory: null,
+        next_payment_date: null,
+        is_active: true,
+        notes: null,
+        created_at: '2026-07-01T00:00:00',
+      }],
+      '/subscriptions/stats': {
+        total_monthly_cost: null,
+        total_annual_projection: null,
+        active_count: 1,
+        inactive_count: 0,
+        by_category: null,
+        exchange_rates: {},
+        fx: {
+          status: 'unavailable',
+          provider: 'European Central Bank reference rates via Frankfurter',
+          as_of: null,
+          stale: null,
+          unavailable_reason: 'Live currency rates are temporarily unavailable.',
+        },
+      },
+      '/subscriptions/exchange-rates/refresh': {
+        updated: 0,
+        fx: {
+          status: 'unavailable',
+          provider: 'European Central Bank reference rates via Frankfurter',
+          as_of: null,
+          stale: null,
+          unavailable_reason: 'Live currency rates are temporarily unavailable.',
+        },
+      },
+      '/subscriptions/suggestions': [],
+      '/subscriptions/reminders': { days: 7, reminders: [] },
     };
     const exact = responses[path];
     if (exact !== undefined) return route.fulfill({ json: exact });
@@ -324,7 +414,7 @@ test('review fixes expose the new brand, safe settings controls, and resumable a
   await expect(page.getByText(/2 MB.*godfin-backup\.db/)).toBeVisible();
 
   await page.getByRole('button', { name: 'AI Model Configuration' }).click();
-  await page.getByRole('button', { name: 'Match similar transaction descriptions' }).click();
+  await page.getByRole('button', { name: 'Match similar transaction descriptions' }).dispatchEvent('click');
   await expect(page.getByText(/download about 100 MB/)).toBeVisible();
   await page.getByRole('button', { name: 'Not now' }).click();
 
@@ -362,6 +452,23 @@ test('behavior reflections lead with plain language and deeper measures follow',
   await expect(page.getByText(/without much thought/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'The numbers behind your habits' })).toBeVisible();
   await expect(page.getByText('How regularly you keep money aside')).toBeVisible();
+  await expect(page.getByText(/previous six finished calendar months/i)).toBeVisible();
+  await expect(page.getByText(/At least 8 full calendar weeks/)).toBeVisible();
+  await expect(page.getByText('Not ready yet')).toBeVisible();
+});
+
+test('subscriptions hide INR totals when a verified currency rate is unavailable', async ({ page }) => {
+  await mockAuthenticatedApp(page);
+  await page.goto('/pin');
+  await page.getByLabel('Enter your PIN').fill('4826');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByRole('link', { name: 'Subscriptions', exact: true }).click();
+
+  await expect(page.getByText(/INR totals are hidden instead of estimated/)).toBeVisible();
+  await expect(page.getByText('INR conversion unavailable')).toBeVisible();
+  await expect(page.getByText('USD service')).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh currency rates' }).click();
+  await expect(page.getByText(/Could not refresh rates while offline/)).toBeVisible();
 });
 
 test('reports require connected AI for commentary and goals show a direct savings action', async ({ page }) => {
@@ -381,7 +488,7 @@ test('reports require connected AI for commentary and goals show a direct saving
   await expect(page.getByText('Your financial report', { exact: false }).first()).toBeVisible();
   await expect(page.getByText('72/100')).toBeVisible();
   await expect(page.getByText(/Connect an AI to create the detailed written analysis/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Detailed AI PDF' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Generate & Download AI PDF' })).toBeDisabled();
 
   await page.getByRole('link', { name: 'Budget', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Add savings' })).toBeVisible();

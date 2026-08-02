@@ -69,9 +69,7 @@ def _transaction(
     return item
 
 
-def test_net_worth_is_max_only_and_manual_values_are_local(
-    auth_client, db_session
-):
+def test_net_worth_is_max_only_and_manual_values_are_local(auth_client, db_session):
     _activate_tier(db_session, "pro")
     denied = auth_client.get("/api/v1/net-worth")
     assert denied.status_code == 403
@@ -116,9 +114,7 @@ def test_net_worth_is_max_only_and_manual_values_are_local(
     assert all("provenance" in item for item in payload["items"])
 
 
-def test_market_data_key_is_encrypted_and_never_returned(
-    auth_client, db_session
-):
+def test_market_data_key_is_encrypted_and_never_returned(auth_client, db_session):
     _activate_tier(db_session, "max")
     response = auth_client.put(
         "/api/v1/net-worth/market-data/config",
@@ -131,9 +127,7 @@ def test_market_data_key_is_encrypted_and_never_returned(
         "base_currency": "USD",
         "key_storage": "encrypted_local",
     }
-    stored = (
-        db_session.query(AppSetting).filter_by(key="twelve_data_api_key").first()
-    )
+    stored = db_session.query(AppSetting).filter_by(key="twelve_data_api_key").first()
     assert stored is not None
     assert stored.value != "td-secret-value"
     assert decrypt(stored.value) == "td-secret-value"
@@ -195,9 +189,7 @@ def test_live_quote_saves_price_exchange_rate_and_provenance(
         },
     )
     assert created.status_code == 201, created.text
-    refreshed = auth_client.post(
-        f"/api/v1/net-worth/{created.json()['id']}/refresh"
-    )
+    refreshed = auth_client.post(f"/api/v1/net-worth/{created.json()['id']}/refresh")
     assert refreshed.status_code == 200, refreshed.text
     payload = refreshed.json()
     assert payload["value_base"] == 16000
@@ -299,9 +291,17 @@ def test_behavior_insights_are_explainable_correctable_and_exportable(
         "buffer_coverage",
         "routine_stability",
     } == {metric["key"] for metric in payload["metrics"]}
-    assert all(metric["formula"] and metric["evidence"] for metric in payload["metrics"])
+    assert all(
+        metric["formula"] and metric["evidence"] for metric in payload["metrics"]
+    )
     assert [metric["difficulty"] for metric in payload["metrics"]] == [
-        "easy", "easy", "easy", "intermediate", "intermediate", "advanced", "advanced"
+        "easy",
+        "easy",
+        "easy",
+        "intermediate",
+        "intermediate",
+        "advanced",
+        "advanced",
     ]
     assert len(payload["reflections"]) >= 4
     assert all(
@@ -312,7 +312,10 @@ def test_behavior_insights_are_explainable_correctable_and_exportable(
 
     corrected = auth_client.put(
         "/api/v1/behavior-insights/discretionary_ratio",
-        json={"hidden": True, "correction_note": "One category is still being reviewed."},
+        json={
+            "hidden": True,
+            "correction_note": "One category is still being reviewed.",
+        },
     )
     assert corrected.status_code == 200
     metric = next(
@@ -325,7 +328,7 @@ def test_behavior_insights_are_explainable_correctable_and_exportable(
 
     exported = auth_client.get("/api/v1/behavior-insights/export")
     assert exported.status_code == 200
-    assert "Months your income covered spending" in exported.text
+    assert "Months when income covered spending" in exported.text
     reset = auth_client.post("/api/v1/behavior-insights/reset")
     assert reset.status_code == 200
     assert all(not item["hidden"] for item in reset.json()["metrics"])
@@ -349,9 +352,7 @@ def test_sponsor_card_is_static_free_only_and_financially_isolated(
     assert paid.json()["visible"] is False
 
 
-def test_reward_pilot_preview_is_opt_in_coarse_and_redacted(
-    auth_client, db_session
-):
+def test_reward_pilot_preview_is_opt_in_coarse_and_redacted(auth_client, db_session):
     _set_setting(db_session, "feature_reward_pilot", "true")
     account = _account(db_session)
     today = date.today()
@@ -372,9 +373,7 @@ def test_reward_pilot_preview_is_opt_in_coarse_and_redacted(
 
     before_consent = auth_client.get("/api/v1/reward-pilot/preview")
     assert before_consent.status_code == 409
-    consent = auth_client.put(
-        "/api/v1/reward-pilot/consent", json={"consented": True}
-    )
+    consent = auth_client.put("/api/v1/reward-pilot/consent", json={"consented": True})
     assert consent.status_code == 200
     response = auth_client.get("/api/v1/reward-pilot/preview")
     assert response.status_code == 200, response.text
@@ -403,11 +402,14 @@ def test_reward_pilot_preview_is_opt_in_coarse_and_redacted(
 
 
 def test_payout_policy_caps_value_and_keeps_identity_outside_payload():
-    assert projected_participant_payout(
-        accepted_bundle=True,
-        new_template_families=100,
-        material_variants=100,
-    ) == 300
+    assert (
+        projected_participant_payout(
+            accepted_bundle=True,
+            new_template_families=100,
+            material_variants=100,
+        )
+        == 300
+    )
     assert validate_redacted_payload({"email": "someone@example.com"})
 
 
