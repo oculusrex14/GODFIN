@@ -67,11 +67,19 @@ def test_update_timezone_rejects_unknown_zone(auth_client):
 def test_generic_setting_mutation_is_deny_by_default(auth_client, db_session):
     protected = {
         'pin_hash': 'hacked',
+        'pin_length': '8',
         'is_first_run': 'true',
         'license_key': 'forged-key',
         'license_tier': 'max',
         'license_status': 'active',
+        'license_last_verified': '2099-01-01T00:00:00Z',
+        'license_device_id': 'attacker-device',
         'schema_revision': '999',
+        'migration_version': '999',
+        'encryption_key': 'attacker-controlled-key',
+        'encryption_key_version': '999',
+        'allow_network_access': 'true',
+        'developer_mode': 'true',
         'enable_embeddings': 'true',
         'does_not_exist': 'test',
     }
