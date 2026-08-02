@@ -264,6 +264,7 @@ def gmail_disconnect(
                 db,
                 body.pin,
                 client_ip_from_request(request),
+                action="delete_gmail_data",
             )
             if body.confirmation != "DELETE GMAIL DATA":
                 raise HTTPException(

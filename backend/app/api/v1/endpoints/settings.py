@@ -182,6 +182,7 @@ def update_network_access(
             db,
             body.current_pin,
             client_ip_from_request(request),
+            action="enable_network_access",
             missing_detail="Enter your current PIN to make this security change",
         )
     value = "true" if body.enabled else "false"
@@ -206,6 +207,7 @@ def update_developer_mode(
             db,
             body.current_pin,
             client_ip_from_request(request),
+            action="enable_developer_mode",
             missing_detail="Enter your current PIN to make this security change",
         )
     value = "true" if body.enabled else "false"
@@ -538,7 +540,12 @@ def reset_classification_memory(
 ):
     from app.core.classification_learning import reset_learning_memory
 
-    require_current_pin(db, body.pin, client_ip_from_request(request))
+    require_current_pin(
+        db,
+        body.pin,
+        client_ip_from_request(request),
+        action="reset_classification_memory",
+    )
     backup_filename = create_backup(DB_PATH, _get_backup_dir(db))
     result = reset_learning_memory(db)
     db.commit()
@@ -557,7 +564,12 @@ def reset_all_data(
     _user: bool = Depends(get_current_user),
 ):
     """Reset all transaction and dynamic data. PIN-protected."""
-    require_current_pin(db, body.pin, client_ip_from_request(request))
+    require_current_pin(
+        db,
+        body.pin,
+        client_ip_from_request(request),
+        action="reset_all_data",
+    )
 
     try:
         backup_filename = create_backup(DB_PATH, _get_backup_dir(db))

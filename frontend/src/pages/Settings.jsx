@@ -722,7 +722,8 @@ export default function Settings() {
               <div>
                 <div className="text-white/70 text-[0.85rem]">Allow network access</div>
                 <div className="text-white/25 text-[0.7rem]">
-                  Off keeps GODFIN on this Mac. Enabling LAN access requires restart.
+                  Off keeps GODFIN on this Mac. When enabled, other devices on your
+                  trusted local network can reach GODFIN while it is running.
                 </div>
               </div>
               <ToggleSwitch
@@ -820,11 +821,24 @@ export default function Settings() {
                     ? 'Enter PIN to enable Developer Mode'
                     : 'Enter PIN to allow network access'}
                 </h3>
-                <button onClick={() => setPendingSensitiveSetting(null)} className="text-white/30 hover:text-white/60"><X size={18} /></button>
+                <button
+                  type="button"
+                  aria-label="Close security confirmation"
+                  onClick={() => setPendingSensitiveSetting(null)}
+                  className="text-white/30 hover:text-white/60"
+                >
+                  <X size={18} />
+                </button>
               </div>
               <div className="flex justify-center">
                 <PinInput onComplete={handlePinVerified} />
               </div>
+              {pendingSensitiveSetting.key === 'allow_network_access' && (
+                <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-400/[0.06] p-3 text-center text-[0.7rem] leading-relaxed text-amber-100/60">
+                  Only enable this on a trusted private network. Other devices on that
+                  network may be able to reach your local GODFIN service after restart.
+                </p>
+              )}
               {pinError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3">{pinError}</p>}
             </motion.div>
           </div>

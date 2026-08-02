@@ -46,11 +46,15 @@ def _validate_pin_format(
     ascending = "01234567890123456789"
     descending = ascending[::-1]
     common_pins = {"1234", "4321", "1212", "2580", "0852", "6969"}
+    repeated_pair = len(pin) in {4, 6} and pin == pin[:2] * (len(pin) // 2)
+    year_like = len(pin) == 4 and 1900 <= int(pin) <= 2099
     weak = (
         len(set(pin)) == 1
         or pin in ascending
         or pin in descending
         or pin in common_pins
+        or repeated_pair
+        or year_like
     )
     if reject_weak and weak:
         raise HTTPException(status_code=400, detail="PIN is too simple. Avoid sequential or repeated digits.")
@@ -136,6 +140,7 @@ def change_pin(
         db,
         body.current_pin,
         client_ip_from_request(request),
+        action="change_pin",
         failure_detail="Current PIN is incorrect",
     )
 
@@ -205,6 +210,7 @@ def verify_pin(body: PinVerify, request: Request, db: Session = Depends(get_db))
         db,
         body.pin,
         client_ip,
+        action="unlock",
         failure_status=401,
         failure_detail="Incorrect PIN",
         missing_status=400,

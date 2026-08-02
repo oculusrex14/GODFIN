@@ -13,12 +13,14 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import hash_pin, pin_hash_needs_upgrade, verify_pin_hash
 from app.models.app_setting import AppSetting
+from app.models.audit_log import AuditLog
 from app.models.pin_attempt import PinAttempt
 
 
 RATE_LIMIT_MAX_ATTEMPTS = 5
 RATE_LIMIT_WINDOW_SECONDS = 300
 LOCAL_DEVICE_SCOPE = "__local_device__"
+PIN_BACKOFF_SECONDS = (0, 1, 2, 4, RATE_LIMIT_WINDOW_SECONDS)
 
 
 def _utcnow() -> datetime:
@@ -80,11 +82,36 @@ def check_pin_rate_limit(db: Session, client_ip: str) -> None:
         db.commit()
 
 
-def record_failed_pin_attempt(db: Session, client_ip: str) -> None:
-    """Atomically increment both device-global and source-IP counters."""
+def _backoff_seconds(failed_attempts: int) -> int:
+    index = min(max(failed_attempts, 1), len(PIN_BACKOFF_SECONDS)) - 1
+    return PIN_BACKOFF_SECONDS[index]
+
+
+def _audit_pin_failure(db: Session, action: str, *, locked: bool) -> None:
+    safe_action = "".join(
+        character if character.isalnum() or character == "_" else "_"
+        for character in (action or "pin_verification").lower()
+    )[:64]
+    db.add(
+        AuditLog(
+            transaction_id=None,
+            field_changed="pin_security",
+            old_value=None,
+            new_value=f"{'lockout' if locked else 'failure'}:{safe_action}",
+            change_source="security",
+        )
+    )
+
+
+def record_failed_pin_attempt(
+    db: Session,
+    client_ip: str,
+    *,
+    action: str,
+) -> None:
+    """Atomically increment device/IP counters and record a non-secret event."""
     now = _utcnow()
     window_cutoff = now - timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS)
-    blocked_until = now + timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS)
     for scope_key in _scope_keys(client_ip):
         expired = PinAttempt.window_started_at <= window_cutoff
         statement = sqlite_insert(PinAttempt).values(
@@ -105,18 +132,30 @@ def record_failed_pin_attempt(db: Session, client_ip: str) -> None:
                     (expired, now),
                     else_=PinAttempt.window_started_at,
                 ),
-                "blocked_until": case(
-                    (expired, None),
-                    (
-                        PinAttempt.failed_attempts + 1 >= RATE_LIMIT_MAX_ATTEMPTS,
-                        blocked_until,
-                    ),
-                    else_=PinAttempt.blocked_until,
-                ),
+                "blocked_until": None,
                 "updated_at": now,
             },
         )
         db.execute(statement)
+
+    db.flush()
+    attempts = (
+        db.query(PinAttempt)
+        .filter(PinAttempt.client_ip.in_(_scope_keys(client_ip)))
+        .populate_existing()
+        .all()
+    )
+    max_failures = max((attempt.failed_attempts for attempt in attempts), default=1)
+    for attempt in attempts:
+        delay = _backoff_seconds(attempt.failed_attempts)
+        attempt.blocked_until = (
+            now + timedelta(seconds=delay) if delay else None
+        )
+    _audit_pin_failure(
+        db,
+        action,
+        locked=max_failures >= RATE_LIMIT_MAX_ATTEMPTS,
+    )
     db.commit()
 
 
@@ -132,6 +171,7 @@ def require_current_pin(
     pin: str | None,
     client_ip: str,
     *,
+    action: str = "pin_verification",
     failure_status: int = 403,
     failure_detail: str = "Incorrect PIN",
     missing_status: int = 403,
@@ -145,7 +185,7 @@ def require_current_pin(
     if not pin_setting or not pin_setting.value:
         raise HTTPException(status_code=400, detail="No PIN set")
     if not verify_pin_hash(pin, pin_setting.value):
-        record_failed_pin_attempt(db, client_ip)
+        record_failed_pin_attempt(db, client_ip, action=action)
         raise HTTPException(status_code=failure_status, detail=failure_detail)
 
     if pin_hash_needs_upgrade(pin_setting.value):

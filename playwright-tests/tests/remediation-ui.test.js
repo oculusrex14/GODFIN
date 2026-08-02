@@ -454,10 +454,17 @@ test('review fixes expose the new brand, safe settings controls, and resumable a
     'Gmail Integration',
     'AI Model Configuration',
     'Backup & Export',
+    'System',
     'Data Management',
   ]) {
     await expect(page.getByRole('button', { name: section })).toHaveAttribute('aria-expanded', 'false');
   }
+
+  await page.getByRole('button', { name: 'System' }).click();
+  await page.getByRole('button', { name: 'Allow network access' }).click();
+  await expect(page.getByText(/Only enable this on a trusted private network/)).toBeVisible();
+  await expect(page.getByText(/Other devices on that network may be able to reach/)).toBeVisible();
+  await page.getByRole('button', { name: 'Close security confirmation' }).click();
 
   await page.getByRole('button', { name: 'Backup & Export' }).click();
   await expect(page.getByText('29 Jul 2026, 4:00 pm')).toBeVisible();
