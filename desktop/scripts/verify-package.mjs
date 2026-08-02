@@ -13,6 +13,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { assertPackagePrivacy } from "./package-privacy.mjs";
+import { assertPackageIntegrity } from "./package-integrity.mjs";
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const projectRoot = path.resolve(desktopRoot, "..");
@@ -286,7 +287,9 @@ if (!await portIsFree()) {
 }
 
 const packaged = await locatePackage();
-await assertPackagePrivacy(await walk(releaseRoot));
+const packageFiles = await walk(releaseRoot);
+await assertPackagePrivacy(packageFiles);
+await assertPackageIntegrity(packageFiles, { projectRoot });
 verifySignature(packaged.fuseTarget);
 verifyFuses(packaged.fuseTarget);
 

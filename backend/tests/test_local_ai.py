@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -202,6 +203,109 @@ def test_changed_tag_digest_is_removed(monkeypatch):
     assert result["verified"] is False
     assert result["removed"] is True
     assert removed == [("/usr/local/bin/ollama", model)]
+
+
+class _CompletedPull:
+    def __init__(self, output="pulling manifest 50%\nverifying digest 100%\n"):
+        self.stdout = io.StringIO(output)
+
+    def wait(self):
+        return 0
+
+
+def _pull_approval(model, expected_digest, *, expires_at=None):
+    return {
+        "model": model,
+        "expected_digest": expected_digest,
+        "registry_version": MINIMUM_REGISTRY_VERSION,
+        "registry_source": "bundled_signed",
+        "issued_at": "2026-08-01T00:00:00+00:00",
+        "expires_at": expires_at or "2099-01-01T00:00:00+00:00",
+        "approved_at": "2026-08-02T00:00:00+00:00",
+        "ollama_version": "ollama version test",
+    }
+
+
+def test_completed_pull_accepts_and_persists_only_the_pinned_digest(monkeypatch):
+    model = "qwen3:4b"
+    expected = BUILTIN_MODEL_REGISTRY[model]["expected_digest"]
+    persisted = []
+    original = local_ai.get_download_status()
+    monkeypatch.setattr(
+        local_ai.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: _CompletedPull(),
+    )
+    monkeypatch.setattr(local_ai, "_model_digest", lambda _model: expected)
+    monkeypatch.setattr(local_ai, "_persist_model_acceptance", persisted.append)
+    local_ai._set_download_state(status="downloading", model=model)
+    try:
+        local_ai._run_model_pull(
+            "/usr/local/bin/ollama",
+            model,
+            _pull_approval(model, expected),
+        )
+        status = local_ai.get_download_status()
+    finally:
+        local_ai._set_download_state(**original)
+
+    assert status["status"] == "complete"
+    assert status["digest_verified"] is True
+    assert status["digest"] == expected
+    assert persisted[0]["digest"] == expected
+    assert persisted[0]["accepted_at"]
+
+
+@pytest.mark.parametrize(
+    ("actual_digest", "expires_at", "should_remove"),
+    [
+        ("sha256:" + "0" * 64, "2099-01-01T00:00:00+00:00", True),
+        (
+            BUILTIN_MODEL_REGISTRY["qwen3:4b"]["expected_digest"],
+            "2000-01-01T00:00:00+00:00",
+            True,
+        ),
+        (None, "2099-01-01T00:00:00+00:00", False),
+    ],
+)
+def test_completed_pull_fails_closed_without_current_exact_digest(
+    monkeypatch,
+    actual_digest,
+    expires_at,
+    should_remove,
+):
+    model = "qwen3:4b"
+    expected = BUILTIN_MODEL_REGISTRY[model]["expected_digest"]
+    removed = []
+    persisted = []
+    original = local_ai.get_download_status()
+    monkeypatch.setattr(
+        local_ai.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: _CompletedPull(),
+    )
+    monkeypatch.setattr(local_ai, "_model_digest", lambda _model: actual_digest)
+    monkeypatch.setattr(
+        local_ai,
+        "_remove_untrusted_model",
+        lambda executable, model_name: removed.append((executable, model_name)) or True,
+    )
+    monkeypatch.setattr(local_ai, "_persist_model_acceptance", persisted.append)
+    local_ai._set_download_state(status="downloading", model=model)
+    try:
+        local_ai._run_model_pull(
+            "/usr/local/bin/ollama",
+            model,
+            _pull_approval(model, expected, expires_at=expires_at),
+        )
+        status = local_ai.get_download_status()
+    finally:
+        local_ai._set_download_state(**original)
+
+    assert status["status"] == "failed"
+    assert status["digest_verified"] is False
+    assert persisted == []
+    assert bool(removed) is should_remove
 
 
 def test_restart_reverifies_persisted_acceptance(db_session, monkeypatch):
