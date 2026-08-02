@@ -357,8 +357,8 @@ function GmailSettings() {
               </div>
               <div className="text-slate-500 text-xs">
                 {isConnected
-                  ? 'Ready to ingest HDFC Bank transaction emails'
-                  : 'Connect your Gmail to automatically import transactions'}
+                  ? `Connected as ${gmailStatus?.email || 'your approved Google account'}`
+                  : gmailStatus?.message || 'Connect your Gmail to automatically import transactions'}
               </div>
             </div>
           </div>

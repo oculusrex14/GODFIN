@@ -345,3 +345,22 @@ def test_retired_manual_oauth_endpoint_is_absent(auth_client):
         json={"code": "never-used"},
     )
     assert response.status_code == 404
+
+
+def test_ingestion_status_rejects_legacy_python_repr(auth_client, db_session):
+    for key, value in (
+        ("ingest_now_status", "completed"),
+        ("ingest_now_result", "{'created': 1}"),
+    ):
+        setting = db_session.query(AppSetting).filter_by(key=key).first()
+        if setting is None:
+            db_session.add(AppSetting(key=key, value=value))
+        else:
+            setting.value = value
+    db_session.commit()
+
+    response = auth_client.get("/api/v1/ingest/gmail/range/status")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert response.json()["result"] is None

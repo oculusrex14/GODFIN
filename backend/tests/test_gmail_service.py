@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+from google.auth.exceptions import RefreshError, TransportError
 from googleapiclient.errors import HttpError
 
 from app.core import gmail_service as gmail_module
@@ -412,3 +414,143 @@ def test_expired_history_cursor_has_explicit_failure():
     with pytest.raises(GmailSyncError) as error:
         service.fetch_messages(history_id="expired", max_results=100)
     assert error.value.code == "history_expired"
+
+
+@pytest.mark.parametrize(
+    ("refresh_error", "expected_status", "retryable", "action"),
+    [
+        (RefreshError("invalid_grant"), "reauthorize", False, "reconnect"),
+        (TransportError("network unavailable"), "temporarily_unavailable", True, "retry"),
+    ],
+)
+def test_expired_credential_status_distinguishes_reauth_from_retry(
+    fake_oauth,
+    monkeypatch,
+    refresh_error,
+    expected_status,
+    retryable,
+    action,
+):
+    class ExpiredCredentials:
+        expired = True
+        valid = False
+        refresh_token = "encrypted-refresh-token"
+
+        def refresh(self, _request):
+            raise refresh_error
+
+    gmail_module.TOKEN_FILE.write_text(
+        json.dumps(
+            {
+                "token": "encrypted-access-token",
+                "refresh_token": "encrypted-refresh-token",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "client_id": "test-client.apps.googleusercontent.com",
+                "client_secret": "encrypted-client-secret",
+                "scopes": [GMAIL_READONLY_SCOPE],
+                "expiry": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gmail_module, "decrypt", lambda value: value)
+    monkeypatch.setattr(
+        gmail_module,
+        "Credentials",
+        lambda **_kwargs: ExpiredCredentials(),
+    )
+
+    service = GmailService()
+
+    assert service.load_credentials() is False
+    health = service.connection_health()
+    assert health.status == expected_status
+    assert health.connected is False
+    assert health.retryable is retryable
+    assert health.action_required == action
+
+
+def test_message_limit_is_partial_and_never_advances_cursor():
+    ids = ["m1", "m2"]
+    pages = {
+        None: {
+            "messages": [{"id": message_id} for message_id in ids],
+            "nextPageToken": "more-messages",
+        },
+        "more-messages": {"messages": [{"id": "m3"}]},
+    }
+    users = FakeUsersApi(
+        pages,
+        {message_id: _message_payload(message_id) for message_id in ids},
+    )
+    service = GmailService()
+    service.service = FakeGmailApi(users)
+
+    result = service.fetch_messages(max_results=2)
+
+    assert [message["id"] for message in result.messages] == ids
+    assert result.status == "partial"
+    assert result.history_id is None
+    assert result.retryable is True
+    assert "narrower date range" in result.errors[0].lower()
+    assert len(users.messages_api.list_calls) == 1
+
+
+def test_history_limit_is_partial_and_never_advances_cursor():
+    pages = {
+        None: {
+            "history": [
+                {"messagesAdded": [{"message": {"id": "m1"}}]},
+                {"messagesAdded": [{"message": {"id": "m2"}}]},
+            ],
+            "historyId": "901",
+            "nextPageToken": "more-history",
+        },
+        "more-history": {
+            "history": [
+                {"messagesAdded": [{"message": {"id": "m3"}}]},
+            ],
+            "historyId": "902",
+        },
+    }
+    users = FakeUsersApi(
+        {},
+        {
+            "m1": _message_payload("m1"),
+            "m2": _message_payload("m2"),
+        },
+        history_pages=pages,
+    )
+    service = GmailService()
+    service.service = FakeGmailApi(users)
+
+    result = service.fetch_messages(history_id="900", max_results=2)
+
+    assert [message["id"] for message in result.messages] == ["m1", "m2"]
+    assert result.status == "partial"
+    assert result.history_id is None
+    assert result.retryable is True
+    assert len(users.history_api.list_calls) == 1
+
+
+def test_revoked_provider_permission_requires_reauthorization():
+    unauthorized = HttpError(
+        resp=SimpleNamespace(status=401, reason="Unauthorized"),
+        content=b'{"error":{"message":"Invalid Credentials"}}',
+    )
+    users = FakeUsersApi(
+        {None: unauthorized},
+        {},
+        profile={"historyId": "1000"},
+    )
+    service = GmailService()
+    service.service = FakeGmailApi(users)
+
+    with pytest.raises(GmailSyncError) as error:
+        service.fetch_messages(max_results=100)
+
+    assert error.value.code == "authorization_required"
+    assert error.value.retryable is False
+    health = service.connection_health()
+    assert health.status == "reauthorize"
+    assert health.action_required == "reconnect"

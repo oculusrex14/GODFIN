@@ -78,25 +78,11 @@ def settings_health(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    from app.core.gmail_service import CLIENT_SECRETS_FILE, TOKEN_FILE, gmail_service
+    from app.core.gmail_service import gmail_service
 
     encryption = get_encryption_health()
 
-    gmail_connected = gmail_service.is_connected
-    if gmail_connected:
-        gmail_status = "connected"
-        gmail_message = "Gmail credentials are valid."
-    elif TOKEN_FILE.exists():
-        gmail_status = "needs_reauth"
-        gmail_message = "Stored Gmail credentials need to be re-authorized."
-    elif CLIENT_SECRETS_FILE.exists() or (
-        os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET")
-    ):
-        gmail_status = "ready"
-        gmail_message = "Gmail is configured and ready to connect."
-    else:
-        gmail_status = "not_configured"
-        gmail_message = "Add Google OAuth credentials to connect Gmail."
+    gmail_health = gmail_service.connection_health()
 
     active_llm = db.query(LLMConfiguration).filter_by(is_active=True).first()
     llm_status = "not_configured"
@@ -127,9 +113,7 @@ def settings_health(
     return {
         "encryption": encryption,
         "gmail": {
-            "status": gmail_status,
-            "connected": gmail_connected,
-            "message": gmail_message,
+            **gmail_health.to_dict(),
         },
         "llm": {
             "status": llm_status,

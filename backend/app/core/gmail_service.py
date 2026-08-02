@@ -18,6 +18,7 @@ import tempfile
 from typing import Iterator, Optional
 from urllib.parse import urlparse
 
+from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -25,7 +26,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session
 
-from app.core.encryption import encrypt, decrypt
+from app.core.encryption import EncryptionError, decrypt, encrypt
 from app.models.gmail_oauth_attempt import GmailOAuthAttempt
 from app.models.session import AuthSession
 
@@ -98,6 +99,24 @@ class GmailFetchResult:
         """Preserve the historical ``messages, history_id = ...`` contract."""
         yield self.messages
         yield self.history_id
+
+
+@dataclass(frozen=True)
+class GmailConnectionHealth:
+    status: str
+    connected: bool
+    message: str
+    retryable: bool = False
+    action_required: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "connected": self.connected,
+            "message": self.message,
+            "retryable": self.retryable,
+            "action_required": self.action_required,
+        }
 
 
 def _utcnow_naive() -> datetime:
@@ -187,6 +206,76 @@ class GmailService:
     def __init__(self):
         self._credentials = None
         self.service = None
+        self._connection_health = GmailConnectionHealth(
+            status="not_connected",
+            connected=False,
+            message="Connect Gmail to import transaction alerts.",
+            action_required="connect",
+        )
+
+    def _set_connection_health(
+        self,
+        *,
+        status: str,
+        connected: bool,
+        message: str,
+        retryable: bool = False,
+        action_required: str | None = None,
+    ) -> None:
+        self._connection_health = GmailConnectionHealth(
+            status=status,
+            connected=connected,
+            message=message,
+            retryable=retryable,
+            action_required=action_required,
+        )
+
+    def connection_health(self) -> GmailConnectionHealth:
+        """Return a safe, actionable state without exposing provider details."""
+        if (
+            self._connection_health.action_required == "reconnect"
+            and self._connection_health.status in {"reauthorize", "credential_error"}
+        ):
+            return self._connection_health
+        if self._credentials is not None and self._credentials.valid:
+            self._set_connection_health(
+                status="connected",
+                connected=True,
+                message="Gmail permission is active.",
+            )
+        elif TOKEN_FILE.exists():
+            self.load_credentials()
+        elif not client_config_available():
+            self._set_connection_health(
+                status="not_configured",
+                connected=False,
+                message=(
+                    "Gmail connection is not configured for this GODFIN build yet."
+                ),
+                action_required="owner_configuration",
+            )
+        else:
+            self._set_connection_health(
+                status="ready",
+                connected=False,
+                message="Gmail is ready to connect.",
+                action_required="connect",
+            )
+        return self._connection_health
+
+    def _authorization_required(self) -> GmailSyncError:
+        self._credentials = None
+        self.service = None
+        self._set_connection_health(
+            status="reauthorize",
+            connected=False,
+            message="Google no longer accepts this Gmail permission. Connect Gmail again.",
+            action_required="reconnect",
+        )
+        return GmailSyncError(
+            "Gmail permission expired. Connect Gmail again.",
+            code="authorization_required",
+        )
 
     def get_auth_url(
         self,
@@ -366,6 +455,11 @@ class GmailService:
             self._credentials = flow.credentials
             self._persist_credentials()
             self._build_service()
+            self._set_connection_health(
+                status="connected",
+                connected=True,
+                message="Gmail permission is active.",
+            )
             logger.info("Gmail authentication completed successfully")
             return True
         except GmailError:
@@ -416,7 +510,20 @@ class GmailService:
 
     def load_credentials(self) -> bool:
         """Load saved credentials from disk."""
+        if (
+            self._connection_health.action_required == "reconnect"
+            and self._connection_health.status in {"reauthorize", "credential_error"}
+        ):
+            return False
         if not TOKEN_FILE.exists():
+            self._credentials = None
+            self.service = None
+            self._set_connection_health(
+                status="not_connected",
+                connected=False,
+                message="Connect Gmail to import transaction alerts.",
+                action_required="connect",
+            )
             return False
 
         try:
@@ -441,23 +548,83 @@ class GmailService:
                 expiry=parsed_expiry,
             )
 
-            # Refresh if expired
-            if self._credentials.expired and self._credentials.refresh_token:
+            if self._credentials.expired:
+                if not self._credentials.refresh_token:
+                    self._credentials = None
+                    self.service = None
+                    self._set_connection_health(
+                        status="reauthorize",
+                        connected=False,
+                        message="Gmail permission expired. Connect Gmail again.",
+                        action_required="reconnect",
+                    )
+                    return False
                 try:
                     self._credentials.refresh(Request())
                     self._persist_credentials()
-                except Exception as e:
-                    logger.warning("Gmail credential refresh failed")
+                except RefreshError:
+                    logger.info("Gmail authorization is no longer valid")
                     self._credentials = None
                     self.service = None
+                    self._set_connection_health(
+                        status="reauthorize",
+                        connected=False,
+                        message="Google no longer accepts this Gmail permission. Connect Gmail again.",
+                        action_required="reconnect",
+                    )
+                    return False
+                except TransportError:
+                    logger.info("Gmail credential refresh is temporarily unavailable")
+                    self._credentials = None
+                    self.service = None
+                    self._set_connection_health(
+                        status="temporarily_unavailable",
+                        connected=False,
+                        message="Google could not be reached. GODFIN will not sync until a retry succeeds.",
+                        retryable=True,
+                        action_required="retry",
+                    )
                     return False
 
+            if not self._credentials.valid:
+                self._credentials = None
+                self.service = None
+                self._set_connection_health(
+                    status="reauthorize",
+                    connected=False,
+                    message="Gmail permission is incomplete. Connect Gmail again.",
+                    action_required="reconnect",
+                )
+                return False
+
             self._build_service()
+            self._set_connection_health(
+                status="connected",
+                connected=True,
+                message="Gmail permission is active.",
+            )
             return True
-        except Exception:
+        except (EncryptionError, json.JSONDecodeError, OSError, TypeError, ValueError):
             logger.warning("Stored Gmail credentials could not be loaded")
             self._credentials = None
             self.service = None
+            self._set_connection_health(
+                status="reauthorize",
+                connected=False,
+                message="Stored Gmail permission is unreadable. Connect Gmail again.",
+                action_required="reconnect",
+            )
+            return False
+        except Exception:
+            logger.exception("Unexpected Gmail credential loading failure")
+            self._credentials = None
+            self.service = None
+            self._set_connection_health(
+                status="credential_error",
+                connected=False,
+                message="Gmail permission could not be checked safely. Connect Gmail again.",
+                action_required="reconnect",
+            )
             return False
 
     def _build_service(self):
@@ -476,9 +643,22 @@ class GmailService:
         try:
             if self._credentials is None:
                 self.load_credentials()
-            return self._credentials is not None and self._credentials.valid
-        except Exception as e:
-            logger.warning(f"Error checking is_connected: {e}")
+            connected = self._credentials is not None and self._credentials.valid
+            if connected:
+                self._set_connection_health(
+                    status="connected",
+                    connected=True,
+                    message="Gmail permission is active.",
+                )
+            return connected
+        except Exception:
+            logger.warning("Gmail connection state could not be checked")
+            self._set_connection_health(
+                status="credential_error",
+                connected=False,
+                message="Gmail permission could not be checked safely. Connect Gmail again.",
+                action_required="reconnect",
+            )
             return False
 
     def get_user_email(self) -> Optional[str]:
@@ -540,6 +720,12 @@ class GmailService:
             self.service = None
             if TOKEN_FILE.exists():
                 TOKEN_FILE.unlink()
+            self._set_connection_health(
+                status="not_connected",
+                connected=False,
+                message="Gmail is disconnected.",
+                action_required="connect",
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to disconnect: {e}")
@@ -559,6 +745,18 @@ class GmailService:
         if max_results < 1:
             raise ValueError("max_results must be at least 1")
         if not self.service and not self.load_credentials():
+            health = self._connection_health
+            if health.retryable:
+                raise GmailSyncError(
+                    health.message,
+                    code="provider_failure",
+                    retryable=True,
+                )
+            if health.action_required == "reconnect":
+                raise GmailSyncError(
+                    health.message,
+                    code="authorization_required",
+                )
             raise GmailSyncError(
                 "Connect Gmail before importing email transactions.",
                 code="not_connected",
@@ -575,6 +773,7 @@ class GmailService:
         seen_ids: set[str] = set()
         errors: list[str] = []
         new_history_id: Optional[str] = None
+        stopped_at_limit = False
 
         try:
             if history_id:
@@ -591,6 +790,8 @@ class GmailService:
                         response = request.execute()
                     except HttpError as exc:
                         status = getattr(exc.resp, 'status', None)
+                        if status in {401, 403}:
+                            raise self._authorization_required() from exc
                         if status == 404:
                             raise GmailSyncError(
                                 "Gmail's saved sync position expired; a safe full rescan is required.",
@@ -626,12 +827,19 @@ class GmailService:
                             break
                     new_history_id = response.get('historyId') or new_history_id
                     page_token = response.get('nextPageToken')
+                    if page_token and len(message_ids) >= max_results:
+                        stopped_at_limit = True
                     if not page_token:
                         break
             else:
                 try:
                     profile = self.service.users().getProfile(userId='me').execute()
                     new_history_id = profile.get('historyId')
+                except HttpError as exc:
+                    status = getattr(exc.resp, 'status', None)
+                    if status in {401, 403}:
+                        raise self._authorization_required() from exc
+                    errors.append("Gmail did not provide a durable sync position.")
                 except Exception:
                     errors.append("Gmail did not provide a durable sync position.")
 
@@ -646,6 +854,8 @@ class GmailService:
                         ).execute()
                     except HttpError as exc:
                         status = getattr(exc.resp, 'status', None)
+                        if status in {401, 403}:
+                            raise self._authorization_required() from exc
                         if not message_ids:
                             raise GmailSyncError(
                                 "Gmail could not list transaction emails.",
@@ -672,18 +882,28 @@ class GmailService:
                             if len(message_ids) >= max_results:
                                 break
                     page_token = response.get('nextPageToken')
+                    if page_token and len(message_ids) >= max_results:
+                        stopped_at_limit = True
                     if not page_token:
                         break
         except GmailSyncError:
             raise
 
+        if stopped_at_limit:
+            errors.append(
+                "Gmail has more matching messages than this safe sync can process at once. "
+                "Use a narrower date range; the saved sync position was not advanced."
+            )
+
         messages: list[dict] = []
-        retryable_partial = False
+        retryable_partial = stopped_at_limit
         for message_id in message_ids:
             try:
                 message = self._get_message(message_id)
             except HttpError as exc:
                 status = getattr(exc.resp, 'status', None)
+                if status in {401, 403}:
+                    raise self._authorization_required() from exc
                 retryable_partial = retryable_partial or status in {
                     408, 429, 500, 502, 503, 504
                 }

@@ -102,7 +102,14 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
       '/accounts': [],
       '/accounts/parser-profiles': [],
       '/accounts/sender-mappings': [],
-      '/auth/gmail/status': { connected: false },
+      '/auth/gmail/status': {
+        connected: false,
+        status: 'not_configured',
+        message: 'Gmail connection is not configured for this GODFIN build yet.',
+        retryable: false,
+        action_required: 'owner_configuration',
+        digest_email_supported: false,
+      },
       '/license': licenseOverride || {
         tier: 'free',
         valid: false,
@@ -467,6 +474,9 @@ test('review fixes expose the new brand, safe settings controls, and resumable a
   await popup.waitForLoadState('domcontentloaded');
   expect(popup.url()).toMatch(/^https:\/\/ollama\.com\/download/);
   await popup.close();
+
+  await page.getByRole('button', { name: 'Gmail Integration' }).click();
+  await expect(page.getByText(/Gmail connection is not configured for this GODFIN build yet/)).toBeVisible();
 
   await page.getByRole('button', { name: 'Setup & Learning' }).click();
   await page.getByRole('button', { name: /app tour/i }).first().click();

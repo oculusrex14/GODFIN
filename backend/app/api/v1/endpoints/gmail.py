@@ -167,24 +167,20 @@ def get_gmail_status(
     _user: bool = Depends(get_current_user),
 ):
     """Check if Gmail is connected."""
-    if gmail_service.is_connected:
+    health = gmail_service.connection_health()
+    if health.connected:
         email = gmail_service.get_user_email()
         return {
             "connected": True,
             "email": email,
             "digest_email_supported": gmail_service.can_send,
+            **health.to_dict(),
         }
-
-    # Try to load credentials
-    if gmail_service.load_credentials():
-        email = gmail_service.get_user_email()
-        return {
-            "connected": True,
-            "email": email,
-            "digest_email_supported": gmail_service.can_send,
-        }
-
-    return {"connected": False, "digest_email_supported": False}
+    return {
+        "connected": False,
+        "digest_email_supported": False,
+        **health.to_dict(),
+    }
 
 
 # --- Ingestion ---
@@ -617,12 +613,7 @@ def get_ingestion_range_status(
         try:
             parsed_result = json.loads(result_val)
         except json.JSONDecodeError:
-            # One-release compatibility for status written by older builds.
-            try:
-                import ast
-                parsed_result = ast.literal_eval(result_val)
-            except Exception:
-                parsed_result = None
+            parsed_result = None
 
     return {
         "status": status,
