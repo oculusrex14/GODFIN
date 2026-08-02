@@ -4,7 +4,17 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, CheckConstraint, Date, Float, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -47,6 +57,19 @@ class NetWorthItem(Base):
             "length(currency) = 3 AND currency = upper(currency)",
             name="ck_net_worth_items_currency_shape",
         ),
+        CheckConstraint(
+            "((fx_source_currency IS NULL AND fx_base_currency IS NULL "
+            "AND fx_rate_source IS NULL AND "
+            "fx_rate_source_url IS NULL AND fx_rate_as_of IS NULL AND "
+            "fx_rate_fetched_at IS NULL) OR "
+            "(length(fx_source_currency) = 3 AND "
+            "fx_source_currency = upper(fx_source_currency) AND "
+            "length(fx_base_currency) = 3 AND "
+            "fx_base_currency = upper(fx_base_currency) AND "
+            "length(fx_rate_source) > 0 AND length(fx_rate_source_url) > 0 "
+            "AND fx_rate_as_of IS NOT NULL AND fx_rate_fetched_at IS NOT NULL))",
+            name="ck_net_worth_items_fx_provenance_complete",
+        ),
     )
 
     id: Mapped[str] = mapped_column(
@@ -55,12 +78,26 @@ class NetWorthItem(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     item_type: Mapped[str] = mapped_column(String(12), nullable=False)
     asset_class: Mapped[str] = mapped_column(String(32), nullable=False)
-    valuation_mode: Mapped[str] = mapped_column(String(12), nullable=False, default="manual")
+    valuation_mode: Mapped[str] = mapped_column(
+        String(12), nullable=False, default="manual"
+    )
     symbol: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     quantity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     manual_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    exchange_rate_to_base: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    exchange_rate_to_base: Mapped[float] = mapped_column(
+        Float, nullable=False, default=1.0
+    )
+    fx_source_currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    fx_base_currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    fx_rate_source: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    fx_rate_source_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    fx_rate_as_of: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    fx_rate_fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
     valuation_source: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     valued_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
@@ -82,7 +119,16 @@ class NetWorthItem(Base):
 
 class NetWorthQuote(Base):
     __tablename__ = "net_worth_quotes"
-    __table_args__ = (Index("ix_net_worth_quotes_item_quoted", "item_id", "quoted_at"),)
+    __table_args__ = (
+        Index("ix_net_worth_quotes_item_quoted", "item_id", "quoted_at"),
+        CheckConstraint(
+            "((fx_rate_source IS NULL AND fx_rate_source_url IS NULL AND "
+            "fx_rate_as_of IS NULL AND fx_rate_fetched_at IS NULL) OR "
+            "(length(fx_rate_source) > 0 AND length(fx_rate_source_url) > 0 "
+            "AND fx_rate_as_of IS NOT NULL AND fx_rate_fetched_at IS NOT NULL))",
+            name="ck_net_worth_quotes_fx_provenance_complete",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -97,6 +143,14 @@ class NetWorthQuote(Base):
     base_currency: Mapped[str] = mapped_column(String(3), nullable=False)
     source: Mapped[str] = mapped_column(String(80), nullable=False)
     source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    fx_rate_source: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    fx_rate_source_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    fx_rate_as_of: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    fx_rate_fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
     quoted_at: Mapped[datetime] = mapped_column(nullable=False, default=utcnow_naive)
     expires_at: Mapped[datetime] = mapped_column(nullable=False)
 

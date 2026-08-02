@@ -121,12 +121,12 @@ def test_market_data_key_is_encrypted_and_never_returned(auth_client, db_session
         json={"api_key": "td-secret-value", "base_currency": "USD"},
     )
     assert response.status_code == 200, response.text
-    assert response.json() == {
-        "provider": "Twelve Data",
-        "configured": True,
-        "base_currency": "USD",
-        "key_storage": "encrypted_local",
-    }
+    payload = response.json()
+    assert payload["provider"] == "Twelve Data"
+    assert payload["configured"] is True
+    assert payload["base_currency"] == "USD"
+    assert payload["key_storage"] == "encrypted_local"
+    assert payload["supported_base_currencies"] == ["INR", "USD", "EUR", "GBP"]
     stored = db_session.query(AppSetting).filter_by(key="twelve_data_api_key").first()
     assert stored is not None
     assert stored.value != "td-secret-value"
@@ -160,16 +160,28 @@ def test_live_quote_saves_price_exchange_rate_and_provenance(
         def __exit__(self, *args):
             return None
 
-        def get(self, url, params):
-            assert params["apikey"] == "td-fixture-key"
-            if url.endswith("/price"):
-                assert params["symbol"] == "AAPL"
-                return FakeResponse({"price": "100"})
-            assert url.endswith("/exchange_rate")
-            assert params["symbol"] == "USD/INR"
-            return FakeResponse({"rate": 80})
+        def get(self, url, params, headers):
+            assert url.endswith("/quote")
+            assert params == {"symbol": "AAPL"}
+            assert headers == {"Authorization": "apikey td-fixture-key"}
+            return FakeResponse({"close": "100", "currency": "USD"})
+
+    from app.core.fx import FxRateSnapshot
+
+    snapshot = FxRateSnapshot(
+        rates_to_inr={"INR": 1.0, "USD": 80.0},
+        as_of=date.today(),
+        provider="European Central Bank reference rates via Frankfurter",
+        source_url="https://api.frankfurter.dev/v2/rates",
+        age_days=0,
+        stale=False,
+        status="available",
+    )
 
     monkeypatch.setattr(net_worth_endpoint.httpx, "Client", FakeClient)
+    monkeypatch.setattr(
+        net_worth_endpoint, "get_inr_rates", lambda *_args, **_kwargs: snapshot
+    )
     _activate_tier(db_session, "max")
     configured = auth_client.put(
         "/api/v1/net-worth/market-data/config",
@@ -193,8 +205,9 @@ def test_live_quote_saves_price_exchange_rate_and_provenance(
     assert refreshed.status_code == 200, refreshed.text
     payload = refreshed.json()
     assert payload["value_base"] == 16000
-    assert payload["provenance"] == "live_quote"
+    assert payload["provenance"] == "market_quote"
     assert payload["source"] == "Twelve Data"
+    assert payload["conversion"]["provider"].startswith("European Central Bank")
     assert payload["quote_history"][0]["unit_price"] == 100
     assert payload["quote_history"][0]["exchange_rate_to_base"] == 80
 

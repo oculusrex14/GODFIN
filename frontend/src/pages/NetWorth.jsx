@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  AlertTriangle,
   KeyRound,
   Landmark,
   Pencil,
@@ -51,14 +52,18 @@ const ASSET_CLASSES = [
 ];
 
 function money(value, currency = 'INR') {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return 'Unavailable';
+  }
   return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', {
     style: 'currency',
     currency,
     maximumFractionDigits: 0,
-  }).format(value || 0);
+  }).format(Number(value));
 }
 
 function freshness(item) {
+  if (!item.available) return { label: 'Needs review', width: 100, tone: 'bg-amber-400/70' };
   if (!item.expires_on) return { label: 'No expiry set', width: 25, tone: 'bg-white/20' };
   const expires = new Date(`${item.expires_on}T23:59:59`);
   const days = Math.ceil((expires - new Date()) / 86400000);
@@ -121,9 +126,17 @@ export default function NetWorth() {
     mutationFn: configureMarketData,
     onSuccess: data => {
       queryClient.setQueryData(['marketDataStatus'], data);
+      refresh();
       setApiKey('');
       setBaseCurrency('');
-      addToast('Market-data settings saved locally.', 'success');
+      if (data.quotes_requiring_refresh > 0) {
+        addToast(
+          `Base currency saved. Refresh ${data.quotes_requiring_refresh} market quote${data.quotes_requiring_refresh === 1 ? '' : 's'} before totals return.`,
+          'info',
+        );
+      } else {
+        addToast('Market-data settings and verified currency rates saved locally.', 'success');
+      }
     },
   });
   const grouped = useMemo(() => ({
@@ -182,6 +195,21 @@ export default function NetWorth() {
         ))}
       </div>
 
+      {summary?.valuation_status === 'incomplete' && (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-[16px] border border-amber-300/20 bg-amber-300/[0.07] p-4"
+        >
+          <AlertTriangle size={17} className="mt-0.5 shrink-0 text-amber-200/70" />
+          <div>
+            <div className="text-sm text-amber-100/75">Net-worth totals are temporarily hidden</div>
+            <p className="mt-1 text-xs leading-relaxed text-white/40">
+              {summary.unavailable_item_count} active item{summary.unavailable_item_count === 1 ? '' : 's'} cannot be valued safely. Review the item message or refresh its quote; GODFIN will not relabel an old value or assume currencies are equal.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-[18px] border border-white/[0.1] bg-white/[0.04] p-4">
         <div className="flex items-center gap-2">
           <KeyRound size={15} className="text-white/35" />
@@ -218,14 +246,17 @@ export default function NetWorth() {
             placeholder={marketData?.configured ? 'Replace encrypted API key' : 'Twelve Data API key'}
             className="min-w-0 flex-1 rounded-[12px] border border-white/[0.12] bg-white/[0.05] px-3 py-2 text-sm text-white/70 placeholder:text-white/20 focus:outline-none"
           />
-          <input
+          <label className="sr-only" htmlFor="net-worth-base-currency">Net-worth base currency</label>
+          <select
+            id="net-worth-base-currency"
             value={baseCurrency || marketData?.base_currency || 'INR'}
-            onChange={event => setBaseCurrency(event.target.value.toUpperCase().slice(0, 3))}
-            aria-label="Net-worth base currency"
-            minLength={3}
-            maxLength={3}
-            className="w-20 rounded-[12px] border border-white/[0.12] bg-white/[0.05] px-3 py-2 text-sm text-white/70 focus:outline-none"
-          />
+            onChange={event => setBaseCurrency(event.target.value)}
+            className="w-24 rounded-[12px] border border-white/[0.12] bg-[#102443] px-3 py-2 text-sm text-white/70 focus:outline-none"
+          >
+            {(marketData?.supported_base_currencies || ['INR', 'USD', 'EUR', 'GBP']).map(currency => (
+              <option key={currency} value={currency}>{currency}</option>
+            ))}
+          </select>
           <GlassButton
             type="submit"
             disabled={configMutation.isPending || (!apiKey.trim() && !baseCurrency)}
@@ -258,9 +289,14 @@ export default function NetWorth() {
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="text-white/85 tabular-nums">
+                        <div className={item.available ? 'text-white/85 tabular-nums' : 'text-amber-100/70 text-sm'}>
                           {money(item.value_base, summary?.base_currency)}
                         </div>
+                        {item.currency !== summary?.base_currency && item.native_value != null && (
+                          <div className="mt-0.5 text-white/25 text-[0.65rem]">
+                            Native {money(item.native_value, item.currency)}
+                          </div>
+                        )}
                         {item.symbol && <div className="text-cyan-200/40 text-xs">{item.symbol}</div>}
                       </div>
                     </div>
@@ -271,6 +307,11 @@ export default function NetWorth() {
                       <span className={item.stale ? 'text-rose-200/55' : 'text-white/25'}>{fresh.label}</span>
                       <span className="text-white/25 truncate max-w-[45%]">{item.source}</span>
                     </div>
+                    {!item.available && (
+                      <p className="mt-3 rounded-[10px] border border-amber-300/15 bg-amber-300/[0.05] px-3 py-2 text-[0.7rem] leading-relaxed text-amber-100/60">
+                        {item.unavailable_reason}
+                      </p>
+                    )}
                     <div className="mt-3 flex gap-2">
                       {item.valuation_mode === 'market' && (
                         <button
@@ -350,7 +391,6 @@ export default function NetWorth() {
                   source_url: form.source_url || null,
                   valued_at: form.valued_at || null,
                   expires_on: form.expires_on || null,
-                  exchange_rate_to_base: 1,
                 });
               }}
               className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[22px] border border-white/[0.14] bg-[#102443]/95 p-5 shadow-2xl"

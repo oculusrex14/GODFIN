@@ -246,6 +246,49 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
       },
       '/subscriptions/suggestions': [],
       '/subscriptions/reminders': { days: 7, reminders: [] },
+      '/net-worth/market-data/config/status': {
+        provider: 'Twelve Data',
+        configured: false,
+        base_currency: 'INR',
+        supported_base_currencies: ['INR', 'USD', 'EUR', 'GBP'],
+        key_storage: 'encrypted_local',
+      },
+      '/net-worth': {
+        base_currency: 'INR',
+        valuation_status: 'incomplete',
+        total_assets: null,
+        total_liabilities: null,
+        net_worth: null,
+        stale_count: 1,
+        unavailable_item_count: 1,
+        valued_item_count: 0,
+        item_count: 1,
+        calculation_version: 'net_worth_v2',
+        provenance: 'Calculated locally from native values and verified rates.',
+        items: [{
+          id: 'usd-asset',
+          name: 'USD cash reserve',
+          item_type: 'asset',
+          asset_class: 'cash',
+          valuation_mode: 'manual',
+          symbol: null,
+          quantity: 1,
+          currency: 'USD',
+          manual_value: 100,
+          native_value: 100,
+          value_base: null,
+          exchange_rate_to_base: null,
+          base_currency: 'INR',
+          source: 'Redacted test statement',
+          valued_at: '2026-08-01',
+          expires_on: '2026-09-01',
+          stale: true,
+          available: false,
+          unavailable_reason: 'No recent verified USD to INR exchange rate is available.',
+          provenance: 'manual',
+          is_active: true,
+        }],
+      },
     };
     const exact = responses[path];
     if (exact !== undefined) return route.fulfill({ json: exact });
@@ -495,4 +538,26 @@ test('reports require connected AI for commentary and goals show a direct saving
   await page.getByRole('button', { name: 'Add savings' }).click();
   await expect(page.getByRole('heading', { name: /Update Emergency cushion/ })).toBeVisible();
   await expect(page.getByLabel('Change')).toHaveValue('deposit');
+});
+
+test('net worth hides every headline total when one active valuation is unsafe', async ({ page }) => {
+  await mockAuthenticatedApp(page, {
+    tier: 'max',
+    valid: true,
+    status: 'active',
+    features: ['net_worth'],
+    message: 'GODFIN Max is active.',
+    topup_credits: 0,
+  });
+  await page.goto('/pin');
+  await page.getByLabel('Enter your PIN').fill('4826');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByRole('link', { name: 'Net Worth', exact: true }).click();
+
+  await expect(page.getByText('Net-worth totals are temporarily hidden')).toBeVisible();
+  await expect(page.getByText(/will not relabel an old value or assume currencies are equal/)).toBeVisible();
+  await expect(page.getByText('Unavailable')).toHaveCount(4);
+  await expect(page.getByText(/Native.*\$100/)).toBeVisible();
+  await expect(page.getByText(/No recent verified USD to INR exchange rate/)).toBeVisible();
+  await expect(page.getByLabel('Net-worth base currency')).toHaveValue('INR');
 });

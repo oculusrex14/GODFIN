@@ -326,7 +326,7 @@ def test_goal_contribution_rejects_unsafe_amount(auth_client, amount):
         ("manual_value", float("nan")),
         ("manual_value", float("inf")),
         ("manual_value", 1e16),
-        ("exchange_rate_to_base", float("nan")),
+        ("exchange_rate_to_base", 1),
         ("currency", "ZZZ"),
         ("asset_class", "made_up_asset"),
         ("valued_at", "2026-02-30"),
@@ -341,7 +341,6 @@ def test_net_worth_rejects_unsafe_values(auth_client, db_session, field, value):
         "valuation_mode": "manual",
         "quantity": 1,
         "manual_value": 1000,
-        "exchange_rate_to_base": 1,
         "currency": "INR",
     }
     payload[field] = value
@@ -422,7 +421,6 @@ def test_net_worth_update_rejects_non_finite_quantity(auth_client, db_session):
         "valuation_mode",
         "quantity",
         "currency",
-        "exchange_rate_to_base",
         "is_active",
     ],
 )
@@ -459,7 +457,7 @@ def test_net_worth_rejects_non_finite_provider_quote(
         status_code = 200
 
         def json(self):
-            return {"price": "NaN"}
+            return {"close": "NaN", "currency": "INR"}
 
     class FakeClient:
         def __init__(self, *args, **kwargs):

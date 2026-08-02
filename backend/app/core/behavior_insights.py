@@ -365,7 +365,12 @@ def compute_behavior_insights(
         )
     else:
         liquid_total = liquid_asset_total(db)
-        if liquid_total <= 0:
+        if liquid_total is None:
+            buffer_reason = (
+                "One or more ready-to-use assets cannot be converted with a fresh, "
+                "verified rate. Refresh those Net Worth valuations first."
+            )
+        elif liquid_total <= 0:
             buffer_reason = "Add cash or other ready-to-use savings in Net Worth before showing coverage."
         elif average_spend > 0:
             buffer_coverage = liquid_total / average_spend

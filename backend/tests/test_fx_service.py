@@ -54,6 +54,9 @@ def test_ecb_rates_are_inverted_to_inr_with_provenance(monkeypatch):
     assert snapshot.provider == "European Central Bank reference rates via Frankfurter"
     assert snapshot.source_url == "https://api.frankfurter.dev/v2/rates"
     assert snapshot.convert_to_inr(100, "USD") == 8000
+    assert snapshot.rate_between("USD", "EUR") == pytest.approx(0.8)
+    assert snapshot.convert(100, "USD", "EUR") == pytest.approx(80)
+    assert snapshot.rate_between("USD", "USD") == 1
     assert captured["params"] == {
         "base": "INR",
         "quotes": "EUR,USD",

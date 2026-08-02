@@ -14,7 +14,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 9
+CURRENT_SCHEMA_REVISION = 10
 
 _RECURRING_PATTERN_COLUMNS = {
     "confidence": "REAL NOT NULL DEFAULT 0",
@@ -30,6 +30,22 @@ _TRANSACTION_COLUMNS = {
 
 _SUBSCRIPTION_FX_COLUMNS = {
     "fx_rate_to_inr": "NUMERIC",
+    "fx_rate_source": "TEXT",
+    "fx_rate_source_url": "TEXT",
+    "fx_rate_as_of": "DATE",
+    "fx_rate_fetched_at": "DATETIME",
+}
+
+_NET_WORTH_ITEM_FX_COLUMNS = {
+    "fx_source_currency": "TEXT",
+    "fx_base_currency": "TEXT",
+    "fx_rate_source": "TEXT",
+    "fx_rate_source_url": "TEXT",
+    "fx_rate_as_of": "DATE",
+    "fx_rate_fetched_at": "DATETIME",
+}
+
+_NET_WORTH_QUOTE_FX_COLUMNS = {
     "fx_rate_source": "TEXT",
     "fx_rate_source_url": "TEXT",
     "fx_rate_as_of": "DATE",
@@ -112,6 +128,12 @@ _FINANCIAL_GUARDS = {
             "manual_value",
             "exchange_rate_to_base",
             "currency",
+            "fx_source_currency",
+            "fx_base_currency",
+            "fx_rate_source",
+            "fx_rate_source_url",
+            "fx_rate_as_of",
+            "fx_rate_fetched_at",
         },
         "NEW.item_type IN ('asset', 'liability') "
         "AND NEW.asset_class IN ('cash', 'stock', 'etf', 'mutual_fund', "
@@ -128,7 +150,54 @@ _FINANCIAL_GUARDS = {
         "AND NEW.exchange_rate_to_base > 0 "
         "AND NEW.exchange_rate_to_base <= 1000000000 "
         "AND length(NEW.currency) = 3 "
-        "AND NEW.currency = upper(NEW.currency)",
+        "AND NEW.currency = upper(NEW.currency) "
+        "AND ((NEW.fx_source_currency IS NULL "
+        "AND NEW.fx_base_currency IS NULL "
+        "AND NEW.fx_rate_source IS NULL "
+        "AND NEW.fx_rate_source_url IS NULL "
+        "AND NEW.fx_rate_as_of IS NULL "
+        "AND NEW.fx_rate_fetched_at IS NULL) OR "
+        "(length(NEW.fx_source_currency) = 3 "
+        "AND NEW.fx_source_currency = upper(NEW.fx_source_currency) "
+        "AND length(NEW.fx_base_currency) = 3 "
+        "AND NEW.fx_base_currency = upper(NEW.fx_base_currency) "
+        "AND length(NEW.fx_rate_source) > 0 "
+        "AND length(NEW.fx_rate_source_url) > 0 "
+        "AND NEW.fx_rate_as_of IS NOT NULL "
+        "AND NEW.fx_rate_fetched_at IS NOT NULL))",
+    ),
+    "net_worth_quotes": (
+        {
+            "unit_price",
+            "quote_currency",
+            "exchange_rate_to_base",
+            "total_value_base",
+            "base_currency",
+            "fx_rate_source",
+            "fx_rate_source_url",
+            "fx_rate_as_of",
+            "fx_rate_fetched_at",
+        },
+        "typeof(NEW.unit_price) IN ('integer', 'real') "
+        "AND NEW.unit_price > 0 AND NEW.unit_price <= 1000000000000000 "
+        "AND typeof(NEW.exchange_rate_to_base) IN ('integer', 'real') "
+        "AND NEW.exchange_rate_to_base > 0 "
+        "AND NEW.exchange_rate_to_base <= 1000000000 "
+        "AND typeof(NEW.total_value_base) IN ('integer', 'real') "
+        "AND NEW.total_value_base >= 0 "
+        "AND NEW.total_value_base <= 1000000000000000 "
+        "AND length(NEW.quote_currency) = 3 "
+        "AND NEW.quote_currency = upper(NEW.quote_currency) "
+        "AND length(NEW.base_currency) = 3 "
+        "AND NEW.base_currency = upper(NEW.base_currency) "
+        "AND ((NEW.fx_rate_source IS NULL "
+        "AND NEW.fx_rate_source_url IS NULL "
+        "AND NEW.fx_rate_as_of IS NULL "
+        "AND NEW.fx_rate_fetched_at IS NULL) OR "
+        "(length(NEW.fx_rate_source) > 0 "
+        "AND length(NEW.fx_rate_source_url) > 0 "
+        "AND NEW.fx_rate_as_of IS NOT NULL "
+        "AND NEW.fx_rate_fetched_at IS NOT NULL))",
     ),
     "transactions": (
         {"amount", "type", "confidence", "status", "semantic_type"},
@@ -229,6 +298,8 @@ def apply_additive_schema_updates(db_path: str) -> None:
             ("recurring_patterns", _RECURRING_PATTERN_COLUMNS),
             ("transactions", _TRANSACTION_COLUMNS),
             ("subscriptions", _SUBSCRIPTION_FX_COLUMNS),
+            ("net_worth_items", _NET_WORTH_ITEM_FX_COLUMNS),
+            ("net_worth_quotes", _NET_WORTH_QUOTE_FX_COLUMNS),
         ):
             exists = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",

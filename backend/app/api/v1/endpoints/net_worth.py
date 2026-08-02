@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.api.v1.endpoints.license import enforce_feature
@@ -11,11 +12,17 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.encryption import SecretDecryptionError, decrypt, encrypt
 from app.core.feature_flags import FeatureDisabledError, require_feature_flag
+from app.core.fx import FxRateUnavailable, get_inr_rates
 from app.core.net_worth import (
     BASE_CURRENCY_KEY,
     MARKET_DATA_KEY,
+    NetWorthValuationContext,
+    apply_snapshot_to_item,
+    build_valuation_context,
+    clear_item_fx,
     get_base_currency,
     net_worth_summary,
+    refresh_manual_item_rates,
     serialize_item,
 )
 from app.models.app_setting import AppSetting
@@ -23,13 +30,12 @@ from app.models.net_worth import NetWorthItem, NetWorthQuote
 from app.core.time import utcnow_naive
 from app.schemas.financial import (
     CurrencyCode,
-    MAX_EXCHANGE_RATE,
     NetWorthAssetClass,
     NetWorthItemType,
     NetWorthValuationMode,
     NonNegativeMoney,
-    PositiveExchangeRate,
     PositiveFiniteNumber,
+    SupportedSubscriptionCurrency,
     require_positive_finite,
     reject_explicit_nulls,
 )
@@ -41,6 +47,8 @@ ILLQUID_CLASSES = {"property", "land", "gem", "private_asset", "other"}
 
 
 class NetWorthItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1, max_length=120)
     item_type: NetWorthItemType
     asset_class: NetWorthAssetClass
@@ -49,7 +57,6 @@ class NetWorthItemCreate(BaseModel):
     quantity: PositiveFiniteNumber = 1
     currency: CurrencyCode = "INR"
     manual_value: NonNegativeMoney | None = None
-    exchange_rate_to_base: PositiveExchangeRate = 1
     valuation_source: str | None = Field(default=None, max_length=120)
     source_url: str | None = Field(default=None, max_length=500)
     valued_at: date | None = None
@@ -58,6 +65,8 @@ class NetWorthItemCreate(BaseModel):
 
 
 class NetWorthItemUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = Field(default=None, min_length=1, max_length=120)
     item_type: NetWorthItemType | None = None
     asset_class: NetWorthAssetClass | None = None
@@ -66,7 +75,6 @@ class NetWorthItemUpdate(BaseModel):
     quantity: PositiveFiniteNumber | None = None
     currency: CurrencyCode | None = None
     manual_value: NonNegativeMoney | None = None
-    exchange_rate_to_base: PositiveExchangeRate | None = None
     valuation_source: str | None = Field(default=None, max_length=120)
     source_url: str | None = Field(default=None, max_length=500)
     valued_at: date | None = None
@@ -85,15 +93,16 @@ class NetWorthItemUpdate(BaseModel):
                 "valuation_mode",
                 "quantity",
                 "currency",
-                "exchange_rate_to_base",
                 "is_active",
             },
         )
 
 
 class MarketDataConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     api_key: str | None = Field(default=None, max_length=200)
-    base_currency: CurrencyCode = "INR"
+    base_currency: SupportedSubscriptionCurrency = "INR"
 
 
 def _authorize(db: Session) -> None:
@@ -157,6 +166,32 @@ def _set_setting(db: Session, key: str, value: str) -> None:
         db.add(AppSetting(key=key, value=value))
 
 
+def _prepare_item_conversion(
+    item: NetWorthItem,
+    *,
+    base_currency: str,
+    invalidate_existing: bool = False,
+):
+    if (
+        invalidate_existing
+        or item.valuation_mode != "manual"
+        or item.currency == base_currency
+    ):
+        clear_item_fx(item)
+    context = build_valuation_context([item], base_currency=base_currency)
+    if (
+        item.valuation_mode == "manual"
+        and item.currency != base_currency
+        and context.snapshot is not None
+    ):
+        apply_snapshot_to_item(
+            item,
+            context.snapshot,
+            base_currency=base_currency,
+        )
+    return context
+
+
 @router.get("")
 def summary(
     db: Session = Depends(get_db),
@@ -187,10 +222,15 @@ def create_item(
     values["symbol"] = body.symbol.upper().strip() if body.symbol else None
     values["asset_class"] = body.asset_class.lower().strip()
     item = NetWorthItem(**values)
+    context = _prepare_item_conversion(
+        item,
+        base_currency=get_base_currency(db),
+        invalidate_existing=True,
+    )
     db.add(item)
     db.commit()
     db.refresh(item)
-    return serialize_item(item)
+    return serialize_item(item, db=db, context=context)
 
 
 @router.get("/{item_id}")
@@ -203,7 +243,11 @@ def get_item(
     item = db.query(NetWorthItem).filter_by(id=item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")
-    return serialize_item(item, include_history=True)
+    context = build_valuation_context(
+        [item],
+        base_currency=get_base_currency(db),
+    )
+    return serialize_item(item, db=db, context=context, include_history=True)
 
 
 @router.put("/{item_id}")
@@ -218,6 +262,8 @@ def update_item(
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")
     updates = body.model_dump(exclude_unset=True)
+    previous_currency = item.currency
+    previous_mode = item.valuation_mode
     projected = {
         "valuation_mode": updates.get("valuation_mode", item.valuation_mode),
         "asset_class": updates.get("asset_class", item.asset_class),
@@ -234,9 +280,16 @@ def update_item(
         if key == "asset_class" and value:
             value = value.lower().strip()
         setattr(item, key, value)
+    context = _prepare_item_conversion(
+        item,
+        base_currency=get_base_currency(db),
+        invalidate_existing=(
+            item.currency != previous_currency or item.valuation_mode != previous_mode
+        ),
+    )
     db.commit()
     db.refresh(item)
-    return serialize_item(item, include_history=True)
+    return serialize_item(item, db=db, context=context, include_history=True)
 
 
 @router.delete("/{item_id}", status_code=204)
@@ -264,8 +317,13 @@ def market_data_status(
         "provider": "Twelve Data",
         "configured": bool(encrypted_key and encrypted_key.value),
         "base_currency": get_base_currency(db),
+        "supported_base_currencies": ["INR", "USD", "EUR", "GBP"],
+        "currency_rate_provider": "European Central Bank reference rates via Frankfurter",
         "key_storage": "encrypted_local",
-        "privacy": "The key is sent only to Twelve Data when you request a quote.",
+        "privacy": (
+            "The key is sent only to Twelve Data when you request a quote. "
+            "Currency conversion sends currency codes only to Frankfurter."
+        ),
     }
 
 
@@ -276,16 +334,39 @@ def configure_market_data(
     _user: bool = Depends(get_current_user),
 ):
     _authorize(db)
-    _set_setting(db, BASE_CURRENCY_KEY, body.base_currency.upper())
+    previous_base = get_base_currency(db)
+    new_base = body.base_currency.upper()
+    _set_setting(db, BASE_CURRENCY_KEY, new_base)
     if body.api_key is not None:
-        _set_setting(db, MARKET_DATA_KEY, encrypt(body.api_key.strip()) if body.api_key else "")
+        _set_setting(
+            db, MARKET_DATA_KEY, encrypt(body.api_key.strip()) if body.api_key else ""
+        )
+    conversion_refresh = refresh_manual_item_rates(
+        db,
+        base_currency=new_base,
+        force_refresh=previous_base != new_base,
+    )
+    quotes_requiring_refresh = 0
+    if previous_base != new_base:
+        quotes_requiring_refresh = (
+            db.query(NetWorthItem)
+            .filter(
+                NetWorthItem.is_active.is_(True),
+                NetWorthItem.valuation_mode == "market",
+            )
+            .count()
+        )
     db.commit()
     saved_key = _setting(db, MARKET_DATA_KEY)
     return {
         "provider": "Twelve Data",
         "configured": bool(saved_key and saved_key.value),
-        "base_currency": body.base_currency.upper(),
+        "base_currency": new_base,
+        "supported_base_currencies": ["INR", "USD", "EUR", "GBP"],
         "key_storage": "encrypted_local",
+        "base_currency_changed": previous_base != new_base,
+        "quotes_requiring_refresh": quotes_requiring_refresh,
+        "conversion_refresh": conversion_refresh,
     }
 
 
@@ -327,46 +408,59 @@ def refresh_quote(
 
     try:
         with httpx.Client(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
-            price_response = client.get(
-                f"{TWELVE_DATA_API}/price",
-                params={"symbol": item.symbol, "apikey": api_key},
+            quote_response = client.get(
+                f"{TWELVE_DATA_API}/quote",
+                params={"symbol": item.symbol},
+                headers={"Authorization": f"apikey {api_key}"},
             )
-            price_payload = price_response.json()
-            if price_response.status_code >= 400 or "price" not in price_payload:
+            quote_payload = quote_response.json()
+            unit_price_value = quote_payload.get("close") or quote_payload.get("price")
+            quote_currency = str(quote_payload.get("currency") or "").upper().strip()
+            if quote_response.status_code >= 400 or unit_price_value is None:
                 raise ValueError(
-                    str(price_payload.get("message") or "Quote was unavailable.")
+                    str(quote_payload.get("message") or "Quote was unavailable.")
                 )
             unit_price = require_positive_finite(
-                float(price_payload["price"]),
+                float(unit_price_value),
                 field_name="Quote price",
             )
-            base_currency = get_base_currency(db)
-            rate = 1.0
-            if item.currency != base_currency:
-                rate_response = client.get(
-                    f"{TWELVE_DATA_API}/exchange_rate",
-                    params={
-                        "symbol": f"{item.currency}/{base_currency}",
-                        "apikey": api_key,
-                    },
-                )
-                rate_payload = rate_response.json()
-                if rate_response.status_code >= 400 or "rate" not in rate_payload:
-                    raise ValueError(
-                        str(
-                            rate_payload.get("message")
-                            or "Currency conversion was unavailable."
-                        )
-                    )
-                rate = require_positive_finite(
-                    float(rate_payload["rate"]),
-                    field_name="Exchange rate",
-                    maximum=MAX_EXCHANGE_RATE,
-                )
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Twelve Data quote failed: {exc}",
+        ) from exc
+
+    if not quote_currency:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Twelve Data did not identify the quote currency. "
+                "The quote was not saved."
+            ),
+        )
+    if quote_currency != item.currency:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Twelve Data reports {item.symbol} in {quote_currency}, but this "
+                f"item is configured as {item.currency}. Correct the item currency "
+                "before refreshing."
+            ),
+        )
+
+    base_currency = get_base_currency(db)
+    try:
+        snapshot = get_inr_rates(
+            {quote_currency, base_currency},
+            force_refresh=quote_currency != base_currency,
+        )
+        rate = snapshot.rate_between(quote_currency, base_currency)
+    except FxRateUnavailable as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Verified {quote_currency} to {base_currency} conversion failed: {exc}"
+            ),
         ) from exc
 
     now = utcnow_naive()
@@ -376,16 +470,39 @@ def refresh_quote(
     quote = NetWorthQuote(
         item_id=item.id,
         unit_price=unit_price,
-        quote_currency=item.currency,
+        quote_currency=quote_currency,
         exchange_rate_to_base=rate,
-        total_value_base=round(unit_price * item.quantity * rate, 2),
+        total_value_base=float(
+            (
+                Decimal(str(unit_price))
+                * Decimal(str(item.quantity))
+                * Decimal(str(rate))
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        ),
         base_currency=base_currency,
         source="Twelve Data",
-        source_url="https://twelvedata.com/",
+        source_url="https://twelvedata.com/docs/advanced",
+        fx_rate_source=snapshot.provider if quote_currency != base_currency else None,
+        fx_rate_source_url=(
+            snapshot.source_url if quote_currency != base_currency else None
+        ),
+        fx_rate_as_of=snapshot.as_of if quote_currency != base_currency else None,
+        fx_rate_fetched_at=now if quote_currency != base_currency else None,
         quoted_at=now,
         expires_at=now + ttl,
     )
     db.add(quote)
     db.commit()
     db.refresh(item)
-    return serialize_item(item, include_history=True)
+    context = NetWorthValuationContext(
+        base_currency=base_currency,
+        snapshot=snapshot,
+        requested_currencies=frozenset({quote_currency, base_currency}),
+    )
+    return serialize_item(
+        item,
+        db=db,
+        context=context,
+        latest_quote=quote,
+        include_history=True,
+    )

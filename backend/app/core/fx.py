@@ -50,6 +50,26 @@ class FxRateSnapshot:
             raise FxRateUnavailable("The amount cannot be converted safely.")
         return numeric_amount * self.rate_to_inr(currency)
 
+    def rate_between(self, source_currency: str, target_currency: str) -> float:
+        """Return target units per source unit through the verified INR cross-rate."""
+
+        source = source_currency.strip().upper()
+        target = target_currency.strip().upper()
+        if source == target:
+            return 1.0
+        return self.rate_to_inr(source) / self.rate_to_inr(target)
+
+    def convert(
+        self,
+        amount: float,
+        source_currency: str,
+        target_currency: str,
+    ) -> float:
+        numeric_amount = float(amount)
+        if not math.isfinite(numeric_amount):
+            raise FxRateUnavailable("The amount cannot be converted safely.")
+        return numeric_amount * self.rate_between(source_currency, target_currency)
+
     def metadata(self, currencies: Iterable[str] | None = None) -> dict:
         requested = sorted(
             {currency.strip().upper() for currency in (currencies or self.rates_to_inr)}

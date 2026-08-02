@@ -141,6 +141,54 @@ def test_additive_migration_adds_subscription_fx_provenance_columns(tmp_path):
     assert columns["fx_rate_to_inr"][3] == 0
 
 
+def test_additive_migration_adds_net_worth_fx_provenance_columns(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE net_worth_items (
+                id TEXT PRIMARY KEY, exchange_rate_to_base REAL NOT NULL
+            );
+            CREATE TABLE net_worth_quotes (
+                id TEXT PRIMARY KEY, exchange_rate_to_base REAL NOT NULL
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        item_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(net_worth_items)")
+        }
+        quote_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(net_worth_quotes)")
+        }
+    finally:
+        connection.close()
+
+    assert {
+        "fx_source_currency",
+        "fx_base_currency",
+        "fx_rate_source",
+        "fx_rate_source_url",
+        "fx_rate_as_of",
+        "fx_rate_fetched_at",
+    }.issubset(item_columns)
+    assert {
+        "fx_rate_source",
+        "fx_rate_source_url",
+        "fx_rate_as_of",
+        "fx_rate_fetched_at",
+    }.issubset(quote_columns)
+
+
 def test_additive_migration_enforces_one_active_audit_per_period(tmp_path):
     db_path = tmp_path / "godfin.db"
     connection = sqlite3.connect(db_path)
@@ -208,12 +256,19 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
                 id TEXT PRIMARY KEY, amount REAL NOT NULL,
                 entry_type TEXT NOT NULL
             );
-            CREATE TABLE net_worth_items (
+                CREATE TABLE net_worth_items (
                 id TEXT PRIMARY KEY, item_type TEXT NOT NULL,
                 asset_class TEXT NOT NULL, valuation_mode TEXT NOT NULL,
                 quantity REAL NOT NULL, manual_value REAL,
-                exchange_rate_to_base REAL NOT NULL, currency TEXT NOT NULL
-            );
+                    exchange_rate_to_base REAL NOT NULL, currency TEXT NOT NULL
+                );
+                CREATE TABLE net_worth_quotes (
+                    id TEXT PRIMARY KEY, unit_price REAL NOT NULL,
+                    quote_currency TEXT NOT NULL,
+                    exchange_rate_to_base REAL NOT NULL,
+                    total_value_base REAL NOT NULL,
+                    base_currency TEXT NOT NULL
+                );
             CREATE TABLE transactions (
                 id TEXT PRIMARY KEY, amount REAL NOT NULL,
                 type TEXT NOT NULL, confidence REAL, status TEXT NOT NULL,
@@ -237,7 +292,7 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
                 "AND name LIKE 'trg_%_financial_guard_%'"
             )
         }
-        assert len(trigger_names) == 12
+        assert len(trigger_names) == 14
 
         connection.execute(
             "INSERT INTO subscriptions "
@@ -261,8 +316,17 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
             ("valid-withdrawal", -250, "withdrawal"),
         )
         connection.execute(
-            "INSERT INTO net_worth_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO net_worth_items "
+            "(id, item_type, asset_class, valuation_mode, quantity, "
+            "manual_value, exchange_rate_to_base, currency) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ("valid-item", "asset", "cash", "manual", 1, 1000, 1, "INR"),
+        )
+        connection.execute(
+            "INSERT INTO net_worth_quotes "
+            "(id, unit_price, quote_currency, exchange_rate_to_base, "
+            "total_value_base, base_currency) VALUES (?, ?, ?, ?, ?, ?)",
+            ("valid-quote", 100, "USD", 80, 8000, "INR"),
         )
         connection.execute(
             "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)",
@@ -302,8 +366,18 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
                 ("bad-withdrawal-sign", 100, "withdrawal"),
             ),
             (
-                "INSERT INTO net_worth_items VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO net_worth_items "
+                "(id, item_type, asset_class, valuation_mode, quantity, "
+                "manual_value, exchange_rate_to_base, currency) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 ("bad-item", "asset", "invented", "manual", 1, 1000, 1, "INR"),
+            ),
+            (
+                "INSERT INTO net_worth_quotes "
+                "(id, unit_price, quote_currency, exchange_rate_to_base, "
+                "total_value_base, base_currency, fx_rate_source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("bad-quote", 100, "USD", 80, 8000, "INR", "partial"),
             ),
             (
                 "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)",
@@ -338,6 +412,8 @@ def test_fresh_schema_declares_financial_check_constraints(db_engine):
         "ck_goals_target_amount_range",
         "ck_goal_contributions_amount_range",
         "ck_net_worth_items_manual_value_range",
+        "ck_net_worth_items_fx_provenance_complete",
+        "ck_net_worth_quotes_fx_provenance_complete",
     }
     with db_engine.connect() as connection:
         rows = connection.exec_driver_sql(
