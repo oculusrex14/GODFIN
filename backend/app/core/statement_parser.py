@@ -999,6 +999,130 @@ CC_LINE_PATTERN = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class _ParsedAmountToken:
+    amount: Decimal
+    direction: Optional[str] = None
+
+
+_PLAIN_AMOUNT_PATTERN = re.compile(r"\d+(?:\.\d{1,2})?")
+_WESTERN_GROUPED_AMOUNT_PATTERN = re.compile(
+    r"\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?",
+)
+_INDIAN_GROUPED_AMOUNT_PATTERN = re.compile(
+    r"\d{1,3}(?:,\d{2})*,\d{3}(?:\.\d{1,2})?",
+)
+_DIRECTION_MARKER_PATTERN = re.compile(
+    r"(?<![A-Z])(CREDIT|CR|DEBIT|DR)(?![A-Z])",
+    re.IGNORECASE,
+)
+_CURRENCY_MARKER_PATTERN = re.compile(
+    r"(?:₹|\bINR\b|\bRS\.?)(?=\s|[+\-(\d]|$)",
+    re.IGNORECASE,
+)
+
+
+def _parse_amount_token(value: object) -> Optional[_ParsedAmountToken]:
+    """Parse one complete statement amount without discarding semantics.
+
+    Only ungrouped, western-grouped, or Indian-grouped decimal amounts are
+    accepted.  CR/DR, a leading sign, and accounting parentheses are preserved
+    as direction instead of being stripped.  Conflicting markers fail closed.
+    """
+    if value is None:
+        return None
+    text = str(value).replace("\u00a0", " ").strip()
+    if not text:
+        return None
+
+    marker_values = {
+        match.upper()
+        for match in _DIRECTION_MARKER_PATTERN.findall(text)
+    }
+    marker_directions = {
+        "credit" if marker in {"CR", "CREDIT"} else "debit"
+        for marker in marker_values
+    }
+    if len(marker_directions) > 1:
+        return None
+    explicit_direction = next(iter(marker_directions), None)
+    text = _DIRECTION_MARKER_PATTERN.sub(" ", text)
+    text = _CURRENCY_MARKER_PATTERN.sub(" ", text).strip()
+
+    parenthesized = text.startswith("(") and text.endswith(")")
+    if parenthesized:
+        text = text[1:-1].strip()
+    elif "(" in text or ")" in text:
+        return None
+
+    sign = ""
+    if text[:1] in {"+", "-"}:
+        sign, text = text[0], text[1:].strip()
+    if not text or "+" in text or "-" in text:
+        return None
+    if parenthesized and sign:
+        return None
+
+    compact = re.sub(r"\s+", "", text)
+    if not any(
+        pattern.fullmatch(compact)
+        for pattern in (
+            _PLAIN_AMOUNT_PATTERN,
+            _WESTERN_GROUPED_AMOUNT_PATTERN,
+            _INDIAN_GROUPED_AMOUNT_PATTERN,
+        )
+    ):
+        return None
+
+    negative = sign == "-" or parenthesized
+    sign_direction = "credit" if negative else None
+    if (
+        explicit_direction is not None
+        and sign_direction is not None
+        and explicit_direction != sign_direction
+    ):
+        return None
+    direction = explicit_direction or sign_direction
+
+    try:
+        amount = Decimal(compact.replace(",", ""))
+    except InvalidOperation:
+        return None
+    if not amount.is_finite():
+        return None
+    amount = amount.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    return _ParsedAmountToken(amount=amount, direction=direction)
+
+
+def _parse_cc_direction(value: str) -> tuple[Optional[str], bool]:
+    """Return a normalized explicit credit-card direction and validity."""
+    normalized = re.sub(r"[\s._/-]+", "", str(value or "")).upper()
+    if not normalized:
+        return None, True
+    if normalized in {"CR", "CREDIT"}:
+        return "credit", True
+    if normalized in {"DR", "DEBIT"}:
+        return "debit", True
+    return None, False
+
+
+def _amount_direction_conflicts(value: object) -> bool:
+    """Identify mutually exclusive direction markers for an error message."""
+    text = str(value or "").replace("\u00a0", " ").strip()
+    marker_directions = {
+        "credit" if marker.upper() in {"CR", "CREDIT"} else "debit"
+        for marker in _DIRECTION_MARKER_PATTERN.findall(text)
+    }
+    if len(marker_directions) > 1:
+        return True
+    without_markers = _DIRECTION_MARKER_PATTERN.sub(" ", text)
+    without_currency = _CURRENCY_MARKER_PATTERN.sub(" ", without_markers).strip()
+    negative = without_currency.startswith("-") or (
+        without_currency.startswith("(") and without_currency.endswith(")")
+    )
+    return negative and marker_directions == {"debit"}
+
+
 def _parse_hdfc_cc_statement(pdf: pdfplumber.PDF, result: StatementParseResult) -> None:
     raw_transactions: list[StatementTransaction] = []
     saved_col_map: Optional[dict[str, int]] = None
@@ -1092,7 +1216,17 @@ def _process_cc_table(
             cell = value.upper()
             if 'DATE' in cell:
                 columns['date'] = column
-            elif 'TRANSACTION' in cell or 'DESCRIPTION' in cell:
+            elif (
+                ('DEBIT' in cell and 'CREDIT' in cell)
+                or 'DR/CR' in cell
+                or 'CR/DR' in cell
+                or 'TRANSACTION TYPE' in cell
+            ):
+                columns['direction'] = column
+            elif (
+                ('TRANSACTION' in cell and 'TYPE' not in cell)
+                or 'DESCRIPTION' in cell
+            ):
                 columns['description'] = column
             elif 'AMOUNT' in cell:
                 columns['amount'] = column
@@ -1119,7 +1253,15 @@ def _process_cc_table(
         date_text = _safe_cell(row, columns['date'])
         description = _safe_cell(row, columns['description'])
         amount_text = _safe_cell(row, columns['amount'])
-        if any('\n' in value or '\r' in value for value in (date_text, description, amount_text)):
+        direction_text = (
+            _safe_cell(row, columns['direction'])
+            if 'direction' in columns
+            else ''
+        )
+        if any(
+            '\n' in value or '\r' in value
+            for value in (date_text, description, amount_text, direction_text)
+        ):
             result.errors.append(
                 f"{table_label} row {row_number}: packed multi-line credit-card row is ambiguous",
             )
@@ -1135,16 +1277,37 @@ def _process_cc_table(
         if not description:
             result.errors.append(f"{table_label} row {row_number}: missing description")
             continue
-        is_credit = bool(re.search(r'\bCR\b', amount_text, re.IGNORECASE))
-        amount = _parse_amount(re.sub(r'\bCR\b', '', amount_text, flags=re.IGNORECASE))
-        if amount is None or not math.isfinite(amount) or amount <= 0:
-            result.errors.append(f"{table_label} row {row_number}: invalid amount")
+        parsed_amount = _parse_amount_token(amount_text)
+        if parsed_amount is None or parsed_amount.amount <= 0:
+            issue = (
+                "conflicting debit/credit markers"
+                if _amount_direction_conflicts(amount_text)
+                else "invalid amount"
+            )
+            result.errors.append(f"{table_label} row {row_number}: {issue}")
             continue
+        column_direction, direction_valid = _parse_cc_direction(direction_text)
+        if not direction_valid:
+            result.errors.append(
+                f"{table_label} row {row_number}: invalid debit/credit marker",
+            )
+            continue
+        directions = {
+            direction
+            for direction in (parsed_amount.direction, column_direction)
+            if direction is not None
+        }
+        if len(directions) > 1:
+            result.errors.append(
+                f"{table_label} row {row_number}: conflicting debit/credit markers",
+            )
+            continue
+        txn_type = next(iter(directions), 'debit')
         result.transactions.append(StatementTransaction(
             date=date_val,
             description=description,
-            amount=amount,
-            txn_type='credit' if is_credit else 'debit',
+            amount=float(parsed_amount.amount),
+            txn_type=txn_type,
         ))
 
     return columns
@@ -1180,24 +1343,32 @@ def _process_cc_text(text: str, result: StatementParseResult) -> None:
 def _parse_statement_date(s: str) -> Optional[date]:
     if not s:
         return None
-    for fmt in ('%d/%m/%Y', '%d/%m/%y', '%d-%m-%Y', '%d-%m-%y'):
+    normalized = re.sub(r"\s+", " ", str(s).strip())
+    for fmt in (
+        '%d/%m/%Y',
+        '%d/%m/%y',
+        '%d-%m-%Y',
+        '%d-%m-%y',
+        '%d.%m.%Y',
+        '%d.%m.%y',
+        '%d %b %Y',
+        '%d %b %y',
+        '%d-%b-%Y',
+        '%d-%b-%y',
+    ):
         try:
-            return datetime.strptime(s.strip(), fmt).date()
+            return datetime.strptime(normalized, fmt).date()
         except ValueError:
             continue
     return None
 
 
 def _parse_amount(s: str) -> Optional[float]:
-    if not s:
+    parsed = _parse_amount_token(s)
+    if parsed is None:
         return None
-    s = s.replace(',', '').replace(' ', '').strip()
-    # Remove any trailing non-numeric chars
-    s = re.sub(r'[^0-9.]', '', s)
-    try:
-        return float(s)
-    except ValueError:
-        return None
+    amount = float(parsed.amount)
+    return -amount if parsed.direction == 'credit' else amount
 
 
 class StatementParser:

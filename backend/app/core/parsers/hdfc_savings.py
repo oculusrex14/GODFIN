@@ -13,6 +13,7 @@ from app.core.parsers.base import StatementParserPlugin
 from app.core.statement_parser import (
     StatementParseResult,
     _append_strict_savings_txn,
+    _parse_amount,
     _parse_hdfc_savings_statement,
     _parse_statement_date,
     _validate_savings_controls,
@@ -67,11 +68,7 @@ def _amount_value(value: object) -> Optional[float]:
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    cleaned = re.sub(r"[^0-9.\-]", "", str(value))
-    try:
-        return float(cleaned) if cleaned else None
-    except ValueError:
-        return None
+    return _parse_amount(str(value))
 
 
 def _parse_xlsx(contents: bytes) -> StatementParseResult:
