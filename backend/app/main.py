@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException
 
 from app.api.v1.router import router as api_v1_router
 from app.core.api_errors import (
+    STANDARD_ERROR_RESPONSES,
     http_exception_handler,
     unhandled_exception_handler,
     validation_exception_handler,
@@ -16,6 +17,10 @@ from app.core.api_errors import (
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.logging_config import setup_logging
+from app.core.request_limits import (
+    MAX_REQUEST_BODY_BYTES,
+    RequestBodyLimitMiddleware,
+)
 from app.seed import run_seeds
 
 logger = logging.getLogger(__name__)
@@ -122,6 +127,11 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.add_middleware(
+    RequestBodyLimitMiddleware,
+    max_bytes=MAX_REQUEST_BODY_BYTES,
+)
+
+app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
@@ -129,4 +139,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_v1_router, prefix=settings.API_V1_PREFIX)
+app.include_router(
+    api_v1_router,
+    prefix=settings.API_V1_PREFIX,
+    responses=STANDARD_ERROR_RESPONSES,
+)

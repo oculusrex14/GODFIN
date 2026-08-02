@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.core.goal_contributions import (
     add_goal_contribution,
     assign_goal_contribution_suggestion,
+    calculate_goal_balance,
     contribution_to_dict,
     recompute_goal_balance,
     suggestion_to_dict,
@@ -93,12 +94,12 @@ def list_goals(
     goals = db.query(Goal).filter_by(is_active=True).all()
     response = []
     for g in goals:
-        recompute_goal_balance(db, g)
+        current_saved = calculate_goal_balance(db, g.id)
         response.append({
             "id": g.id,
             "name": g.name,
             "target_amount": g.target_amount,
-            "current_saved": g.current_saved,
+            "current_saved": current_saved,
             "deadline_date": str(g.deadline_date),
             "pressure_level": g.pressure_level,
             "annual_return_rate": g.annual_return_rate,
@@ -115,7 +116,6 @@ def list_goals(
                 .count()
             ),
         })
-    db.flush()
     return response
 
 

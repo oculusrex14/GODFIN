@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -15,18 +15,19 @@ from app.core.advisor_digest import build_weekly_digest, digest_to_html
 from app.api.v1.endpoints.license import enforce_feature
 from app.core.gmail_service import gmail_service
 from app.models.app_setting import AppSetting
+from app.schemas.financial import ChatRole
 
 router = APIRouter()
 
 
 class ChatMessage(BaseModel):
-    role: str  # "user" or "assistant"
-    content: str
+    role: ChatRole
+    content: str = Field(min_length=1, max_length=4000)
 
 
 class ChatRequest(BaseModel):
-    message: str
-    history: List[ChatMessage] = []
+    message: str = Field(min_length=1, max_length=4000)
+    history: List[ChatMessage] = Field(default_factory=list, max_length=20)
 
 
 class ChatResponse(BaseModel):
@@ -35,7 +36,7 @@ class ChatResponse(BaseModel):
 
 class DigestSettingsUpdate(BaseModel):
     enabled: bool
-    recipient: str | None = None
+    recipient: str | None = Field(default=None, max_length=254)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -70,6 +71,11 @@ def _get_setting(db: Session, key: str, default: str = "") -> AppSetting:
     return setting
 
 
+def _setting_value(db: Session, key: str, default: str = "") -> str:
+    setting = db.query(AppSetting).filter_by(key=key).first()
+    return setting.value if setting is not None else default
+
+
 @router.get("/digest")
 def advisor_weekly_digest(
     db: Session = Depends(get_db),
@@ -84,14 +90,13 @@ def get_digest_settings(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    enabled = _get_setting(db, "advisor_weekly_digest_enabled", "false")
-    recipient = _get_setting(db, "advisor_weekly_digest_recipient", "")
-    last_sent = _get_setting(db, "advisor_weekly_digest_last_sent", "")
-    db.commit()
+    enabled = _setting_value(db, "advisor_weekly_digest_enabled", "false")
+    recipient = _setting_value(db, "advisor_weekly_digest_recipient", "")
+    last_sent = _setting_value(db, "advisor_weekly_digest_last_sent", "")
     return {
-        "enabled": enabled.value == "true",
-        "recipient": recipient.value or None,
-        "last_sent": last_sent.value or None,
+        "enabled": enabled == "true",
+        "recipient": recipient or None,
+        "last_sent": last_sent or None,
         "gmail_connected": gmail_service.is_connected,
         "gmail_send_supported": gmail_service.can_send,
     }
@@ -124,7 +129,7 @@ def send_advisor_digest(
     _user: bool = Depends(get_current_user),
 ):
     enforce_feature(db, "advanced_reports")
-    recipient = _get_setting(db, "advisor_weekly_digest_recipient", "").value
+    recipient = _setting_value(db, "advisor_weekly_digest_recipient", "")
     if not recipient:
         raise HTTPException(status_code=400, detail="Configure a digest recipient first.")
     digest = build_weekly_digest(db)

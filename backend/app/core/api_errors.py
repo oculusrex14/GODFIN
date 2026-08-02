@@ -6,9 +6,42 @@ from typing import Any
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
+
+
+class APIErrorResponse(BaseModel):
+    """The one public error contract returned by every API failure path."""
+
+    code: str
+    message: str
+    hint: str | None
+    retriable: bool
+    detail: str
+
+
+STANDARD_ERROR_RESPONSES = {
+    status: {
+        "model": APIErrorResponse,
+        "description": description,
+    }
+    for status, description in {
+        400: "Invalid request",
+        401: "Authentication required",
+        403: "Action not permitted",
+        404: "Resource not found",
+        409: "Request conflicts with current state",
+        410: "Endpoint or resource is no longer available",
+        413: "Request body is too large",
+        422: "Request validation failed",
+        429: "Request rate limit reached",
+        500: "Unexpected local service error",
+        502: "Upstream service returned an invalid response",
+        503: "Service temporarily unavailable",
+    }.items()
+}
 
 
 def _message(detail: Any, fallback: str) -> str:

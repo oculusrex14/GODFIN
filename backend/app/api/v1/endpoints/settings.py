@@ -321,17 +321,17 @@ def developer_mode_status(
 
 class RuleCreate(BaseModel):
     rule_type: str = Field(..., pattern=r'^(regex|contains|exact)$')
-    pattern: str = Field(..., min_length=1)
-    category: str = Field(..., min_length=1)
-    subcategory: str = None
-    priority: int = 100
+    pattern: str = Field(..., min_length=1, max_length=1000)
+    category: str = Field(..., min_length=1, max_length=100)
+    subcategory: str | None = Field(default=None, max_length=100)
+    priority: int = Field(default=100, ge=0, le=10_000)
 
 
 class RuleUpdate(BaseModel):
-    pattern: str = Field(None, min_length=1)
-    category: str = Field(None, min_length=1)
-    subcategory: str = None
-    priority: int = None
+    pattern: str | None = Field(default=None, min_length=1, max_length=1000)
+    category: str | None = Field(default=None, min_length=1, max_length=100)
+    subcategory: str | None = Field(default=None, max_length=100)
+    priority: int | None = Field(default=None, ge=0, le=10_000)
 
 
 @router.post("/developer/rules", status_code=201)

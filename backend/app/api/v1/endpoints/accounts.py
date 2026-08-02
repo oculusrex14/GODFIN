@@ -59,7 +59,7 @@ class SenderMapping(BaseModel):
 
 
 class SenderMappingsUpdate(BaseModel):
-    mappings: list[SenderMapping]
+    mappings: list[SenderMapping] = Field(max_length=100)
 
 
 def _account_dict(account: Account) -> dict:

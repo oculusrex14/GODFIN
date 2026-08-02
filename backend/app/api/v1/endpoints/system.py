@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -41,7 +41,7 @@ class LocalModelAction(BaseModel):
 
 
 class LocalAIChoice(BaseModel):
-    choice: str
+    choice: Literal["local", "provider", "none"]
 
 
 @router.get("/status", response_model=SystemStatus)
@@ -210,8 +210,6 @@ def choose_local_ai(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    if body.choice not in {"local", "provider", "none"}:
-        raise HTTPException(status_code=422, detail="Unknown AI setup choice")
     setting = db.query(AppSetting).filter_by(key="local_ai_choice").first()
     if setting is None:
         setting = AppSetting(key="local_ai_choice", value=body.choice)

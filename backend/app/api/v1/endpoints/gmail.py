@@ -82,9 +82,9 @@ def get_gmail_auth_url(
 
 @router.get("/auth/gmail/callback")
 def gmail_oauth_callback(
-    code: str = Query(None),
-    state: str = Query(None),
-    error: str = Query(None),
+    code: str | None = Query(default=None, min_length=1, max_length=4096),
+    state: str | None = Query(default=None, min_length=16, max_length=512),
+    error: str | None = Query(default=None, min_length=1, max_length=200),
     db: Session = Depends(get_db),
 ):
     """Validate one-time state and complete the fixed loopback callback."""

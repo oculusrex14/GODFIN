@@ -72,16 +72,20 @@ def suggestion_to_dict(
     }
 
 
-def recompute_goal_balance(db: Session, goal: Goal) -> float:
+def calculate_goal_balance(db: Session, goal_id: str) -> float:
     total = (
         db.query(func.coalesce(func.sum(GoalContribution.amount), 0.0))
         .filter(
-            GoalContribution.goal_id == goal.id,
+            GoalContribution.goal_id == goal_id,
             GoalContribution.is_voided.is_(False),
         )
         .scalar()
     )
-    goal.current_saved = round(max(0.0, float(total or 0.0)), 2)
+    return round(max(0.0, float(total or 0.0)), 2)
+
+
+def recompute_goal_balance(db: Session, goal: Goal) -> float:
+    goal.current_saved = calculate_goal_balance(db, goal.id)
     return goal.current_saved
 
 
@@ -326,4 +330,3 @@ def reconcile_goal_source_transactions(db: Session) -> int:
             suggestion.decided_at = utcnow_naive()
         voided += 1
     return voided
-

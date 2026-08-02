@@ -33,18 +33,40 @@ router = APIRouter()
 # ============================================================================
 
 class LLMConfigCreate(BaseModel):
-    provider: str = Field(..., description="Provider type")
-    auth_method: str = Field(default="openapi", description="Authentication method")
-    model: str = Field(..., description="Model identifier")
-    api_key: Optional[str] = Field(None, description="API key for OpenAPI auth")
-    base_url: Optional[str] = Field(None, description="Custom base URL")
+    provider: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        pattern=r"^[a-z0-9_-]+$",
+        description="Provider type",
+    )
+    auth_method: str = Field(
+        default="openapi",
+        min_length=1,
+        max_length=50,
+        pattern=r"^[a-z0-9_-]+$",
+        description="Authentication method",
+    )
+    model: str = Field(..., min_length=1, max_length=200, description="Model identifier")
+    api_key: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=8192,
+        description="API key for OpenAPI auth",
+    )
+    base_url: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=2048,
+        description="Custom base URL",
+    )
     hosted_data_consent: bool = False
 
 
 class LLMConfigUpdate(BaseModel):
-    model: Optional[str] = None
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
+    model: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    api_key: Optional[str] = Field(default=None, min_length=1, max_length=8192)
+    base_url: Optional[str] = Field(default=None, min_length=1, max_length=2048)
     is_active: Optional[bool] = None
     hosted_data_consent: Optional[bool] = None
 
@@ -66,10 +88,10 @@ class LLMConfigResponse(BaseModel):
     updated_at: str
 
 class TestConnectionRequest(BaseModel):
-    provider: str
-    model: str
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
+    provider: str = Field(min_length=1, max_length=50, pattern=r"^[a-z0-9_-]+$")
+    model: str = Field(min_length=1, max_length=200)
+    api_key: Optional[str] = Field(default=None, min_length=1, max_length=8192)
+    base_url: Optional[str] = Field(default=None, min_length=1, max_length=2048)
 
 
 class TestConnectionResponse(BaseModel):
