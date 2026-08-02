@@ -339,6 +339,40 @@ def test_gmail_data_deletion_requires_current_pin_and_exact_confirmation(
     assert db_session.query(Transaction).filter_by(id=statement_transaction_id).first() is not None
 
 
+def test_gmail_data_deletion_stops_when_safety_backup_fails(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    gmail_transaction = _source_transaction(db_session, source="gmail", suffix="backup")
+    transaction_id = gmail_transaction.id
+    disconnect_calls = []
+
+    def fail_backup(*_args, **_kwargs):
+        raise RuntimeError("synthetic backup failure")
+
+    monkeypatch.setattr("app.api.v1.endpoints.gmail.create_backup", fail_backup)
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: disconnect_calls.append(True) or True,
+    )
+
+    response = auth_client.post(
+        "/api/v1/auth/gmail/disconnect",
+        json={
+            "clear_data": True,
+            "pin": "4826",
+            "confirmation": "DELETE GMAIL DATA",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "not deleted" in response.json()["detail"].lower()
+    db_session.expire_all()
+    assert db_session.query(Transaction).filter_by(id=transaction_id).one_or_none()
+    assert disconnect_calls == []
+
+
 def test_retired_manual_oauth_endpoint_is_absent(auth_client):
     response = auth_client.post(
         "/api/v1/auth/gmail/manual-code",

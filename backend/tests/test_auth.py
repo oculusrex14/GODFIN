@@ -195,7 +195,7 @@ def test_sensitive_endpoint_hopping_cannot_bypass_pin_throttle(
     for _ in range(4):
         response = auth_client.post(
             "/api/v1/settings/reset-data",
-            json={"pin": "9999", "create_backup": False},
+            json={"pin": "9999"},
         )
         assert response.status_code == 403
     response = auth_client.post(

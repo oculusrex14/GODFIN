@@ -221,19 +221,23 @@ def test_list_backups_empty():
 
 # --- Data Reset ---
 
-def test_reset_data_success(auth_client, db_session):
+def test_reset_data_success(auth_client, db_session, monkeypatch):
     # Add some data
     _add_txn(db_session, 'SWIGGY', 500, date(2025, 6, 5), category='FOOD & DINING')
     db_session.commit()
 
     # Backups are covered with a real temporary SQLite file above; this API
     # fixture uses a shared in-memory database and must not touch the user's DB.
-    resp = auth_client.post('/api/v1/settings/reset-data', json={'pin': '4826', 'create_backup': False})
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.settings.create_backup",
+        lambda *_args, **_kwargs: "godfin_backup_test.db",
+    )
+    resp = auth_client.post('/api/v1/settings/reset-data', json={'pin': '4826'})
     assert resp.status_code == 200
     data = resp.json()
     assert data['success'] is True
-    assert data['backup_created'] is False
-    assert data['backup_filename'] is None
+    assert data['backup_created'] is True
+    assert data['backup_filename'] == "godfin_backup_test.db"
     assert 'All data has been reset' in data['message']
 
     # Verify transactions are gone
@@ -242,7 +246,7 @@ def test_reset_data_success(auth_client, db_session):
 
 
 def test_reset_data_wrong_pin(auth_client):
-    resp = auth_client.post('/api/v1/settings/reset-data', json={'pin': '0000', 'create_backup': False})
+    resp = auth_client.post('/api/v1/settings/reset-data', json={'pin': '0000'})
     assert resp.status_code == 403
     assert resp.json()['detail'] == 'Incorrect PIN'
     # A wrong destructive-action confirmation is not an expired login session.

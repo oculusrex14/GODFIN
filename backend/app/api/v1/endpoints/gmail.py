@@ -8,12 +8,12 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user, hash_token
 from app.core.backup import create_backup
 from app.core.config import settings as app_config
+from app.core.data_deletion import delete_transactions_with_dependents
 from app.core.database import get_db
 from app.core.gmail_service import (
     GmailConfigurationError,
@@ -234,20 +234,7 @@ class GmailDisconnectRequest(BaseModel):
 
 def _delete_gmail_transactions(db: Session) -> int:
     """Delete Gmail-derived rows only, in reviewed foreign-key order."""
-    from app.core.goal_contributions import (
-        recompute_goal_balance,
-        void_goal_contribution,
-    )
-    from app.models.audit_log import AuditLog
-    from app.models.classification_learning import ClassificationCorrection
-    from app.models.goal import Goal
-    from app.models.goal_contribution import (
-        GoalContribution,
-        GoalContributionSuggestion,
-    )
     from app.models.transaction import Transaction
-    from app.models.transaction_split import TransactionSplit
-    from app.models.transfer_match import TransferMatch
 
     transaction_ids = [
         row[0]
@@ -255,51 +242,11 @@ def _delete_gmail_transactions(db: Session) -> int:
         .filter(Transaction.source == "gmail")
         .all()
     ]
-    if not transaction_ids:
-        return 0
-
-    affected_goal_ids: set[str] = set()
-    contributions = (
-        db.query(GoalContribution)
-        .filter(GoalContribution.source_transaction_id.in_(transaction_ids))
-        .all()
+    return delete_transactions_with_dependents(
+        db,
+        transaction_ids,
+        void_reason="Gmail source data was deleted by the user.",
     )
-    for contribution in contributions:
-        affected_goal_ids.add(contribution.goal_id)
-        if not contribution.is_voided:
-            void_goal_contribution(
-                db,
-                contribution,
-                reason="Gmail source data was deleted by the user.",
-            )
-        contribution.source_transaction_id = None
-
-    db.query(GoalContributionSuggestion).filter(
-        GoalContributionSuggestion.transaction_id.in_(transaction_ids)
-    ).delete(synchronize_session=False)
-    db.query(TransferMatch).filter(
-        or_(
-            TransferMatch.debit_transaction_id.in_(transaction_ids),
-            TransferMatch.credit_transaction_id.in_(transaction_ids),
-        )
-    ).delete(synchronize_session=False)
-    db.query(ClassificationCorrection).filter(
-        ClassificationCorrection.transaction_id.in_(transaction_ids)
-    ).delete(synchronize_session=False)
-    db.query(TransactionSplit).filter(
-        TransactionSplit.parent_transaction_id.in_(transaction_ids)
-    ).delete(synchronize_session=False)
-    db.query(AuditLog).filter(
-        AuditLog.transaction_id.in_(transaction_ids)
-    ).delete(synchronize_session=False)
-    deleted = db.query(Transaction).filter(
-        Transaction.id.in_(transaction_ids),
-        Transaction.source == "gmail",
-    ).delete(synchronize_session=False)
-
-    for goal in db.query(Goal).filter(Goal.id.in_(affected_goal_ids)).all():
-        recompute_goal_balance(db, goal)
-    return int(deleted or 0)
 
 @router.post("/auth/gmail/disconnect")
 def gmail_disconnect(

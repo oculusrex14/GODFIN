@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -11,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.backup import create_backup, list_backups
 from app.core.config import settings as app_config
+from app.core.data_deletion import reset_dynamic_data
 from app.core.database import get_db
 from app.core.encryption import SecretDecryptionError, decrypt, get_encryption_health
 from app.core.license import license_status
@@ -19,6 +22,7 @@ from app.models.app_setting import AppSetting
 from app.models.classification_rule import ClassificationRule
 from app.models.llm_config import LLMConfiguration
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 DB_PATH = str(app_config.database_path)
@@ -425,8 +429,8 @@ def delete_rule(
 # --- Reset Data ---
 
 class ResetDataRequest(BaseModel):
-    pin: str = Field(..., min_length=1)
-    create_backup: bool = True
+    pin: str = Field(..., min_length=4, max_length=8, pattern=r"^\d+$")
+    create_backup: Literal[True] = True
 
 
 class ClassificationMemoryReset(BaseModel):
@@ -553,70 +557,42 @@ def reset_all_data(
     _user: bool = Depends(get_current_user),
 ):
     """Reset all transaction and dynamic data. PIN-protected."""
-    # 1. Verify PIN
     require_current_pin(db, body.pin, client_ip_from_request(request))
 
-    # 2. Create backup first (safety net)
-    backup_filename = None
-    if body.create_backup:
-        try:
-            backup_dir = _get_backup_dir(db)
-            backup_filename = create_backup(DB_PATH, backup_dir)
-        except Exception:
-            pass  # Don't fail the reset if backup fails
+    try:
+        backup_filename = create_backup(DB_PATH, _get_backup_dir(db))
+    except Exception as exc:
+        logger.error("Safety backup failed before data reset: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Data was not reset because the safety backup failed.",
+        ) from exc
 
-    # 3. Delete all dynamic data (preserve accounts, settings, rules)
-    from app.models.transaction import Transaction
-    from app.models.transaction_split import TransactionSplit
-    from app.models.audit_session import AuditSession
-    from app.models.audit_log import AuditLog
-    from app.models.merchant_memory import MerchantMemory
-    from app.models.monthly_aggregate import MonthlyAggregate
-    from app.models.recurring_pattern import RecurringPattern
-    from app.models.goal import Goal
-    from app.models.income_source import IncomeSource
-    from app.models.subscription import Subscription
-    from app.models.system_log import SystemLog
-    from app.models.classification_learning import (
-        ClassificationCorrection,
-        ClassificationPattern,
-    )
-    from app.models.behavior_insight import BehaviorInsightPreference
-    from app.models.net_worth import NetWorthItem, NetWorthQuote
-    from app.models.reward_pilot import RewardPilotSubmission
+    try:
+        deletion_counts = reset_dynamic_data(db)
+        for key in ['last_ingestion_run', 'last_gmail_history_id', 'ingestion_history']:
+            setting = db.query(AppSetting).filter_by(key=key).first()
+            if setting:
+                setting.value = ''
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Data reset rolled back after the safety backup succeeded")
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Data was not reset because deletion could not be completed safely. "
+                "The safety backup remains available."
+            ),
+        ) from exc
 
-    # Delete child tables FIRST (FK order matters):
-    # TransactionSplit → Transaction; AuditLog → Transaction
-    # Transaction → AuditSession; MonthlyAggregate → AuditSession
-    db.query(TransactionSplit).delete(synchronize_session=False)
-    db.query(AuditLog).delete(synchronize_session=False)
-    db.query(NetWorthQuote).delete(synchronize_session=False)
-    db.query(NetWorthItem).delete(synchronize_session=False)
-    db.query(BehaviorInsightPreference).delete(synchronize_session=False)
-    db.query(RewardPilotSubmission).delete(synchronize_session=False)
-    db.query(ClassificationCorrection).delete(synchronize_session=False)
-    db.query(ClassificationPattern).delete(synchronize_session=False)
-    db.query(Transaction).delete(synchronize_session=False)
-    db.query(MonthlyAggregate).delete(synchronize_session=False)
-    db.query(AuditSession).delete(synchronize_session=False)
-    db.query(MerchantMemory).delete(synchronize_session=False)
-    db.query(RecurringPattern).delete(synchronize_session=False)
-    db.query(Goal).delete(synchronize_session=False)
-    db.query(IncomeSource).delete(synchronize_session=False)
-    db.query(Subscription).delete(synchronize_session=False)
-    db.query(SystemLog).delete(synchronize_session=False)
-
-    # 4. Reset ingestion tracking state
-    for key in ['last_ingestion_run', 'last_gmail_history_id', 'ingestion_history']:
-        setting = db.query(AppSetting).filter_by(key=key).first()
-        if setting:
-            setting.value = ''
-
-    db.commit()
+    deleted_records = sum(deletion_counts.values())
 
     return {
         'success': True,
-        'backup_created': backup_filename is not None,
+        'backup_created': True,
         'backup_filename': backup_filename,
+        'deleted_records': deleted_records,
+        'deletion_counts': deletion_counts,
         'message': 'All data has been reset. Accounts and settings preserved.',
     }
