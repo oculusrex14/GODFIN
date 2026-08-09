@@ -33,6 +33,17 @@ preserving the strongest linked subscription suggestion. Duplicate Gmail
 message identities fail closed because ledger rows are authoritative and must
 never be silently deleted by a migration.
 
+Revision 13 begins the exact-money migration at the authoritative ledger edge.
+Transactions, transaction splits, and transfer matches retain their legacy
+`REAL` amount only as a temporary compatibility shadow; `amount_minor` is the
+authoritative integer minor-unit value used by the ORM for reads, comparisons,
+ordering, and aggregation. Existing cent-exact rows are backfilled inside the
+startup transaction. Ambiguous sub-cent history fails closed instead of being
+silently rounded, and restart-safe INSERT/UPDATE guards require the exact and
+compatibility shadows to agree. Remaining product-money tables are migrated in
+later reviewed revisions under `GF-DATA-002` before the compatibility shadows
+can be removed.
+
 This strategy is intentional for a packaged, single-user, local-only
 application. A schema change must remain safe to run repeatedly against both an
 empty database and every supported prior local revision.

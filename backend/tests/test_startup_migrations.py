@@ -523,9 +523,9 @@ def test_failed_revision_rolls_back_prior_schema_changes(tmp_path):
             CREATE TABLE app_settings (
                 key TEXT PRIMARY KEY, value TEXT NOT NULL
             );
-            INSERT INTO app_settings VALUES (
-                'schema_revision', '{CURRENT_SCHEMA_REVISION - 2}'
-            );
+                INSERT INTO app_settings VALUES (
+                    'schema_revision', '{CURRENT_SCHEMA_REVISION - 3}'
+                );
             CREATE TABLE subscriptions (
                 id TEXT PRIMARY KEY,
                 amount REAL NOT NULL,

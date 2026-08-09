@@ -1,8 +1,10 @@
 """Shared validation contracts for financial API inputs.
 
-Persistence still uses legacy SQLite ``REAL`` columns.  These request types
-therefore guard the existing boundary against non-finite and unreasonable
-values without pretending to complete the separate exact-money migration.
+Revision 13 stores authoritative ledger amounts as integer minor units while
+temporarily mirroring legacy SQLite ``REAL`` columns. Other product-money
+tables still use legacy storage. These request types guard all boundaries
+against non-finite and unreasonable values while the remaining exact-money
+migrations proceed table by table.
 """
 
 from __future__ import annotations

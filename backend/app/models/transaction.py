@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, time
+from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
@@ -17,9 +18,17 @@ from sqlalchemy import (
     Time,
     text,
 )
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.money import (
+    MAX_MONEY_MINOR,
+    MoneyMinorUnits,
+    money_from_minor,
+    money_decimal,
+    set_money_columns,
+)
 from app.core.time import utcnow_naive
 
 if TYPE_CHECKING:
@@ -45,6 +54,14 @@ class Transaction(Base):
         CheckConstraint(
             "amount > 0 AND amount <= 1000000000000000",
             name="ck_transactions_amount_range",
+        ),
+        CheckConstraint(
+            f"amount_minor > 0 AND amount_minor <= {MAX_MONEY_MINOR}",
+            name="ck_transactions_amount_minor_range",
+        ),
+        CheckConstraint(
+            "amount_minor = CAST(ROUND(amount * 100, 0) AS INTEGER)",
+            name="ck_transactions_amount_shadow_consistent",
         ),
         CheckConstraint(
             "type IN ('debit', 'credit')",
@@ -73,7 +90,10 @@ class Transaction(Base):
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     merchant_raw: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     merchant_normalized: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    _legacy_amount: Mapped[float] = mapped_column("amount", Float, nullable=False)
+    _exact_amount: Mapped[Decimal] = mapped_column(
+        "amount_minor", MoneyMinorUnits(), nullable=False
+    )
     type: Mapped[str] = mapped_column(String(10), nullable=False)
     instrument: Mapped[str] = mapped_column(String(20), nullable=False)
     account_id: Mapped[str] = mapped_column(
@@ -111,3 +131,23 @@ class Transaction(Base):
 
     account: Mapped["Account"] = relationship("Account", back_populates="transactions")
     splits: Mapped[list["TransactionSplit"]] = relationship("TransactionSplit", back_populates="parent_transaction")
+
+    @hybrid_property
+    def amount(self) -> Decimal:
+        if self._exact_amount is not None:
+            return money_decimal(self._exact_amount)
+        return money_from_minor(None, self._legacy_amount)
+
+    @amount.inplace.setter
+    def _set_amount(self, value) -> None:
+        set_money_columns(
+            self,
+            value,
+            legacy_attr="_legacy_amount",
+            exact_attr="_exact_amount",
+        )
+
+    @amount.inplace.expression
+    @classmethod
+    def _amount_expression(cls):
+        return cls._exact_amount

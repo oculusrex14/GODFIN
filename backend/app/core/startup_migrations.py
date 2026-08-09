@@ -15,7 +15,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 12
+CURRENT_SCHEMA_REVISION = 13
 
 
 class SchemaMigrationError(RuntimeError):
@@ -42,6 +42,17 @@ _RECURRING_PATTERN_COLUMNS = {
 _TRANSACTION_COLUMNS = {
     "semantic_type": "TEXT NOT NULL DEFAULT 'unknown'",
 }
+
+_EXACT_MONEY_SHADOWS = {
+    "transactions": {"amount", "raw_text", "account_id"},
+    "transaction_splits": {"amount", "parent_transaction_id", "category"},
+    "transfer_matches": {
+        "amount",
+        "debit_transaction_id",
+        "credit_transaction_id",
+    },
+}
+_MAX_MONEY_MINOR = 100000000000000000
 
 _INCOME_SOURCE_COLUMNS = {
     "next_expected_date": "DATE",
@@ -698,6 +709,108 @@ def _validate_revision_12(connection: sqlite3.Connection) -> None:
                 )
 
 
+def _exact_money_table_is_supported(
+    connection: sqlite3.Connection,
+    table: str,
+    required_columns: set[str],
+) -> bool:
+    columns = _table_columns(connection, table)
+    return bool(columns) and required_columns.issubset(columns)
+
+
+def _install_exact_money_guard(
+    connection: sqlite3.Connection,
+    table: str,
+) -> None:
+    invalid = (
+        "NEW.amount_minor IS NULL "
+        "OR typeof(NEW.amount_minor) <> 'integer' "
+        "OR NEW.amount_minor <= 0 "
+        f"OR NEW.amount_minor > {_MAX_MONEY_MINOR} "
+        "OR CAST(ROUND(NEW.amount * 100, 0) AS INTEGER) "
+        "<> NEW.amount_minor"
+    )
+    for operation in ("insert", "update"):
+        trigger = f"trg_{table}_exact_money_{operation}"
+        connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        connection.execute(
+            f"CREATE TRIGGER {trigger} "
+            f"BEFORE {operation.upper()} ON {table} "
+            f"FOR EACH ROW WHEN {invalid} BEGIN "
+            f"SELECT RAISE(ABORT, 'GODFIN exact-money invariant failed: {table}'); "
+            "END"
+        )
+
+
+def _apply_revision_13(connection: sqlite3.Connection) -> None:
+    for table, required_columns in _EXACT_MONEY_SHADOWS.items():
+        if not _exact_money_table_is_supported(
+            connection,
+            table,
+            required_columns,
+        ):
+            continue
+        columns = _table_columns(connection, table)
+        invalid = connection.execute(
+            f"SELECT COUNT(*) FROM {table} "
+            "WHERE amount IS NULL "
+            "OR typeof(amount) NOT IN ('integer', 'real') "
+            "OR amount <= 0 OR amount > 1000000000000000 "
+            "OR ABS(amount * 100 - ROUND(amount * 100, 0)) > 0.000001"
+        ).fetchone()[0]
+        if invalid:
+            raise SchemaMigrationError(
+                f"The {table} table contains {invalid} amount value(s) "
+                "that cannot be converted to exact minor units safely."
+            )
+        if "amount_minor" not in columns:
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN amount_minor INTEGER"
+            )
+        connection.execute(
+            f"UPDATE {table} SET amount_minor = "
+            "CAST(ROUND(amount * 100, 0) AS INTEGER) "
+            "WHERE amount_minor IS NULL"
+        )
+        _install_exact_money_guard(connection, table)
+
+
+def _validate_revision_13(connection: sqlite3.Connection) -> None:
+    for table, required_columns in _EXACT_MONEY_SHADOWS.items():
+        if not _exact_money_table_is_supported(
+            connection,
+            table,
+            required_columns,
+        ):
+            continue
+        if "amount_minor" not in _table_columns(connection, table):
+            raise SchemaMigrationError(
+                f"The {table} exact-money column was not installed."
+            )
+        invalid = connection.execute(
+            f"SELECT COUNT(*) FROM {table} "
+            "WHERE amount_minor IS NULL "
+            "OR typeof(amount_minor) <> 'integer' "
+            "OR amount_minor <= 0 "
+            f"OR amount_minor > {_MAX_MONEY_MINOR} "
+            "OR CAST(ROUND(amount * 100, 0) AS INTEGER) <> amount_minor"
+        ).fetchone()[0]
+        if invalid:
+            raise SchemaMigrationError(
+                f"The {table} table contains {invalid} invalid exact-money row(s)."
+            )
+        for operation in ("insert", "update"):
+            trigger = f"trg_{table}_exact_money_{operation}"
+            installed = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
+            ).fetchone()
+            if not installed:
+                raise SchemaMigrationError(
+                    f"The {table} exact-money guard was not installed."
+                )
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -710,6 +823,12 @@ MIGRATION_REGISTRY = (
         name="enforce_derived_and_ingestion_identities",
         apply=_apply_revision_12,
         validate=_validate_revision_12,
+    ),
+    SchemaMigration(
+        revision=13,
+        name="introduce_exact_ledger_minor_units",
+        apply=_apply_revision_13,
+        validate=_validate_revision_13,
     ),
 )
 
