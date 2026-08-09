@@ -5,6 +5,7 @@ import json
 import logging
 import re
 from datetime import date, datetime
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from fpdf import FPDF
@@ -13,13 +14,21 @@ from sqlalchemy.orm import Session
 
 from app.core.budget import ELASTICITY
 from app.core.llm_service import call_llm, estimate_tokens
+from app.core.money import money_decimal
 from app.core.transaction_semantics import spending_clause, verified_income_clause
+from app.models.app_setting import AppSetting
 from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
 
 logger = logging.getLogger(__name__)
 
 CHART_DPI = 300
+REPORT_CALCULATION_VERSION = "2.0"
+REPORT_SAVINGS_TARGET_KEY = "report_savings_target_percent"
+DEFAULT_SAVINGS_TARGET_PERCENT = Decimal("20.0")
+MIN_SAVINGS_TARGET_PERCENT = Decimal("1.0")
+MAX_SAVINGS_TARGET_PERCENT = Decimal("80.0")
+_PERCENT_QUANTUM = Decimal("0.1")
 
 
 class DetailedReportUnavailable(RuntimeError):
@@ -54,10 +63,78 @@ def _month_range(month: str):
     return start, end
 
 
+def _percent(value: Decimal) -> float:
+    return float(value.quantize(_PERCENT_QUANTUM, rounding=ROUND_HALF_UP))
+
+
+def _month_status(month: str, *, as_of: date) -> str:
+    start, end = _month_range(month)
+    if start > as_of:
+        return "future"
+    if end <= as_of:
+        return "complete"
+    return "partial"
+
+
+def get_savings_target_percent(db: Session) -> Decimal:
+    setting = db.query(AppSetting).filter_by(key=REPORT_SAVINGS_TARGET_KEY).first()
+    try:
+        target = Decimal(str(setting.value)) if setting else DEFAULT_SAVINGS_TARGET_PERCENT
+    except (TypeError, ValueError, ArithmeticError):
+        target = DEFAULT_SAVINGS_TARGET_PERCENT
+    if not target.is_finite() or not (
+        MIN_SAVINGS_TARGET_PERCENT <= target <= MAX_SAVINGS_TARGET_PERCENT
+    ):
+        target = DEFAULT_SAVINGS_TARGET_PERCENT
+    return target.quantize(_PERCENT_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def set_savings_target_percent(db: Session, value: Decimal | float | str) -> Decimal:
+    try:
+        target = Decimal(str(value)).quantize(
+            _PERCENT_QUANTUM,
+            rounding=ROUND_HALF_UP,
+        )
+    except (TypeError, ValueError, ArithmeticError) as exc:
+        raise ValueError("Savings target must be a finite percentage") from exc
+    if not target.is_finite() or not (
+        MIN_SAVINGS_TARGET_PERCENT <= target <= MAX_SAVINGS_TARGET_PERCENT
+    ):
+        raise ValueError("Savings target must be between 1% and 80%")
+    setting = db.query(AppSetting).filter_by(key=REPORT_SAVINGS_TARGET_KEY).first()
+    if setting is None:
+        setting = AppSetting(key=REPORT_SAVINGS_TARGET_KEY, value=str(target))
+        db.add(setting)
+    else:
+        setting.value = str(target)
+    db.commit()
+    return target
+
+
+def _monthly_recurring_amount(pattern: RecurringPattern) -> Decimal:
+    amount = money_decimal(pattern.avg_amount)
+    divisor = {
+        "monthly": Decimal("1"),
+        "quarterly": Decimal("3"),
+        "annual": Decimal("12"),
+    }.get(pattern.frequency)
+    if divisor is None:
+        return Decimal("0.00")
+    return (amount / divisor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 # --- Data Preparation ---
 
-def prepare_summary_report(db: Session, month: str) -> dict:
+def prepare_summary_report(
+    db: Session,
+    month: str,
+    *,
+    as_of: date | None = None,
+) -> dict:
     start, end = _month_range(month)
+    reference_day = as_of or date.today()
+    period_status = _month_status(month, as_of=reference_day)
+    target_percent = get_savings_target_percent(db)
 
     base = db.query(Transaction).filter(
         Transaction.date >= start,
@@ -65,13 +142,13 @@ def prepare_summary_report(db: Session, month: str) -> dict:
         Transaction.status != 'deleted',
     )
 
-    total_spend = float(
+    total_spend = money_decimal(
         base.filter(spending_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
     )
 
-    total_income = float(
+    total_income = money_decimal(
         base.filter(verified_income_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
@@ -79,13 +156,22 @@ def prepare_summary_report(db: Session, month: str) -> dict:
 
     savings_rate = None
     if total_income > 0:
-        savings_rate = round(((total_income - total_spend) / total_income) * 100, 1)
+        savings_rate = _percent(
+            ((total_income - total_spend) / total_income) * Decimal("100")
+        )
 
     transaction_count = base.filter(
         spending_clause(Transaction)
     ).count()
 
-    avg_transaction = round(total_spend / transaction_count, 2) if transaction_count > 0 else 0
+    avg_transaction = (
+        (total_spend / transaction_count).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        if transaction_count > 0
+        else Decimal("0.00")
+    )
 
     # Category breakdown
     category_rows = (
@@ -98,75 +184,156 @@ def prepare_summary_report(db: Session, month: str) -> dict:
         .order_by(func.sum(Transaction.amount).desc())
         .all()
     )
+    category_amounts = [
+        (row.category, money_decimal(row.total))
+        for row in category_rows
+    ]
     categories = [
-        {'category': r.category, 'amount': round(float(r.total), 2)}
-        for r in category_rows
+        {'category': category, 'amount': float(amount)}
+        for category, amount in category_amounts
     ]
 
     # Elasticity breakdown
-    elasticity = {'fixed': 0, 'semi_flexible': 0, 'flexible': 0}
-    for cat_row in categories:
-        elast = ELASTICITY.get(cat_row['category'], 'flexible')
-        if elast in elasticity:
-            elasticity[elast] += cat_row['amount']
-    elasticity = {k: round(v, 2) for k, v in elasticity.items()}
+    elasticity_amounts = {
+        'fixed': Decimal("0.00"),
+        'semi_flexible': Decimal("0.00"),
+        'flexible': Decimal("0.00"),
+    }
+    for category, amount in category_amounts:
+        elast = ELASTICITY.get(category, 'flexible')
+        if elast in elasticity_amounts:
+            elasticity_amounts[elast] += amount
+    elasticity = {
+        key: float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+        for key, value in elasticity_amounts.items()
+    }
 
-    # Recurring total
-    recurring_total = float(
-        db.query(func.coalesce(func.sum(RecurringPattern.avg_amount), 0))
-        .filter(RecurringPattern.is_active == True, RecurringPattern.frequency == 'monthly')
-        .scalar()
+    # Every active cadence is converted to one monthly equivalent. A quarterly
+    # or annual commitment must not disappear from the monthly money picture.
+    recurring_patterns = (
+        db.query(RecurringPattern)
+        .filter(RecurringPattern.is_active == True)
+        .all()
     )
+    recurring_total = sum(
+        (_monthly_recurring_amount(pattern) for pattern in recurring_patterns),
+        Decimal("0.00"),
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    target_fraction = target_percent / Decimal("100")
+    required_reduction = Decimal("0.00")
+    flexible_reduction = Decimal("0.00")
+    remaining_gap = Decimal("0.00")
+    assessment_available = period_status == "complete" and total_income > 0
+    if assessment_available:
+        required_reduction = max(
+            Decimal("0.00"),
+            total_spend - ((Decimal("1") - target_fraction) * total_income),
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        flexible_reduction = min(
+            required_reduction,
+            elasticity_amounts['flexible'],
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        remaining_gap = (required_reduction - flexible_reduction).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+
+    # Compatibility fields now expose a single, reproducible target-attainment
+    # calculation rather than an unvalidated composite "health" judgement.
     financial_health_score = None
-    financial_health_label = "Add income to calculate"
+    financial_health_label = "Complete the month to compare with your target"
     health_components = {}
-    if total_income > 0:
-        savings_value = savings_rate or 0.0
-        savings_points = max(0.0, min(55.0, (savings_value + 10.0) / 50.0 * 55.0))
-        coverage_points = max(
-            0.0,
-            min(25.0, (1.0 - max(0.0, total_spend - total_income) / total_income) * 25.0),
+    if period_status == "future":
+        financial_health_label = "This month has not started"
+    elif period_status == "complete" and total_income <= 0:
+        financial_health_label = "Add verified income to compare with your target"
+    elif assessment_available:
+        savings_decimal = Decimal(str(savings_rate))
+        progress = max(
+            Decimal("0"),
+            min(Decimal("100"), savings_decimal / target_percent * Decimal("100")),
         )
-        subscription_share = recurring_total / total_income
-        commitment_points = max(0.0, min(20.0, (1.0 - subscription_share) * 20.0))
-        financial_health_score = round(
-            savings_points + coverage_points + commitment_points
+        financial_health_score = int(
+            progress.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         )
-        if financial_health_score >= 75:
-            financial_health_label = "Strong breathing room"
-        elif financial_health_score >= 50:
-            financial_health_label = "Some breathing room"
+        if required_reduction == 0:
+            financial_health_label = "Monthly savings target reached"
+        elif total_spend > total_income:
+            financial_health_label = "Spending was higher than recorded income"
         else:
-            financial_health_label = "Money may feel tight"
+            financial_health_label = "Monthly savings target not yet reached"
         health_components = {
-            "money_left_after_spending": round(savings_points, 1),
-            "income_coverage": round(coverage_points, 1),
-            "room_after_subscriptions": round(commitment_points, 1),
+            "savings_target_progress_percent": financial_health_score,
+            "recorded_savings_rate_percent": savings_rate,
+            "target_savings_rate_percent": float(target_percent),
         }
+
+    if period_status == "partial":
+        health_caveat = (
+            "This month is still open, so GODFIN shows current totals but waits "
+            "until month-end before scoring target progress or suggesting a cut."
+        )
+    elif period_status == "future":
+        health_caveat = "No assessment is available for a future month."
+    elif total_income <= 0:
+        health_caveat = (
+            "A savings target needs verified recorded income. No score or spending "
+            "recommendation is produced without it."
+        )
+    else:
+        health_caveat = (
+            f"Version {REPORT_CALCULATION_VERSION}: target progress equals the "
+            "recorded savings rate divided by your monthly target, capped at 100. "
+            "It is not a credit score or a financial diagnosis."
+        )
 
     return {
         'month': month,
-        'total_spend': round(total_spend, 2),
-        'total_income': round(total_income, 2),
+        'period_status': period_status,
+        'period_start': start.isoformat(),
+        'period_end_exclusive': end.isoformat(),
+        'as_of_date': reference_day.isoformat(),
+        'calculation_version': REPORT_CALCULATION_VERSION,
+        'total_spend': float(total_spend),
+        'total_income': float(total_income),
         'savings_rate': savings_rate,
         'transaction_count': transaction_count,
-        'avg_transaction': avg_transaction,
+        'avg_transaction': float(avg_transaction),
         'top_categories': categories[:5],
         'all_categories': categories,
         'spending_by_elasticity': elasticity,
-        'recurring_total': round(recurring_total, 2),
+        'recurring_total': float(recurring_total),
+        'savings_target_percent': float(target_percent),
+        'savings_target_assessment_available': assessment_available,
+        'target_already_met': assessment_available and required_reduction == 0,
+        'required_spend_reduction_to_target': (
+            float(required_reduction) if assessment_available else None
+        ),
+        'actionable_flexible_reduction': (
+            float(flexible_reduction) if assessment_available else None
+        ),
+        'remaining_target_gap': (
+            float(remaining_gap) if assessment_available else None
+        ),
         'financial_health_score': financial_health_score,
         'financial_health_label': financial_health_label,
         'financial_health_components': health_components,
-        'financial_health_caveat': (
-            "A simple monthly summary from recorded income, spending, and confirmed "
-            "recurring costs. It is not a credit score or financial diagnosis."
+        'financial_health_version': REPORT_CALCULATION_VERSION,
+        'financial_health_formula': (
+            "clamp(max(0, recorded_savings_rate) / target_savings_rate * 100, 0, 100)"
         ),
+        'financial_health_caveat': health_caveat,
     }
 
 
-def prepare_detailed_report(db: Session, month: str) -> dict:
-    summary = prepare_summary_report(db, month)
+def prepare_detailed_report(
+    db: Session,
+    month: str,
+    *,
+    as_of: date | None = None,
+) -> dict:
+    summary = prepare_summary_report(db, month, as_of=as_of)
     start, end = _month_range(month)
 
     base = db.query(Transaction).filter(
@@ -213,9 +380,9 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
         for r in daily_rows
     ]
 
-    # Category comparison: this month vs trailing 3-month average (relative to the
-    # report month, NOT today — so viewing a past month compares against the period
-    # that actually preceded it).
+    # Category comparison uses up to three prior calendar months relative to the
+    # selected report month. The denominator is the number of months that actually
+    # contain spending evidence, so sparse history is never silently treated as zero.
     y, m = int(month[:4]), int(month[5:7])
     comparison_months: list[tuple[int, int]] = []
     for back in range(1, 4):
@@ -244,18 +411,39 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
         .all()
     )
 
-    # Average over the 3 months preceding the report month
-    months_in_period = 3
-    avg_by_cat = {r.category: round(float(r.total) / months_in_period, 2) for r in avg_rows}
-
+    observed_month_rows = (
+        db.query(Transaction.date)
+        .filter(
+            Transaction.date >= three_months_ago,
+            Transaction.date < start,
+            Transaction.status != 'deleted',
+            spending_clause(Transaction),
+        )
+        .all()
+    )
+    observed_months = sorted(
+        {f"{row.date.year}-{row.date.month:02d}" for row in observed_month_rows}
+    )
+    months_in_period = len(observed_months)
     category_comparison = []
-    for cat_row in summary['all_categories']:
-        cat = cat_row['category']
-        category_comparison.append({
-            'category': cat,
-            'current': cat_row['amount'],
-            'average': avg_by_cat.get(cat, 0),
-        })
+    if summary['period_status'] == 'complete' and months_in_period > 0:
+        avg_by_cat = {
+            row.category: float(
+                (money_decimal(row.total) / months_in_period).quantize(
+                    Decimal("0.01"),
+                    rounding=ROUND_HALF_UP,
+                )
+            )
+            for row in avg_rows
+        }
+        for cat_row in summary['all_categories']:
+            cat = cat_row['category']
+            category_comparison.append({
+                'category': cat,
+                'current': cat_row['amount'],
+                'average': avg_by_cat.get(cat, 0.0),
+                'sample_months': months_in_period,
+            })
 
     # Recurring patterns
     patterns = (
@@ -266,7 +454,8 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
     recurring_list = [
         {
             'merchant': p.merchant_normalized,
-            'amount': p.avg_amount,
+            'amount': float(money_decimal(p.avg_amount)),
+            'monthly_equivalent': float(_monthly_recurring_amount(p)),
             'frequency': p.frequency,
             'category': p.category,
         }
@@ -297,6 +486,22 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
         'top_merchants': top_merchants,
         'daily_spending': daily_spending,
         'category_comparison': category_comparison,
+        'category_comparison_sample_size': (
+            months_in_period if summary['period_status'] == 'complete' else 0
+        ),
+        'category_comparison_months': (
+            observed_months if summary['period_status'] == 'complete' else []
+        ),
+        'category_comparison_caveat': (
+            f"Average of {months_in_period} prior recorded complete month(s). "
+            "Months with spending in other categories count as zero for an absent category."
+            if summary['period_status'] == 'complete' and months_in_period > 0
+            else (
+                "Current partial months are not compared with complete historical months."
+                if summary['period_status'] == 'partial'
+                else "No prior recorded complete month is available for comparison."
+            )
+        ),
         'recurring_list': recurring_list,
         'income_breakdown': income_breakdown,
     }
@@ -304,8 +509,25 @@ def prepare_detailed_report(db: Session, month: str) -> dict:
 
 # --- Spending Trend (reuse dashboard logic) ---
 
-def _get_spending_trend(db: Session, month: str, num_months: int = 6) -> list:
-    year, mon = int(month[:4]), int(month[5:7])
+def _get_spending_trend(
+    db: Session,
+    month: str,
+    num_months: int = 6,
+    *,
+    as_of: date | None = None,
+) -> list:
+    reference_day = as_of or date.today()
+    report_start, report_end = _month_range(month)
+    if report_end <= reference_day:
+        anchor = report_start
+    else:
+        current_start = date(reference_day.year, reference_day.month, 1)
+        anchor = (
+            date(current_start.year - 1, 12, 1)
+            if current_start.month == 1
+            else date(current_start.year, current_start.month - 1, 1)
+        )
+    year, mon = anchor.year, anchor.month
     result = []
 
     for i in range(num_months - 1, -1, -1):
@@ -318,7 +540,7 @@ def _get_spending_trend(db: Session, month: str, num_months: int = 6) -> list:
         m_start = date(y, m, 1)
         m_end = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
 
-        spend = float(
+        spend = money_decimal(
             db.query(func.coalesce(func.sum(Transaction.amount), 0))
             .filter(
                 Transaction.date >= m_start,
@@ -328,7 +550,7 @@ def _get_spending_trend(db: Session, month: str, num_months: int = 6) -> list:
             )
             .scalar()
         )
-        income = float(
+        income = money_decimal(
             db.query(func.coalesce(func.sum(Transaction.amount), 0))
             .filter(
                 Transaction.date >= m_start,
@@ -338,11 +560,24 @@ def _get_spending_trend(db: Session, month: str, num_months: int = 6) -> list:
             )
             .scalar()
         )
+        transaction_count = (
+            db.query(Transaction.id)
+            .filter(
+                Transaction.date >= m_start,
+                Transaction.date < m_end,
+                Transaction.status != 'deleted',
+                (spending_clause(Transaction) | verified_income_clause(Transaction)),
+            )
+            .count()
+        )
         result.append({
             'month': f'{y}-{m:02d}',
-            'label': m_start.strftime('%b'),
-            'spend': round(spend, 2),
-            'income': round(income, 2),
+            'label': m_start.strftime('%b %Y'),
+            'spend': float(spend),
+            'income': float(income),
+            'transaction_count': transaction_count,
+            'has_observed_data': transaction_count > 0,
+            'period_status': 'complete',
         })
 
     return result
@@ -484,13 +719,16 @@ def _empty_chart(message: str, plt=None) -> bytes:
 INSIGHT_TONES = ('positive', 'warning', 'negative', 'neutral')
 
 
-def _tone_for_savings(savings_rate):
-    if savings_rate is None:
+def _tone_for_savings(
+    savings_rate,
+    target_percent=DEFAULT_SAVINGS_TARGET_PERCENT,
+    *,
+    assessment_available=True,
+):
+    if savings_rate is None or not assessment_available:
         return 'neutral'
-    if savings_rate >= 30:
+    if Decimal(str(savings_rate)) >= Decimal(str(target_percent)):
         return 'positive'
-    if savings_rate >= 10:
-        return 'neutral'
     if savings_rate >= 0:
         return 'warning'
     return 'negative'
@@ -504,16 +742,25 @@ def _build_insights_prompt(detailed: dict, trend: list, month_label: str) -> str
     s = detailed
     elastic = s.get('spending_by_elasticity', {})
     top_cats = s.get('top_categories', [])
+    target_percent = s.get('savings_target_percent', 20.0)
+    assessment_available = bool(s.get('savings_target_assessment_available'))
+    history_sample = s.get('category_comparison_sample_size', 0)
+    observed_trend = [item for item in trend if item.get('has_observed_data')]
+
+    def amount_or_na(value):
+        return "N/A" if value is None else f"Rs {_format_inr(value)}"
+
     cats_lines = '\n'.join(
         f"  - {c['category']}: Rs {_format_inr(c['amount'])} ({_pct(c['amount'], s['total_spend'])}% of spend)"
         for c in top_cats
     ) or '  - (none)'
 
     comp_lines = '\n'.join(
-        f"  - {c['category']}: this month Rs {_format_inr(c['current'])} vs 3-mo avg Rs {_format_inr(c['average'])}"
+        f"  - {c['category']}: report month Rs {_format_inr(c['current'])} vs "
+        f"{history_sample}-recorded-month avg Rs {_format_inr(c['average'])}"
         f" (delta {('+' if c['current'] - c['average'] >= 0 else '')}Rs {_format_inr(c['current'] - c['average'])})"
         for c in s.get('category_comparison', [])[:8]
-    ) or '  - (none)'
+    ) or f"  - unavailable: {s.get('category_comparison_caveat', 'not enough comparable history')}"
 
     recur_lines = '\n'.join(
         f"  - {r['category']}: Rs {_format_inr(r['amount'])} / {r['frequency']}"
@@ -522,7 +769,7 @@ def _build_insights_prompt(detailed: dict, trend: list, month_label: str) -> str
 
     trend_lines = '\n'.join(
         f"  - {t['month']}: spend Rs {_format_inr(t['spend'])}, income Rs {_format_inr(t['income'])}"
-        for t in trend
+        for t in trend if t.get('has_observed_data')
     ) or '  - (none)'
 
     return f"""You are writing a careful, plain-language monthly money report for an Indian
@@ -533,9 +780,16 @@ bands, ratios, and category names. Explain finance terms in everyday language. D
 diagnose the user, shame spending, or claim certainty that the data cannot support.
 
 === FINANCIAL DATA ===
+Calculation version: {s.get('calculation_version', REPORT_CALCULATION_VERSION)}
+Report period status: {s.get('period_status', 'unknown')}
 Total Spend: Rs {_format_inr(s.get('total_spend', 0))}
 Total Income: Rs {_format_inr(s.get('total_income', 0))}
 Savings Rate: {s.get('savings_rate', 'N/A')}%
+User's monthly savings target: {target_percent}%
+Target assessment available: {assessment_available}
+Required spend reduction to reach target: {amount_or_na(s.get('required_spend_reduction_to_target'))}
+Reduction available from identified flexible spend: {amount_or_na(s.get('actionable_flexible_reduction'))}
+Target gap remaining after identified flexible spend: {amount_or_na(s.get('remaining_target_gap'))}
 Transactions: {s.get('transaction_count', 0)}
 Average Transaction: Rs {_format_inr(s.get('avg_transaction', 0))}
 
@@ -548,13 +802,13 @@ Recurring monthly total: Rs {_format_inr(s.get('recurring_total', 0))}
 Top categories:
 {cats_lines}
 
-Category vs trailing 3-month average:
+Category comparison ({history_sample} prior recorded complete month(s)):
 {comp_lines}
 
 Recurring commitments by category:
 {recur_lines}
 
-Last 6 months trend (oldest → newest):
+Finished-month trend ({len(observed_trend)} recorded month(s), oldest → newest; partial months excluded):
 {trend_lines}
 === END DATA ===
 
@@ -563,9 +817,9 @@ Respond with ONLY a JSON object (no prose, no markdown fences) in EXACTLY this s
   "executive_summary": "2-4 sentence markdown overview of the month's financial position.",
   "sections": [
     {{"title": "Spending Breakdown", "tone": "neutral", "icon": "pie", "content": "markdown: where the money went, top categories with Rs and %, what stands out"}},
-    {{"title": "Savings Health", "tone": "<positive|warning|negative|neutral>", "icon": "piggy", "content": "markdown: assess the savings rate vs the 20% benchmark, income vs spend balance"}},
-    {{"title": "Trend & Momentum", "tone": "neutral", "icon": "trend", "content": "markdown: compare this month to the 6-month trend, is spending accelerating or cooling"}},
-    {{"title": "Watch-outs", "tone": "<positive|warning|negative|neutral>", "icon": "alert", "content": "markdown: categories spiking vs their 3-mo average, flexible spend risks, recurring creep"}}
+    {{"title": "Savings Target Check", "tone": "<positive|warning|negative|neutral>", "icon": "piggy", "content": "markdown: use only the user's target and the supplied solved target-gap fields; explain when the assessment is unavailable"}},
+    {{"title": "Finished-Month Trend", "tone": "neutral", "icon": "trend", "content": "markdown: compare only the supplied completed recorded months and state the sample size"}},
+    {{"title": "Worth Reviewing", "tone": "<positive|warning|negative|neutral>", "icon": "alert", "content": "markdown: categories above their observed-month average, flexible spend limits, and recurring commitments, with caveats"}}
   ],
   "highlights": [
     {{"label": "Biggest Category", "value": "amount band (Y%)", "tone": "neutral", "delta": null}},
@@ -584,7 +838,12 @@ Rules:
 - "icon" must be one of: pie, piggy, trend, alert, wallet, repeat.
 - Keep executive_summary to 2-4 sentences. Each section's content: 3-6 sentences of markdown (use **bold** for category/amount anchors, and bullet lists where natural).
 - 3 recommendations max, each a single bullet string.
-- Reference only the supplied bands, percentages, and counts. No generic platitudes."""
+- Reference only the supplied bands, percentages, and counts. No generic platitudes.
+- Never call the target-progress score a financial-health score, credit score, diagnosis, or prediction.
+- If Target assessment available is false, do not judge target performance or recommend a target-closing cut.
+- Never compare a partial report month with a completed month.
+- If a target gap remains after all identified flexible spend, say clearly that flexible cuts alone cannot reach the target.
+- Do not invent a 20%, 25%, or other heuristic cut. Use only the supplied solved reduction fields."""
 
 
 def _parse_insights_json(raw: str) -> Optional[dict]:
@@ -665,40 +924,47 @@ def _parse_insights_json(raw: str) -> Optional[dict]:
 
 
 def _heuristic_insights(detailed: dict, trend: list) -> dict:
-    """Deterministic, data-driven structured report used when the LLM is unavailable.
-    Always produces a complete, meaningful report from the numbers."""
+    """Build plain-language notes from versioned, completed-period calculations."""
     s = detailed
     spend = s.get('total_spend', 0)
     income = s.get('total_income', 0)
     savings = s.get('savings_rate')
+    target = s.get('savings_target_percent', 20.0)
+    assessment_available = bool(s.get('savings_target_assessment_available'))
+    period_status = s.get('period_status', 'unknown')
+    required_reduction = s.get('required_spend_reduction_to_target')
+    actionable_reduction = s.get('actionable_flexible_reduction')
+    remaining_gap = s.get('remaining_target_gap')
     elastic = s.get('spending_by_elasticity', {})
     fixed = elastic.get('fixed', 0)
     flex = elastic.get('flexible', 0)
-    semi = elastic.get('semi_flexible', 0)
     top = s.get('top_categories', [])
     comp = s.get('category_comparison', [])
+    comparison_sample = s.get('category_comparison_sample_size', 0)
     recurring = s.get('recurring_total', 0)
 
     # Executive summary
     if spend == 0 and income == 0:
         exec_sum = "No transactions were recorded for this period, so there is nothing to analyse yet. " \
                    "Once alerts are ingested, this report will populate automatically."
-    elif savings is not None and savings >= 30:
-        exec_sum = f"**{month_label_of(s)}** was a strong month: you saved **{savings:.1f}%** of income " \
-                   f"(Rs {_format_inr(income - spend)} of Rs {_format_inr(income)}). Spending stayed at " \
-                   f"Rs {_format_inr(spend)} across {s.get('transaction_count', 0)} transactions."
-    elif savings is not None and savings >= 0:
-        exec_sum = f"In **{month_label_of(s)}** you spent Rs {_format_inr(spend)} against income of " \
-                   f"Rs {_format_inr(income)}, saving **{savings:.1f}%**. There is room to tighten " \
-                   f"discretionary spend and push the savings rate toward the 20% benchmark."
-    elif savings is not None:
-        exec_sum = f"**{month_label_of(s)}** ran a deficit: spending of Rs {_format_inr(spend)} exceeded " \
-                   f"income of Rs {_format_inr(income)} by Rs {_format_inr(spend - income)}. Priority " \
-                   f"this month is reining in flexible expenses."
+    elif period_status == 'partial':
+        exec_sum = f"These are **current-to-date totals for {month_label_of(s)}**: Rs " \
+                   f"{_format_inr(spend)} spent and Rs {_format_inr(income)} of verified income recorded. " \
+                   "Because the month is still open, GODFIN does not score target progress or compare it " \
+                   "with complete months yet."
+    elif assessment_available and required_reduction == 0:
+        exec_sum = f"In **{month_label_of(s)}** you kept **{savings:.1f}%** of recorded income, meeting " \
+                   f"your {target:.1f}% monthly target. Spending was Rs {_format_inr(spend)} across " \
+                   f"{s.get('transaction_count', 0)} transactions."
+    elif assessment_available:
+        exec_sum = f"In **{month_label_of(s)}** you spent Rs {_format_inr(spend)} against verified " \
+                   f"income of Rs {_format_inr(income)}, keeping **{savings:.1f}%**. Reaching your " \
+                   f"{target:.1f}% target would have required Rs {_format_inr(required_reduction or 0)} " \
+                   "less spending with income unchanged."
     else:
         exec_sum = f"You recorded Rs {_format_inr(spend)} of spending across " \
                    f"{s.get('transaction_count', 0)} transactions in **{month_label_of(s)}**. " \
-                   f"Add income transactions to enable savings-rate analysis."
+                   "Verified income is needed before GODFIN can compare this month with your savings target."
 
     # Spending Breakdown section
     if top:
@@ -716,53 +982,88 @@ def _heuristic_insights(detailed: dict, trend: list) -> dict:
         'content': breakdown,
     }]
 
-    # Savings Health section
-    tone_s = _tone_for_savings(savings)
-    if savings is not None:
-        if savings >= 30:
-            health = f"A **{savings:.1f}%** savings rate is well above the 20% healthy benchmark — " \
-                     f"you kept Rs {_format_inr(income - spend)} of every Rs {_format_inr(income)} earned."
-        elif savings >= 20:
-            health = f"At **{savings:.1f}%**, you meet the 20% benchmark. Maintaining this consistently " \
-                     f"builds a strong cushion."
-        elif savings >= 10:
-            health = f"Your **{savings:.1f}%** savings rate sits below the 20% benchmark. Trimming " \
-                     f"flexible spend by Rs {_format_inr(flex * 0.25)} would close most of the gap."
-        elif savings >= 0:
-            health = f"Only **{savings:.1f}%** of income was saved — below the 20% benchmark. " \
-                     f"Discretionary categories are the fastest lever to improve this."
-        else:
-            health = f"Negative savings of **{savings:.1f}%** means spending outran income by " \
-                     f"Rs {_format_inr(spend - income)}. This is unsustainable month-over-month."
+    # Savings target section: only a completed month with verified income can
+    # produce an assessment or an amount recommendation.
+    tone_s = _tone_for_savings(
+        savings,
+        target,
+        assessment_available=assessment_available,
+    )
+    if period_status == 'partial':
+        target_note = (
+            "The month is still open. Current totals are useful for checking transactions, but "
+            "a target result or suggested cut now would compare an unfinished period unfairly."
+        )
+    elif period_status == 'future':
+        target_note = "This month has not started, so no target result is available."
+    elif not assessment_available:
+        target_note = (
+            "No verified income was recorded, so GODFIN cannot calculate how much of income was "
+            "kept or solve a target gap."
+        )
+    elif required_reduction == 0:
+        target_note = f"You kept **{savings:.1f}%** of recorded income and met your **{target:.1f}%** " \
+                      "monthly target. The result describes this completed month only."
+    elif (remaining_gap or 0) == 0:
+        target_note = f"The exact gap to your **{target:.1f}%** target was Rs " \
+                      f"{_format_inr(required_reduction)}. Identified flexible spending could cover " \
+                      "that amount if income and all other spending stayed unchanged."
     else:
-        health = "No income was recorded, so a savings rate can't be calculated. " \
-                 "Log salary/credit transactions to unlock this analysis."
-    sections.append({'title': 'Savings Health', 'tone': tone_s, 'icon': 'piggy', 'content': health})
+        target_note = f"The exact gap to your **{target:.1f}%** target was Rs " \
+                      f"{_format_inr(required_reduction or 0)}. The recorded flexible categories " \
+                      f"could cover at most Rs {_format_inr(actionable_reduction or 0)}, leaving " \
+                      f"Rs {_format_inr(remaining_gap or 0)}. Flexible cuts alone therefore cannot " \
+                      "reach the target; do not automatically cut essential costs."
+    sections.append({
+        'title': 'Savings Target Check',
+        'tone': tone_s,
+        'icon': 'piggy',
+        'content': target_note,
+    })
 
-    # Trend & Momentum section
-    if trend and len(trend) >= 2:
-        cur = trend[-1]
-        prev = trend[-2]
+    # Trend section uses recorded, completed months only.
+    observed_trend = [
+        item for item in trend
+        if item.get('has_observed_data', bool(item.get('spend') or item.get('income')))
+    ]
+    if len(observed_trend) >= 2:
+        cur = observed_trend[-1]
+        prev = observed_trend[-2]
         spend_delta = cur['spend'] - prev['spend']
-        direction = "up" if spend_delta > 0 else "down"
-        # 6-mo average spend
-        avg6 = sum(t['spend'] for t in trend) / len(trend)
+        if spend_delta > 0:
+            change_text = f"up Rs {_format_inr(spend_delta)}"
+        elif spend_delta < 0:
+            change_text = f"down Rs {_format_inr(abs(spend_delta))}"
+        else:
+            change_text = "unchanged"
+        avg6 = sum(t['spend'] for t in observed_trend) / len(observed_trend)
         vs_avg = cur['spend'] - avg6
-        momentum = (f"This month's spend of Rs {_format_inr(cur['spend'])} is {direction} "
-                    f"Rs {_format_inr(abs(spend_delta))} versus last month "
-                    f"(Rs {_format_inr(prev['spend'])}), and "
-                    f"{'above' if vs_avg > 0 else 'below'} the 6-month average of "
-                    f"Rs {_format_inr(avg6)} by Rs {_format_inr(abs(vs_avg))}.")
+        if vs_avg > 0:
+            average_text = f"above the {len(observed_trend)}-recorded-month average by Rs {_format_inr(vs_avg)}"
+        elif vs_avg < 0:
+            average_text = f"below the {len(observed_trend)}-recorded-month average by Rs {_format_inr(abs(vs_avg))}"
+        else:
+            average_text = f"equal to the {len(observed_trend)}-recorded-month average"
+        momentum = (
+            f"In {cur['label']}, spending was Rs {_format_inr(cur['spend'])}, {change_text} "
+            f"from {prev['label']} (Rs {_format_inr(prev['spend'])}). It was {average_text}. "
+            "Only finished calendar months with recorded data are included."
+        )
     else:
-        momentum = "Not enough history yet to establish a spending trend — two or more months of " \
-                   "data are needed."
-    sections.append({'title': 'Trend & Momentum', 'tone': 'neutral', 'icon': 'trend', 'content': momentum})
+        momentum = f"Only {len(observed_trend)} recorded finished month(s) are available. At least " \
+                   "two are needed for a direction comparison."
+    sections.append({
+        'title': 'Finished-Month Trend',
+        'tone': 'neutral',
+        'icon': 'trend',
+        'content': momentum,
+    })
 
     # Watch-outs section
     spikes = []
     for c in comp:
         diff = c['current'] - c['average']
-        if c['average'] > 0 and diff / c['average'] >= 0.25:
+        if c['average'] > 0 and diff > 0:
             spikes.append((c['category'], diff, c['current'], c['average']))
     spikes.sort(key=lambda x: x[1], reverse=True)
 
@@ -770,20 +1071,21 @@ def _heuristic_insights(detailed: dict, trend: list) -> dict:
     if spikes:
         for cat, diff, cur, avg in spikes[:3]:
             pct_inc = round((diff / avg) * 100) if avg > 0 else 0
-            watch_lines.append(f"**{cat}** is running Rs {_format_inr(diff)} (+{pct_inc}%) above its "
-                               f"3-month average (Rs {_format_inr(avg)} → Rs {_format_inr(cur)})")
-    if flex > 0 and _pct(flex, spend) > 40:
-        watch_lines.append(f"Flexible spend dominates at {_pct(flex, spend)}% of total — this is the "
-                           f"easiest category to cut in a tight month")
-    if recurring > 0 and income > 0 and recurring / income > 0.3:
-        watch_lines.append(f"Recurring commitments of Rs {_format_inr(recurring)} already absorb "
-                           f"{round(recurring / income * 100)}% of income before discretionary spend")
+            watch_lines.append(f"**{cat}** was Rs {_format_inr(diff)} (+{pct_inc}%) above its average "
+                               f"across {comparison_sample} prior recorded month(s) "
+                               f"(Rs {_format_inr(avg)} to Rs {_format_inr(cur)}).")
+    if flex > 0:
+        watch_lines.append(f"Flexible categories were Rs {_format_inr(flex)} "
+                           f"({_pct(flex, spend)}% of recorded spending).")
+    if recurring > 0 and income > 0:
+        watch_lines.append(f"Confirmed recurring commitments have a monthly equivalent of Rs "
+                           f"{_format_inr(recurring)}, or {_pct(recurring, income)}% of recorded income.")
     if not watch_lines:
-        watch_lines.append("No categories are spiking materially versus their trailing average, and "
-                           "the fixed/flexible balance looks stable.")
-    watch_tone = 'warning' if len(watch_lines) > 1 else ('neutral' if not spikes else 'warning')
+        watch_lines.append("There is not enough completed comparison history to identify a category "
+                           "that was above its prior recorded-month average.")
+    watch_tone = 'warning' if spikes and comparison_sample >= 2 else 'neutral'
     sections.append({
-        'title': 'Watch-outs',
+        'title': 'Worth Reviewing',
         'tone': watch_tone,
         'icon': 'alert',
         'content': '\n'.join(f"- {w}" for w in watch_lines),
@@ -815,38 +1117,61 @@ def _heuristic_insights(detailed: dict, trend: list) -> dict:
         })
     if savings is not None:
         highlights.append({
-            'label': 'Savings Rate',
-            'value': f"{savings:.1f}%",
-            'tone': _tone_for_savings(savings),
-            'delta': f"of Rs {_format_inr(income)}",
+            'label': 'Recorded Savings Rate',
+            'value': f"{savings:.1f}%" if assessment_available else "Current-to-date",
+            'tone': tone_s,
+            'delta': (
+                f"Target {target:.1f}%"
+                if assessment_available
+                else "Target check waits for month-end"
+            ),
         })
 
     # Recommendations
     recs = []
     if spikes:
         cat, diff, _, _ = spikes[0]
-        recs.append(f"**Audit {cat} first** — it is Rs {_format_inr(diff)} above its 3-month average. "
-                    f"Review the underlying transactions and set a ceiling of Rs "
-                    f"{_format_inr(spikes[0][3])} for next month.")
-    if savings is not None and savings < 20 and flex > 0:
-        target = round(flex * 0.20)
-        recs.append(f"**Trim flexible spend by ~Rs {_format_inr(target)}** next month to move the "
-                    f"savings rate from {savings:.1f}% toward the 20% benchmark.")
+        recs.append(f"**Review {cat} first** — it was Rs {_format_inr(diff)} above its average "
+                    f"across {comparison_sample} prior recorded month(s). Check the underlying "
+                    "transactions before deciding whether this was exceptional or repeatable.")
+    if assessment_available and (required_reduction or 0) > 0:
+        if (remaining_gap or 0) == 0 and (actionable_reduction or 0) > 0:
+            recs.append(f"**Target the solved gap, not a guessed percentage** — reducing recorded "
+                        f"flexible spending by Rs {_format_inr(actionable_reduction)} would have "
+                        f"reached the {target:.1f}% target if income and other spending stayed unchanged.")
+        elif (actionable_reduction or 0) > 0:
+            recs.append(f"**Do not expect flexible cuts alone to reach the target.** The full gap is "
+                        f"Rs {_format_inr(required_reduction)}, while identified flexible spending "
+                        f"can cover at most Rs {_format_inr(actionable_reduction)}.")
+        else:
+            recs.append(f"The {target:.1f}% target gap is Rs {_format_inr(required_reduction)}, but "
+                        "no recorded category is classified as flexible. Review categories or the target "
+                        "instead of cutting essential spending automatically.")
     if recurring > 0:
         recs.append(f"**Review recurring commitments** totalling Rs {_format_inr(recurring)} — cancel "
                     f"unused subscriptions to free up monthly margin.")
     if not recs:
-        recs.append("Keep doing what you're doing — spending is within historical norms. "
-                    "Redirect surplus savings toward an emergency fund or investment.")
-        recs.append("Continue logging income transactions so savings-rate tracking stays accurate.")
+        if assessment_available and required_reduction == 0:
+            recs.append(f"Your {target:.1f}% target was met for this completed month. Review another "
+                        "finished month before treating it as a lasting pattern.")
+        else:
+            recs.append("Keep recording income and spending. GODFIN needs a completed month with "
+                        "verified income before it can calculate a target result honestly.")
 
     return {
         'available': True,
         'source': 'heuristic',
+        'calculation_version': s.get('calculation_version', REPORT_CALCULATION_VERSION),
+        'period_status': period_status,
+        'sample_sizes': {
+            'category_comparison_months': comparison_sample,
+            'trend_recorded_complete_months': len(observed_trend),
+        },
+        'caveat': s.get('financial_health_caveat'),
         'executive_summary': exec_sum,
         'sections': sections,
         'highlights': highlights,
-        'recommendations': recs,
+        'recommendations': recs[:3],
     }
 
 
@@ -865,6 +1190,16 @@ def _empty_insights(detailed: dict) -> dict:
     return {
         'available': False,
         'source': 'none',
+        'calculation_version': detailed.get(
+            'calculation_version', REPORT_CALCULATION_VERSION
+        ),
+        'period_status': detailed.get('period_status', 'unknown'),
+        'sample_sizes': {
+            'category_comparison_months': detailed.get(
+                'category_comparison_sample_size', 0
+            ),
+            'trend_recorded_complete_months': 0,
+        },
         'executive_summary': f"No transactions recorded for {month_label}. Ingest Gmail alerts or "
                              f"upload a statement to populate this report.",
         'sections': [],
@@ -902,6 +1237,19 @@ def generate_ai_financial_insights(detailed: dict, trend: list) -> dict:
         if parsed:
             parsed['available'] = True
             parsed['source'] = 'llm'
+            parsed['calculation_version'] = detailed.get(
+                'calculation_version', REPORT_CALCULATION_VERSION
+            )
+            parsed['period_status'] = detailed.get('period_status', 'unknown')
+            parsed['sample_sizes'] = {
+                'category_comparison_months': detailed.get(
+                    'category_comparison_sample_size', 0
+                ),
+                'trend_recorded_complete_months': len(
+                    [item for item in trend if item.get('has_observed_data')]
+                ),
+            }
+            parsed['caveat'] = detailed.get('financial_health_caveat')
             parsed.setdefault('executive_summary', '')
             return parsed
         logger.warning("LLM insights returned unparseable JSON")
@@ -1248,8 +1596,17 @@ def generate_summary_pdf(db: Session, month: str) -> bytes:
     pdf.stat_line('Total Spend', f'Rs {_format_inr(summary["total_spend"])}')
     pdf.stat_line('Total Income', f'Rs {_format_inr(summary["total_income"])}')
     sr = summary['savings_rate']
-    sr_color = ReportPDF.TONE_COLORS.get(_tone_for_savings(sr), (255, 255, 255))
+    sr_color = ReportPDF.TONE_COLORS.get(
+        _tone_for_savings(
+            sr,
+            summary['savings_target_percent'],
+            assessment_available=summary['savings_target_assessment_available'],
+        ),
+        (255, 255, 255),
+    )
     pdf.stat_line('Savings Rate', f'{sr}%' if sr is not None else 'N/A', value_color=sr_color)
+    pdf.stat_line('Savings Target', f'{summary["savings_target_percent"]}%')
+    pdf.stat_line('Period Status', summary['period_status'].title())
     pdf.stat_line('Transactions', str(summary['transaction_count']))
     pdf.stat_line('Avg Transaction', f'Rs {_format_inr(summary["avg_transaction"])}')
     pdf.stat_line('Recurring Total', f'Rs {_format_inr(summary["recurring_total"])}')
@@ -1283,7 +1640,7 @@ def generate_summary_pdf(db: Session, month: str) -> bytes:
         pdf.ln(4)
 
     # Trend chart
-    pdf.section_label('Spending Trend (6 Months)')
+    pdf.section_label('Finished-Month Spending Trend')
     pdf.image(io.BytesIO(trend_chart), x=15, w=140)
     pdf.ln(6)
 
@@ -1330,8 +1687,17 @@ def generate_detailed_pdf(
     pdf.stat_line('Total Spend', f'Rs {_format_inr(detailed["total_spend"])}')
     pdf.stat_line('Total Income', f'Rs {_format_inr(detailed["total_income"])}')
     sr = detailed['savings_rate']
-    sr_color = ReportPDF.TONE_COLORS.get(_tone_for_savings(sr), (255, 255, 255))
+    sr_color = ReportPDF.TONE_COLORS.get(
+        _tone_for_savings(
+            sr,
+            detailed['savings_target_percent'],
+            assessment_available=detailed['savings_target_assessment_available'],
+        ),
+        (255, 255, 255),
+    )
     pdf.stat_line('Savings Rate', f'{sr}%' if sr is not None else 'N/A', value_color=sr_color)
+    pdf.stat_line('Savings Target', f'{detailed["savings_target_percent"]}%')
+    pdf.stat_line('Period Status', detailed['period_status'].title())
     pdf.stat_line('Transactions', str(detailed['transaction_count']))
     pdf.ln(4)
 
@@ -1394,14 +1760,16 @@ def generate_detailed_pdf(
     pdf.ln(4)
 
     # Trend chart
-    pdf.section_label('Spending Trend (6 Months)')
+    pdf.section_label('Finished-Month Spending Trend')
     pdf.image(io.BytesIO(trend_chart), x=15, w=140)
     pdf.ln(4)
 
     # Category comparison (new page)
     if detailed.get('category_comparison'):
         pdf.add_page()
-        pdf.section_label('Category vs 3-Month Average')
+        pdf.section_label(
+            f"Category vs {detailed['category_comparison_sample_size']}-Recorded-Month Average"
+        )
         pdf.set_font('Helvetica', '', 9)
         for comp in detailed['category_comparison']:
             diff = comp['current'] - comp['average']

@@ -605,6 +605,13 @@ export function fetchReportDetailed(month) {
   return apiFetch(`/reports/detailed${qs}`);
 }
 
+export function updateReportSavingsTarget(targetPercent) {
+  return apiFetch('/reports/preferences/savings-target', {
+    method: 'PUT',
+    body: JSON.stringify({ target_percent: targetPercent }),
+  });
+}
+
 export function generateReportInsights(month) {
   return apiFetch('/reports/ai/insights', {
     method: 'POST',
@@ -1137,6 +1144,7 @@ export const auditApi = {
 export const reportsApi = {
   summary: fetchReportSummary,
   detailed: fetchReportDetailed,
+  updateSavingsTarget: updateReportSavingsTarget,
   generateInsights: generateReportInsights,
   transactions: fetchReportTransactions,
   comparison: fetchMonthlyComparison,

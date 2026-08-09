@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { format, subMonths } from 'date-fns';
 import {
@@ -17,6 +17,7 @@ import {
   fetchReportSummary, fetchReportDetailed, generateReportInsights,
   downloadMonthlyReportPDF, downloadCSV, fetchLicenseStatus, downloadFinancialYearPack,
   fetchLLMConfig,
+  updateReportSavingsTarget,
 } from '../api/client';
 import { websiteUrl } from '../config/website';
 import { StatCard } from '../components/StatCard';
@@ -116,6 +117,7 @@ function MarkdownCard({ children, className = '' }) {
 }
 
 export default function Reports() {
+  const queryClient = useQueryClient();
   const [month, setMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [contentReady, setContentReady] = useState(false);
   const [aiReportData, setAIReportData] = useState(null);
@@ -152,6 +154,16 @@ export default function Reports() {
   const insightsMutation = useMutation({
     mutationFn: requestedMonth => generateReportInsights(requestedMonth),
     onSuccess: data => setAIReportData(data),
+  });
+  const targetMutation = useMutation({
+    mutationFn: targetPercent => updateReportSavingsTarget(targetPercent),
+    onSuccess: async () => {
+      setAIReportData(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['reportSummary'] }),
+        queryClient.invalidateQueries({ queryKey: ['reportDetailed'] }),
+      ]);
+    },
   });
 
   const insightsData = aiReportData?.month === month ? aiReportData : null;
@@ -208,13 +220,55 @@ export default function Reports() {
               <ShieldCheck size={22} />
             </div>
             <div>
-              <p className="text-white/35 text-[0.68rem]">Monthly money picture</p>
+              <p className="text-white/35 text-[0.68rem]">Savings target progress</p>
               <p className="mt-0.5 text-2xl font-light text-[#54E1D0]">
-                {summary?.financial_health_score ?? '--'}<span className="text-xs text-white/25">/100</span>
+                {summary?.financial_health_score ?? '--'}
+                {summary?.financial_health_score != null && (
+                  <span className="text-xs text-white/25">/100</span>
+                )}
               </p>
               <p className="text-white/45 text-xs">{summary?.financial_health_label}</p>
             </div>
           </div>
+          <form
+            className="mt-3 flex items-end gap-2"
+            onSubmit={event => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const value = Number(form.get('targetPercent'));
+              if (Number.isFinite(value)) targetMutation.mutate(value);
+            }}
+          >
+            <label className="min-w-0 flex-1 text-[0.62rem] text-white/30">
+              Your monthly target
+              <span className="mt-1 flex min-h-9 items-center rounded-lg border border-white/[0.1] bg-black/10 px-2">
+                <input
+                  type="number"
+                  name="targetPercent"
+                  min="1"
+                  max="80"
+                  step="0.1"
+                  key={summary?.savings_target_percent ?? 20}
+                  defaultValue={summary?.savings_target_percent ?? 20}
+                  className="w-full bg-transparent text-xs text-white/65 outline-none"
+                  aria-label="Monthly savings target percentage"
+                />
+                <span className="text-white/25">%</span>
+              </span>
+            </label>
+            <button
+              type="submit"
+              disabled={targetMutation.isPending}
+              className="min-h-9 rounded-lg border border-[#54E1D0]/20 bg-[#17C3B2]/10 px-3 text-[0.65rem] text-[#54E1D0]/80 disabled:opacity-40"
+            >
+              {targetMutation.isPending ? 'Saving…' : 'Save'}
+            </button>
+          </form>
+          {targetMutation.isError && (
+            <p className="mt-1 text-[0.62rem] text-rose-200/70">
+              {targetMutation.error?.message || 'Use a target between 1% and 80%.'}
+            </p>
+          )}
           <p className="mt-3 text-white/22 text-[0.62rem] leading-relaxed">{summary?.financial_health_caveat}</p>
         </div>
       </section>
@@ -432,7 +486,10 @@ export default function Reports() {
           className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Current vs 3-Month Average</h2>
+          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-1" style={{ fontWeight: 500 }}>Completed-Month Category Comparison</h2>
+          <p className="mb-4 text-[0.62rem] text-white/22">
+            {detailed?.category_comparison_caveat || 'Waiting for comparable completed months.'}
+          </p>
           {!comparison.length ? (
             <p className="text-sm text-white/30 text-center py-8">No comparison data</p>
           ) : (
@@ -444,7 +501,7 @@ export default function Reports() {
                   <YAxis type="category" dataKey="category" stroke="rgba(255,255,255,0.2)" fontSize={9} tickLine={false} width={80} />
                   <Tooltip contentStyle={tooltipStyle} itemStyle={{ color: '#fff' }} formatter={(v) => formatINR(v)} />
                   <Bar dataKey="current" name="This Month" fill="#60a5fa" radius={[0, 4, 4, 0]} />
-                  <Bar dataKey="average" name="3-Mo Avg" fill="rgba(255,255,255,0.1)" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="average" name="Recorded-month avg" fill="rgba(255,255,255,0.1)" radius={[0, 4, 4, 0]} />
                   <Legend wrapperStyle={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }} iconSize={8} />
                 </BarChart>
               </ResponsiveContainer>

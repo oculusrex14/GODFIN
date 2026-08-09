@@ -128,15 +128,19 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
       '/reports/summary': {
         total_income: 85000,
         total_spend: 57000,
-        savings_rate: 0,
+        savings_rate: 32.9,
         recurring_total: 10500,
-        financial_health_score: 72,
-        financial_health_label: 'A steady month',
-        financial_health_caveat: 'This money picture is based only on the activity recorded in GODFIN.',
+        period_status: 'complete',
+        savings_target_percent: 20,
+        savings_target_assessment_available: true,
+        financial_health_score: 100,
+        financial_health_label: 'Monthly savings target reached',
+        financial_health_caveat: 'Version 2.0 target progress from verified recorded income and spending.',
         all_categories: [{ category: 'Food & Dining', amount: 12000 }],
       },
       '/reports/detailed': {
         category_comparison: [],
+        category_comparison_caveat: 'No prior recorded complete month is available for comparison.',
         income_breakdown: [{ source: 'Salary', amount: 85000 }],
         recurring_list: [{ merchant: 'Internet', amount: 1200 }],
         top_merchants: [],
@@ -369,7 +373,7 @@ test('calculation help stays in the viewport and settings remember expansion', a
 
   await navigateFromMobileMenu(page, 'Budget');
   await expect(page.getByRole('heading', { name: 'Budget & Goals' })).toBeVisible();
-  const infoButton = page.getByRole('button', { name: 'How Savings Rate is calculated' });
+  const infoButton = page.getByRole('button', { name: 'How Optional-spending change is calculated' });
   await infoButton.hover();
   const tooltip = page.getByRole('tooltip');
   await expect(tooltip).toBeVisible();
@@ -546,7 +550,9 @@ test('reports require connected AI for commentary and goals show a direct saving
   await page.getByRole('link', { name: 'Reports', exact: true }).click();
 
   await expect(page.getByText('Your financial report', { exact: false }).first()).toBeVisible();
-  await expect(page.getByText('72/100')).toBeVisible();
+  await expect(page.getByText('Savings target progress')).toBeVisible();
+  await expect(page.getByText('100/100')).toBeVisible();
+  await expect(page.getByLabel('Monthly savings target percentage')).toHaveValue('20');
   await expect(page.getByText(/Connect an AI to create the detailed written analysis/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Generate & Download AI PDF' })).toBeDisabled();
 
@@ -554,7 +560,7 @@ test('reports require connected AI for commentary and goals show a direct saving
   await expect(page.getByRole('button', { name: 'Add savings' })).toBeVisible();
   await page.getByRole('button', { name: 'Add savings' }).click();
   await expect(page.getByRole('heading', { name: /Update Emergency cushion/ })).toBeVisible();
-  await expect(page.getByLabel('Change')).toHaveValue('deposit');
+  await expect(page.getByLabel('ChangeAdd savingsRecord')).toHaveValue('deposit');
 });
 
 test('net worth hides every headline total when one active valuation is unsafe', async ({ page }) => {

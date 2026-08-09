@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from app.core.reporting import (
     generate_summary_pdf,
     prepare_detailed_report,
     prepare_summary_report,
+    set_savings_target_percent,
 )
 from app.core.tax_pack import build_financial_year_tax_pack
 from app.core.transaction_semantics import (
@@ -39,6 +40,17 @@ AI_REPORT_CONSENT_VERSION = "2026-08-02"
 class AIReportRequest(BaseModel):
     month: YearMonth | None = None
     consent: bool
+
+
+class SavingsTargetRequest(BaseModel):
+    target_percent: float = Field(ge=1, le=80)
+
+
+class SavingsTargetResponse(BaseModel):
+    target_percent: float
+    minimum_percent: float
+    maximum_percent: float
+    applies_to: str
 
 
 def _default_month(db: Session) -> str:
@@ -116,6 +128,24 @@ def report_detailed(
     if month is None:
         month = _default_month(db)
     return prepare_detailed_report(db, month)
+
+
+@router.put(
+    "/preferences/savings-target",
+    response_model=SavingsTargetResponse,
+)
+def update_report_savings_target(
+    body: SavingsTargetRequest,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    target = set_savings_target_percent(db, body.target_percent)
+    return {
+        "target_percent": float(target),
+        "minimum_percent": 1.0,
+        "maximum_percent": 80.0,
+        "applies_to": "completed monthly report target comparisons",
+    }
 
 
 def _ai_report_metadata(llm_config: LLMConfiguration) -> dict:
