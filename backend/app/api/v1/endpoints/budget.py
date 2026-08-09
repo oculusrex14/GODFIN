@@ -278,7 +278,10 @@ def void_contribution(
     )
     if not entry:
         raise HTTPException(status_code=404, detail="Contribution not found")
-    void_goal_contribution(db, entry, reason=body.reason)
+    try:
+        void_goal_contribution(db, entry, reason=body.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     goal = db.query(Goal).filter_by(id=goal_id).one()
     db.commit()
     return {
@@ -482,6 +485,15 @@ def financial_profile(
         "recurring_burden": profile.recurring_burden,
         "subscription_dependency": profile.subscription_dependency,
         "savings_rate": profile.savings_rate,
+        "data_status": profile.data_status,
+        "period_start": profile.period_start,
+        "period_end": profile.period_end,
+        "comparison_start": profile.comparison_start,
+        "comparison_end": profile.comparison_end,
+        "transaction_count": profile.transaction_count,
+        "comparison_transaction_count": profile.comparison_transaction_count,
+        "calculation_version": profile.calculation_version,
+        "caveat": profile.caveat,
     }
 
 

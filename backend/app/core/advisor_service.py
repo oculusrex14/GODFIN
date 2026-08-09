@@ -164,15 +164,24 @@ def build_financial_profile_text(db: Session) -> str:
         .scalar()
     )
 
-    savings_rate = f"{profile.savings_rate:.1f}%" if profile.savings_rate else "N/A"
+    savings_rate = (
+        f"{profile.savings_rate:.1f}%"
+        if profile.savings_rate is not None
+        else "Unavailable (not enough verified income in the complete month)"
+    )
 
     return f"""User Financial Profile:
 
-Current Month ({today.strftime('%B %Y')}):
+Current Month to Date ({today.strftime('%B %Y')} — incomplete period):
 - Income: Rs {income:,.0f}
 - Spending: Rs {total_spend:,.0f}
-- Savings Rate: {savings_rate}
 - Top Categories: {top_cats or 'No data yet'}
+
+Latest Complete Month ({profile.period_start} to {profile.period_end}):
+- Amount kept from income: {savings_rate}
+- Small flexible purchase share: {profile.impulse_index if profile.impulse_index is not None else 'Unavailable'}
+- Fixed-cost share of income: {profile.fixed_expense_ratio if profile.fixed_expense_ratio is not None else 'Unavailable'}
+- Calculation status: {profile.data_status}
 
 Last 3 Months:
 {history_text}
@@ -184,8 +193,7 @@ Overall:
 - Active Goals: {goals_text}
 - Monthly Recurring: Rs {recurring_total:,.0f}
 - Monthly Subscriptions: Rs {sub_total:,.0f}
-- Impulse Index: {profile.impulse_index:.1f}%
-- Fixed Expense Ratio: {profile.fixed_expense_ratio:.1f}%"""
+- Financial ratios above use complete calendar months only."""
 
 
 SYSTEM_PROMPT = """You are a friendly, knowledgeable personal financial advisor for an Indian user who tracks their finances through GODFIN.

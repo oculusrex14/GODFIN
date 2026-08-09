@@ -32,12 +32,13 @@ function formatINR(amount) {
 }
 
 function HealthGauge({ label, value, max = 100, invert = false, icon: Icon, calculation }) {
-  const safeValue = value != null && !isNaN(value) ? value : 0;
-  const pct = max > 0 ? Math.min(safeValue / max, 1) * 100 : 0;
+  const hasValue = value != null && !isNaN(value);
+  const safeValue = hasValue ? value : 0;
+  const pct = max > 0 ? Math.max(0, Math.min(safeValue / max, 1)) * 100 : 0;
   const good = invert ? pct < 40 : pct > 60;
   const warn = invert ? pct >= 40 && pct < 70 : pct >= 30 && pct <= 60;
-  const gradientClass = good ? 'from-emerald-400 to-emerald-500' : warn ? 'from-amber-400 to-amber-500' : 'from-rose-400 to-rose-500';
-  const textColor = good ? 'text-emerald-400/80' : warn ? 'text-amber-400/80' : 'text-rose-400/80';
+  const gradientClass = !hasValue ? 'from-white/15 to-white/10' : good ? 'from-emerald-400 to-emerald-500' : warn ? 'from-amber-400 to-amber-500' : 'from-rose-400 to-rose-500';
+  const textColor = !hasValue ? 'text-white/35' : good ? 'text-emerald-400/80' : warn ? 'text-amber-400/80' : 'text-rose-400/80';
 
   return (
     <div className="space-y-1.5">
@@ -48,7 +49,7 @@ function HealthGauge({ label, value, max = 100, invert = false, icon: Icon, calc
           {calculation && <CalculationInfo title={label} {...calculation} />}
         </div>
         <span className={`text-[0.8rem] tabular-nums ${textColor}`} style={{ fontWeight: 500 }}>
-          {value != null && !isNaN(value) ? `${value.toFixed(1)}%` : '--'}
+          {hasValue ? `${value.toFixed(1)}%` : '--'}
         </span>
       </div>
       <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
@@ -215,84 +216,93 @@ export default function Budget() {
           className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5 mb-6"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Financial Health</h2>
+          <div className="mb-4">
+            <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Your Money Patterns</h2>
+            <p className="mt-1 text-[0.68rem] text-white/30">
+              {profile.data_status === 'insufficient_history'
+                ? 'Add a complete month of transactions to calculate these patterns.'
+                : profile.data_status === 'income_unavailable'
+                  ? `Based on ${profile.period_start} to ${profile.period_end}. Income-based patterns need verified income.`
+                  : `Based on the complete month ${profile.period_start} to ${profile.period_end}.`}
+            </p>
+          </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <HealthGauge
-              label="Savings Rate"
+              label="How much income you kept"
               value={profile.savings_rate}
               icon={PiggyBank}
               calculation={{
-                meaning: 'The portion of income left after included expenses.',
-                formula: '(income − expenses) ÷ income',
-                inputs: 'Verified income and non-transfer expenses.',
-                period: 'Current financial-profile window.',
-                caveat: 'Unavailable when verified income is zero.',
+                meaning: 'For every ₹100 that came in as verified income, this is how much was left after everyday spending.',
+                formula: 'Money left after spending, shown as a share of verified income.',
+                inputs: 'Verified income and purchases that were not transfers or reversals.',
+                period: 'The latest complete calendar month.',
+                caveat: 'This stays blank when GODFIN cannot confirm the month’s income.',
               }}
             />
             <HealthGauge
-              label="Impulse Index"
+              label="Small-spend habit"
               value={profile.impulse_index}
               invert
               icon={Gauge}
               calculation={{
-                meaning: 'The share of debit transactions that are small flexible-category purchases.',
-                formula: 'small flexible debit count ÷ total debit count × 100',
-                inputs: 'Debits below ₹500 in flexible categories and all included debits.',
-                period: 'Current financial-profile window.',
-                caveat: 'Category quality affects this estimate; it is not a psychological diagnosis.',
+                meaning: 'How often your purchases were small, optional spends below ₹500.',
+                formula: 'Small optional purchases compared with all purchases.',
+                inputs: 'At least five purchases, using categories such as dining, shopping and entertainment.',
+                period: 'The latest complete calendar month.',
+                caveat: 'This describes a pattern only. It does not label a purchase as good or bad.',
               }}
             />
             <HealthGauge
-              label="Fixed Expense Ratio"
+              label="Income already committed"
               value={profile.fixed_expense_ratio}
               invert
               icon={Wallet}
               calculation={{
-                meaning: 'How much verified income is committed to fixed expenses.',
-                formula: 'fixed expenses ÷ income',
-                inputs: 'Fixed-category expenses and verified income.',
-                period: 'Current financial-profile window.',
-                caveat: 'Review categories and income completeness before interpreting this ratio.',
+                meaning: 'How much of your income went to harder-to-change costs such as housing and financial obligations.',
+                formula: 'Hard-to-change costs compared with verified income.',
+                inputs: 'Verified income and purchases categorized as fixed costs.',
+                period: 'The latest complete calendar month.',
+                caveat: 'Correct any wrong categories before relying on this number.',
               }}
             />
             <HealthGauge
-              label="Recurring Burden"
+              label="Repeat-payment load"
               value={profile.recurring_burden}
               invert
               icon={Repeat}
               calculation={{
-                meaning: 'The portion of income used by detected recurring payments.',
-                formula: 'recurring expenses ÷ income',
-                inputs: 'Confirmed recurring transactions and verified income.',
-                period: 'Current financial-profile window.',
-                caveat: 'New or irregular recurring payments may not be detected yet.',
+                meaning: 'How much of a typical month’s income is already spoken for by repeating payments.',
+                formula: 'Monthly equivalent of repeat payments compared with verified income.',
+                inputs: 'Detected monthly, quarterly and yearly payments converted to a monthly amount.',
+                period: 'Income from the latest complete month and currently detected repeat payments.',
+                caveat: 'New or irregular payments may not have enough history to appear yet.',
               }}
             />
             <HealthGauge
-              label="Subscription Dependency"
+              label="Subscription share"
               value={profile.subscription_dependency}
               invert
               icon={CreditCard}
               calculation={{
-                meaning: 'The portion of expenses attributed to confirmed subscriptions.',
-                formula: 'subscription expenses ÷ total expenses',
-                inputs: 'Confirmed subscriptions and non-transfer expenses.',
-                period: 'Current financial-profile window.',
-                caveat: 'Unconfirmed subscription suggestions are excluded.',
+                meaning: 'How much of your spending went to services that charge again and again.',
+                formula: 'Subscription spending compared with all spending.',
+                inputs: 'Confirmed subscription purchases and all included purchases.',
+                period: 'The latest complete calendar month.',
+                caveat: 'Suggestions you have not confirmed are left out.',
               }}
             />
             <HealthGauge
-              label="Lifestyle Inflation"
+              label="Optional-spending change"
               value={profile.lifestyle_inflation}
               max={200}
               invert
               icon={TrendingUp}
               calculation={{
-                meaning: 'How discretionary spending changed relative to the comparison period.',
-                formula: '(current flexible spend − prior flexible spend) ÷ prior flexible spend × 100',
-                inputs: 'Discretionary-category expenses in comparable periods.',
-                period: 'Current window versus the previous comparable window.',
-                caveat: 'Short or incomplete periods can create large swings.',
+                meaning: 'Whether optional spending rose or fell compared with the month before.',
+                formula: 'Change in optional spending from one complete month to the next.',
+                inputs: 'At least three optional purchases in each of two complete months.',
+                period: 'The latest complete month compared with the complete month before it.',
+                caveat: 'A change is a prompt to reflect, not proof that your lifestyle improved or worsened.',
               }}
             />
           </div>
@@ -475,7 +485,11 @@ export default function Budget() {
 
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-[0.8rem]">Required Monthly Saving</span>
+                  <span className="text-white/40 text-[0.8rem]">
+                    {simResult.months_remaining === 0
+                      ? 'Amount Needed Before Deadline'
+                      : 'Required Monthly Saving'}
+                  </span>
                   <span className="text-white/90 text-[0.95rem] tabular-nums" style={{ fontWeight: 500 }}>{formatINR(simResult.required_monthly)}</span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -487,7 +501,7 @@ export default function Budget() {
                   <span className="text-white/70 text-[0.85rem] tabular-nums">{formatINR(simResult.max_saveable)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-[0.8rem]">Months Remaining</span>
+                  <span className="text-white/40 text-[0.8rem]">Month-end Deposits Remaining</span>
                   <span className="text-white/70 text-[0.85rem] tabular-nums">{simResult.months_remaining}</span>
                 </div>
 
@@ -541,7 +555,9 @@ export default function Budget() {
                     <p>GODFIN needs at least two complete months of transaction history before estimating saving capacity.</p>
                   )}
                   <p className="mt-1">{simResult.caveat}</p>
-                  <p className="mt-1 text-white/25">Calculation version {simResult.calculation_version}; contributions are modeled at month end.</p>
+                  <p className="mt-1 text-white/25">
+                    Calculation version {simResult.calculation_version}; GODFIN counted the actual calendar month ends on or before your deadline.
+                  </p>
                 </div>
               </div>
             </motion.div>

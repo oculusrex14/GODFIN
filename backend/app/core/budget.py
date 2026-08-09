@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-import math
+import calendar
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.taxonomy import TAXONOMY
 from app.core.transaction_semantics import (
     active_clause,
     is_spending,
     is_verified_income,
-    spending_clause,
-    verified_income_clause,
 )
 from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
@@ -43,7 +39,7 @@ PRESSURE_LEVELS = {
     'moderate': 0.60,
     'aggressive': 0.80,
 }
-SIMULATION_CALCULATION_VERSION = "2.0"
+SIMULATION_CALCULATION_VERSION = "2.1"
 SIMULATION_HISTORY_MONTHS = 6
 MINIMUM_CAPACITY_MONTHS = 2
 
@@ -78,6 +74,31 @@ def calculate_required_monthly_saving(
         payment = future_gap / annuity_factor
 
     return float(payment.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def scheduled_month_end_contributions(
+    as_of: date,
+    deadline: date,
+) -> list[date]:
+    """Return the actual month-end contribution dates through a deadline."""
+    if deadline < as_of:
+        return []
+
+    year = as_of.year
+    month = as_of.month
+    scheduled: list[date] = []
+    while True:
+        month_end = date(year, month, calendar.monthrange(year, month)[1])
+        if month_end > deadline:
+            break
+        if month_end >= as_of:
+            scheduled.append(month_end)
+        if month == 12:
+            year += 1
+            month = 1
+        else:
+            month += 1
+    return scheduled
 
 
 @dataclass
@@ -127,10 +148,11 @@ def simulate_goal(
     deadline: date,
     annual_return_rate: float = 0.0,
     minimum_floor: float = 5000.0,
+    as_of: date | None = None,
 ) -> SimulationResult:
-    today = date.today()
-    days_remaining = max(1, (deadline - today).days)
-    months_remaining = max(1, math.ceil(days_remaining / 30.4375))
+    today = as_of or date.today()
+    contribution_dates = scheduled_month_end_contributions(today, deadline)
+    months_remaining = len(contribution_dates)
 
     required = calculate_required_monthly_saving(
         target_amount, current_saved, months_remaining, annual_return_rate
@@ -168,6 +190,15 @@ def simulate_goal(
         capacity_status="calculated" if has_capacity_data else "insufficient_data",
         assumptions={
             "contribution_timing": "end_of_month",
+            "schedule_basis": "actual_calendar_month_ends_on_or_before_deadline",
+            "first_contribution_date": (
+                contribution_dates[0].isoformat() if contribution_dates else None
+            ),
+            "last_contribution_date": (
+                contribution_dates[-1].isoformat() if contribution_dates else None
+            ),
+            "scheduled_contribution_count": months_remaining,
+            "amount_due_before_first_month_end": months_remaining == 0,
             "annual_return_rate": round(float(annual_return_rate), 6),
             "monthly_return_rate": round(float(annual_return_rate) / 12, 8),
             "minimum_flexible_floor": round(float(minimum_floor), 2),
@@ -284,153 +315,133 @@ def _calculate_extended_months(
 
 @dataclass
 class FinancialProfile:
-    impulse_index: float = 0.0
-    lifestyle_inflation: float = 0.0
-    fixed_expense_ratio: float = 0.0
-    recurring_burden: float = 0.0
-    subscription_dependency: float = 0.0
-    savings_rate: float = 0.0
+    impulse_index: Optional[float] = None
+    lifestyle_inflation: Optional[float] = None
+    fixed_expense_ratio: Optional[float] = None
+    recurring_burden: Optional[float] = None
+    subscription_dependency: Optional[float] = None
+    savings_rate: Optional[float] = None
+    data_status: str = "insufficient_history"
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    comparison_start: Optional[str] = None
+    comparison_end: Optional[str] = None
+    transaction_count: int = 0
+    comparison_transaction_count: int = 0
+    calculation_version: str = "2.0"
+    caveat: str = (
+        "These are descriptive money patterns from categorized transactions, "
+        "not a diagnosis or a judgment about you."
+    )
 
 
-def compute_financial_profile(db: Session) -> FinancialProfile:
-    profile = FinancialProfile()
-    today = date.today()
-    month_start = date(today.year, today.month, 1)
+def compute_financial_profile(
+    db: Session,
+    *,
+    as_of: date | None = None,
+) -> FinancialProfile:
+    """Calculate plain-language ratios from the latest complete month."""
+    today = as_of or date.today()
+    current_month_start = date(today.year, today.month, 1)
+    period_start = _month_start_offset(current_month_start, -1)
+    comparison_start = _month_start_offset(current_month_start, -2)
+    profile = FinancialProfile(
+        period_start=period_start.isoformat(),
+        period_end=(current_month_start - timedelta(days=1)).isoformat(),
+        comparison_start=comparison_start.isoformat(),
+        comparison_end=(period_start - timedelta(days=1)).isoformat(),
+    )
 
-    # Get current month data
-    if today.month == 1:
-        prev_month_start = date(today.year - 1, 12, 1)
-    else:
-        prev_month_start = date(today.year, today.month - 1, 1)
-
-    # Total income this month
-    income = float(
-        db.query(func.coalesce(func.sum(Transaction.amount), 0))
+    primary = (
+        db.query(Transaction)
         .filter(
-            Transaction.date >= month_start,
-            Transaction.status != 'deleted',
-            verified_income_clause(Transaction),
+            Transaction.date >= period_start,
+            Transaction.date < current_month_start,
+            active_clause(Transaction),
         )
-        .scalar()
+        .all()
+    )
+    comparison = (
+        db.query(Transaction)
+        .filter(
+            Transaction.date >= comparison_start,
+            Transaction.date < period_start,
+            active_clause(Transaction),
+        )
+        .all()
+    )
+    profile.transaction_count = len(primary)
+    profile.comparison_transaction_count = len(comparison)
+    if not primary:
+        return profile
+
+    income = sum(float(item.amount) for item in primary if is_verified_income(item))
+    spending = [item for item in primary if is_spending(item)]
+    total_spend = sum(float(item.amount) for item in spending)
+    fixed_categories = {
+        category for category, elasticity in ELASTICITY.items()
+        if elasticity == "fixed"
+    }
+    flexible_categories = {
+        category for category, elasticity in ELASTICITY.items()
+        if elasticity == "flexible"
+    }
+    fixed_spend = sum(
+        float(item.amount) for item in spending
+        if item.category in fixed_categories
+    )
+    flexible_spending = [
+        item for item in spending if item.category in flexible_categories
+    ]
+    subscription_spend = sum(
+        float(item.amount) for item in spending
+        if (item.subcategory or "").strip().lower() == "subscriptions"
     )
 
-    # Total spend this month (excluding transfers)
-    total_spend = float(
-        db.query(func.coalesce(func.sum(Transaction.amount), 0))
-        .filter(
-            Transaction.date >= month_start,
-            Transaction.status != 'deleted',
-            spending_clause(Transaction),
+    if len(spending) >= 5:
+        small_flexible_count = sum(
+            1 for item in flexible_spending if float(item.amount) < 500
         )
-        .scalar()
-    )
-
-    # 1. Savings Rate
-    if income > 0:
-        profile.savings_rate = round(((income - total_spend) / income) * 100, 1)
-
-    # 2. Fixed Expense Ratio
-    fixed_categories = [cat for cat, elast in ELASTICITY.items() if elast == 'fixed']
-    fixed_spend = float(
-        db.query(func.coalesce(func.sum(Transaction.amount), 0))
-        .filter(
-            Transaction.date >= month_start,
-            Transaction.status != 'deleted',
-            spending_clause(Transaction),
-            Transaction.category.in_(fixed_categories),
+        profile.impulse_index = round(
+            small_flexible_count / len(spending) * 100,
+            1,
         )
-        .scalar()
-    )
-    if income > 0:
-        profile.fixed_expense_ratio = round((fixed_spend / income) * 100, 1)
-
-    # 3. Impulse Index (small discretionary transactions < 500 in flexible categories)
-    flexible_categories = [cat for cat, elast in ELASTICITY.items() if elast == 'flexible']
-    small_count = (
-        db.query(func.count(Transaction.id))
-        .filter(
-            Transaction.date >= month_start,
-            Transaction.status != 'deleted',
-            spending_clause(Transaction),
-            Transaction.amount < 500,
-            Transaction.category.in_(flexible_categories),
-        )
-        .scalar()
-    )
-    total_txn_count = (
-        db.query(func.count(Transaction.id))
-        .filter(
-            Transaction.date >= month_start,
-            Transaction.status != 'deleted',
-            spending_clause(Transaction),
-        )
-        .scalar()
-    )
-    if total_txn_count > 0:
-        profile.impulse_index = min(round((small_count / total_txn_count) * 100, 1), 100.0)
-
-    # 4. Lifestyle Inflation (current month flexible vs previous month)
-    current_flexible = float(
-        db.query(func.coalesce(func.sum(Transaction.amount), 0))
-        .filter(
-            Transaction.date >= month_start,
-            Transaction.status != 'deleted',
-            spending_clause(Transaction),
-            Transaction.category.in_(flexible_categories),
-        )
-        .scalar()
-    )
-    prev_flexible = float(
-        db.query(func.coalesce(func.sum(Transaction.amount), 0))
-        .filter(
-            Transaction.date >= prev_month_start,
-            Transaction.date < month_start,
-            Transaction.status != 'deleted',
-            spending_clause(Transaction),
-            Transaction.category.in_(flexible_categories),
-        )
-        .scalar()
-    )
-    # Only compute if previous month had meaningful spending (>= 1000)
-    # to avoid extreme percentages from tiny denominators
-    if prev_flexible >= 1000:
-        raw = ((current_flexible - prev_flexible) / prev_flexible) * 100
-        profile.lifestyle_inflation = round(max(-100.0, min(raw, 500.0)), 1)
-    elif prev_flexible > 0 and current_flexible > 0:
-        # Not enough data for reliable %, flag as insufficient
-        profile.lifestyle_inflation = 0.0
-
-    # 5. Recurring Burden
-    recurring_total = float(
-        db.query(func.coalesce(func.sum(RecurringPattern.avg_amount), 0))
-        .filter(RecurringPattern.is_active == True, RecurringPattern.frequency == 'monthly')
-        .scalar()
-    )
-    if income > 0:
-        profile.recurring_burden = min(round((recurring_total / income) * 100, 1), 100.0)
-
-    # 6. Subscription Dependency (% of total spending, not just flexible)
-    sub_spend = float(
-        db.query(func.coalesce(func.sum(Transaction.amount), 0))
-        .filter(
-            Transaction.date >= month_start,
-            Transaction.status != 'deleted',
-            spending_clause(Transaction),
-            Transaction.category == 'ENTERTAINMENT',
-            Transaction.subcategory == 'Subscriptions',
-        )
-        .scalar()
-    )
-    total_spend = float(
-        db.query(func.coalesce(func.sum(Transaction.amount), 0))
-        .filter(
-            Transaction.date >= month_start,
-            Transaction.status != 'deleted',
-            spending_clause(Transaction),
-        )
-        .scalar()
-    )
     if total_spend > 0:
-        profile.subscription_dependency = min(round((sub_spend / total_spend) * 100, 1), 100.0)
+        profile.subscription_dependency = round(
+            subscription_spend / total_spend * 100,
+            1,
+        )
 
+    comparison_spending = [item for item in comparison if is_spending(item)]
+    comparison_flexible = [
+        item for item in comparison_spending
+        if item.category in flexible_categories
+    ]
+    if len(flexible_spending) >= 3 and len(comparison_flexible) >= 3:
+        current_flexible = sum(float(item.amount) for item in flexible_spending)
+        previous_flexible = sum(float(item.amount) for item in comparison_flexible)
+        if previous_flexible > 0:
+            profile.lifestyle_inflation = round(
+                (current_flexible - previous_flexible)
+                / previous_flexible
+                * 100,
+                1,
+            )
+
+    if income <= 0:
+        profile.data_status = "income_unavailable"
+        return profile
+
+    profile.savings_rate = round((income - total_spend) / income * 100, 1)
+    profile.fixed_expense_ratio = round(fixed_spend / income * 100, 1)
+    frequency_divisors = {"monthly": 1, "quarterly": 3, "annual": 12}
+    monthly_recurring = sum(
+        float(pattern.avg_amount) / frequency_divisors[pattern.frequency]
+        for pattern in db.query(RecurringPattern)
+        .filter(RecurringPattern.is_active.is_(True))
+        .all()
+        if pattern.frequency in frequency_divisors
+    )
+    profile.recurring_burden = round(monthly_recurring / income * 100, 1)
+    profile.data_status = "calculated"
     return profile

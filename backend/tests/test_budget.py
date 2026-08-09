@@ -11,6 +11,7 @@ from app.core.budget import (
     simulate_goal,
 )
 from app.core.recurring import detect_recurring_patterns
+from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
 from app.seed import SAVINGS_ACCOUNT_ID
 
@@ -103,22 +104,94 @@ def test_no_recurring_single_txn(db_session):
 # --- Financial Profile ---
 
 def test_financial_profile_empty(db_session):
-    profile = compute_financial_profile(db_session)
-    assert profile.savings_rate == 0.0
-    assert profile.impulse_index == 0.0
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+    assert profile.savings_rate is None
+    assert profile.impulse_index is None
+    assert profile.data_status == "insufficient_history"
+    assert profile.period_start == "2026-07-01"
+    assert profile.period_end == "2026-07-31"
 
 
 def test_financial_profile_with_data(db_session):
-    today = date.today()
-    _add_txn(db_session, 'SALARY', 75000, today, category='INCOME', txn_type='credit')
-    _add_txn(db_session, 'RENT', 20000, today, category='HOUSING')
-    _add_txn(db_session, 'SWIGGY', 200, today, category='FOOD & DINING')
-    _add_txn(db_session, 'COFFEE', 100, today, category='FOOD & DINING')
+    complete_month = date(2026, 7, 15)
+    _add_txn(db_session, 'SALARY', 75000, complete_month, category='INCOME', txn_type='credit')
+    _add_txn(db_session, 'RENT', 20000, complete_month, category='HOUSING')
+    _add_txn(db_session, 'SWIGGY', 200, complete_month, category='FOOD & DINING')
+    _add_txn(db_session, 'COFFEE', 100, complete_month, category='FOOD & DINING')
     db_session.flush()
 
-    profile = compute_financial_profile(db_session)
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
     assert profile.savings_rate > 0
     assert profile.fixed_expense_ratio > 0
+    assert profile.impulse_index is None
+    assert profile.data_status == "calculated"
+
+
+def test_financial_profile_ignores_partial_current_month(db_session):
+    _add_txn(
+        db_session,
+        'JULY SALARY',
+        10000,
+        date(2026, 7, 5),
+        category='INCOME',
+        txn_type='credit',
+    )
+    _add_txn(db_session, 'JULY RENT', 2000, date(2026, 7, 6), category='HOUSING')
+    _add_txn(
+        db_session,
+        'AUGUST PARTIAL SALARY',
+        999999,
+        date(2026, 8, 2),
+        category='INCOME',
+        txn_type='credit',
+    )
+    _add_txn(
+        db_session,
+        'AUGUST PARTIAL SPEND',
+        999999,
+        date(2026, 8, 3),
+        category='SHOPPING',
+    )
+    db_session.flush()
+
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+    assert profile.savings_rate == 80.0
+    assert profile.fixed_expense_ratio == 20.0
+    assert profile.transaction_count == 2
+
+
+def test_financial_profile_monthly_equivalent_recurring_costs(db_session):
+    _add_txn(
+        db_session,
+        'SALARY',
+        10000,
+        date(2026, 7, 5),
+        category='INCOME',
+        txn_type='credit',
+    )
+    for merchant, amount, frequency in (
+        ('MONTHLY BILL', 120, 'monthly'),
+        ('QUARTERLY BILL', 300, 'quarterly'),
+        ('YEARLY BILL', 1200, 'annual'),
+    ):
+        db_session.add(
+            RecurringPattern(
+                merchant_normalized=merchant,
+                avg_amount=amount,
+                frequency=frequency,
+                last_occurrence=date(2026, 7, 1),
+                next_expected=date(2026, 8, 1),
+                times_detected=4,
+                confidence=0.9,
+                evidence_count=4,
+                detection_status='active',
+                is_active=True,
+            )
+        )
+    db_session.flush()
+
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+    assert profile.recurring_burden == 3.2
 
 
 # --- Elasticity ---
@@ -220,6 +293,8 @@ def test_financial_profile_api(auth_client):
     assert "savings_rate" in data
     assert "impulse_index" in data
     assert "fixed_expense_ratio" in data
+    assert data["calculation_version"] == "2.0"
+    assert data["period_start"]
 
 
 def test_elasticity_api(auth_client):

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from decimal import Decimal
 from typing import Iterable
+from uuid import uuid4
 
-from sqlalchemy import func
+from sqlalchemy import func, text
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.core.money import exact_money_statement_values, money_decimal, money_to_minor
 from app.core.time import utcnow_naive
 from app.models.goal import Goal
 from app.models.goal_contribution import (
@@ -30,6 +34,10 @@ _EXCLUDED_DEPOSIT_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 _INVALID_SOURCE_STATUSES = {"deleted", "reversed", "reversal", "voided"}
+
+
+class GoalBalanceInvariantError(ValueError):
+    """Raised when contribution history would make a goal balance negative."""
 
 
 def contribution_to_dict(entry: GoalContribution) -> dict:
@@ -81,7 +89,12 @@ def calculate_goal_balance(db: Session, goal_id: str) -> float:
         )
         .scalar()
     )
-    return round(max(0.0, float(total or 0.0)), 2)
+    balance = money_decimal(total or Decimal("0.00"))
+    if balance < 0:
+        raise GoalBalanceInvariantError(
+            "Goal contribution history is inconsistent: withdrawals exceed savings."
+        )
+    return float(balance)
 
 
 def recompute_goal_balance(db: Session, goal: Goal) -> float:
@@ -101,36 +114,82 @@ def add_goal_contribution(
     source_transaction_id: str | None = None,
     idempotency_key: str | None = None,
 ) -> GoalContribution:
-    if idempotency_key:
-        existing = (
-            db.query(GoalContribution)
-            .filter_by(idempotency_key=idempotency_key)
-            .first()
-        )
-        if existing:
-            return existing
-
-    magnitude = round(abs(float(amount)), 2)
+    magnitude = abs(money_decimal(amount))
     if magnitude <= 0:
         raise ValueError("Contribution amount must be greater than zero.")
     signed_amount = -magnitude if entry_type == "withdrawal" else magnitude
-    current_total = recompute_goal_balance(db, goal)
-    if current_total + signed_amount < -0.005:
-        raise ValueError("A withdrawal cannot reduce goal savings below zero.")
+    table = GoalContribution.__table__
+    entry_id = str(uuid4())
+    values = {
+        "id": entry_id,
+        "goal_id": goal.id,
+        "contribution_date": contribution_date,
+        "entry_type": entry_type,
+        "source_type": source_type,
+        "source_transaction_id": source_transaction_id,
+        "idempotency_key": idempotency_key,
+        "note": note,
+        "is_voided": False,
+        "created_at": utcnow_naive(),
+        **exact_money_statement_values(table, {"amount": signed_amount}),
+    }
 
-    entry = GoalContribution(
-        goal_id=goal.id,
-        amount=signed_amount,
-        contribution_date=contribution_date,
-        entry_type=entry_type,
-        source_type=source_type,
-        source_transaction_id=source_transaction_id,
-        idempotency_key=idempotency_key,
-        note=note,
-    )
-    db.add(entry)
-    db.flush()
-    recompute_goal_balance(db, goal)
+    # The insert is the concurrency boundary. SQLite serializes writers and the
+    # two unique identities make simultaneous retries collapse into one row.
+    # The goal total changes only when this transaction actually inserted it.
+    with db.begin_nested():
+        inserted = db.execute(
+            sqlite_insert(table).values(values).on_conflict_do_nothing()
+        )
+        if inserted.rowcount != 1:
+            existing_query = db.query(GoalContribution)
+            if idempotency_key:
+                existing_query = existing_query.filter_by(
+                    idempotency_key=idempotency_key
+                )
+            elif source_transaction_id:
+                existing_query = existing_query.filter_by(
+                    source_transaction_id=source_transaction_id
+                )
+            else:
+                raise ValueError("Contribution could not be recorded uniquely.")
+            existing = existing_query.first()
+            if existing is None:
+                raise ValueError("Contribution identity conflict could not be resolved.")
+            if (
+                existing.goal_id != goal.id
+                or money_decimal(existing.amount) != signed_amount
+                or existing.entry_type != entry_type
+                or existing.contribution_date != contribution_date
+                or existing.source_transaction_id != source_transaction_id
+                or existing.source_type != source_type
+                or existing.note != note
+            ):
+                raise ValueError(
+                    "This contribution identity was already used for different details."
+                )
+            db.expire(goal, ["_legacy_current_saved", "_exact_current_saved"])
+            return existing
+
+        delta_minor = money_to_minor(signed_amount)
+        updated = db.execute(
+            text(
+                "UPDATE goals SET "
+                "current_saved_minor = current_saved_minor + :delta_minor, "
+                "current_saved = "
+                "CAST(current_saved_minor + :delta_minor AS REAL) / 100.0 "
+                "WHERE id = :goal_id "
+                "AND current_saved_minor + :delta_minor >= 0"
+            ),
+            {"delta_minor": delta_minor, "goal_id": goal.id},
+        )
+        if updated.rowcount != 1:
+            raise ValueError("A withdrawal cannot reduce goal savings below zero.")
+
+    db.expire(goal, ["_legacy_current_saved", "_exact_current_saved"])
+    entry = db.get(GoalContribution, entry_id)
+    if entry is None:
+        raise RuntimeError("Contribution insert completed without a readable ledger row.")
     return entry
 
 
@@ -142,12 +201,14 @@ def void_goal_contribution(
 ) -> None:
     if entry.is_voided:
         return
-    entry.is_voided = True
-    entry.voided_at = utcnow_naive()
-    entry.void_reason = reason[:255]
-    goal = db.query(Goal).filter_by(id=entry.goal_id).first()
-    if goal:
-        recompute_goal_balance(db, goal)
+    with db.begin_nested():
+        entry.is_voided = True
+        entry.voided_at = utcnow_naive()
+        entry.void_reason = reason[:255]
+        db.flush()
+        goal = db.query(Goal).filter_by(id=entry.goal_id).first()
+        if goal:
+            recompute_goal_balance(db, goal)
 
 
 def _deposit_evidence(transaction: Transaction) -> tuple[str, str, float] | None:

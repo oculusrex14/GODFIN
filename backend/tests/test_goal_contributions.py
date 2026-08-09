@@ -2,15 +2,27 @@ from __future__ import annotations
 
 import calendar
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from threading import Barrier
 
 import pytest
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
 
-from app.core.budget import calculate_required_monthly_saving, simulate_goal
+from app.core.budget import (
+    calculate_required_monthly_saving,
+    scheduled_month_end_contributions,
+    simulate_goal,
+)
 from app.core.goal_contributions import (
+    GoalBalanceInvariantError,
+    add_goal_contribution,
+    calculate_goal_balance,
     detect_goal_contribution_suggestions,
     reconcile_goal_source_transactions,
 )
+from app.core.database import Base
 from app.core.recurring import detect_recurring_patterns
 from app.models.app_setting import AppSetting
 from app.models.goal import Goal
@@ -152,6 +164,188 @@ def test_goal_opening_balance_deposit_withdrawal_and_void(auth_client):
     assert too_large.status_code == 400
 
 
+def test_goal_idempotency_key_rejects_changed_details(auth_client):
+    goal_id = auth_client.post(
+        "/api/v1/goals",
+        json=_future_goal_payload(current_saved=0),
+    ).json()["id"]
+    first = auth_client.post(
+        f"/api/v1/goals/{goal_id}/contributions",
+        json={
+            "amount": 1250.25,
+            "entry_type": "deposit",
+            "idempotency_key": "stable-operation-1",
+        },
+    )
+    assert first.status_code == 201
+
+    changed = auth_client.post(
+        f"/api/v1/goals/{goal_id}/contributions",
+        json={
+            "amount": 1250.26,
+            "entry_type": "deposit",
+            "idempotency_key": "stable-operation-1",
+        },
+    )
+    assert changed.status_code == 400
+    goal = auth_client.get("/api/v1/goals").json()[0]
+    assert goal["current_saved"] == 1250.25
+
+
+def test_voiding_supporting_deposit_cannot_make_balance_negative(auth_client):
+    goal_id = auth_client.post(
+        "/api/v1/goals",
+        json=_future_goal_payload(current_saved=0),
+    ).json()["id"]
+    deposit = auth_client.post(
+        f"/api/v1/goals/{goal_id}/contributions",
+        json={"amount": 200, "entry_type": "deposit"},
+    ).json()["contribution"]
+    withdrawal = auth_client.post(
+        f"/api/v1/goals/{goal_id}/contributions",
+        json={"amount": 150, "entry_type": "withdrawal"},
+    )
+    assert withdrawal.status_code == 201
+
+    response = auth_client.post(
+        f"/api/v1/goals/{goal_id}/contributions/{deposit['id']}/void",
+        json={"reason": "Would invalidate the remaining withdrawal"},
+    )
+    assert response.status_code == 409
+    entries = auth_client.get(
+        f"/api/v1/goals/{goal_id}/contributions"
+    ).json()
+    original = next(entry for entry in entries if entry["id"] == deposit["id"])
+    assert original["is_voided"] is False
+    goal = auth_client.get("/api/v1/goals").json()[0]
+    assert goal["current_saved"] == 50
+
+
+def test_corrupt_negative_goal_ledger_raises_invariant(db_session):
+    goal = Goal(
+        name="Invariant test",
+        target_amount=1000,
+        current_saved=0,
+        deadline_date=date.today() + timedelta(days=30),
+    )
+    db_session.add(goal)
+    db_session.flush()
+    db_session.add(
+        GoalContribution(
+            goal_id=goal.id,
+            amount=-100,
+            contribution_date=date.today(),
+            entry_type="withdrawal",
+            source_type="manual",
+        )
+    )
+    db_session.flush()
+
+    with pytest.raises(GoalBalanceInvariantError):
+        calculate_goal_balance(db_session, goal.id)
+
+
+def test_concurrent_goal_updates_are_atomic_and_idempotent(tmp_path):
+    database_path = tmp_path / "concurrent-goals.db"
+    engine = create_engine(
+        f"sqlite:///{database_path}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+
+    @event.listens_for(engine, "connect")
+    def _configure_sqlite(connection, _record):
+        cursor = connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=10000")
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+    with SessionLocal() as db:
+        goal = Goal(
+            name="Concurrent goal",
+            target_amount=1000,
+            current_saved=0,
+            deadline_date=date.today() + timedelta(days=90),
+        )
+        db.add(goal)
+        db.flush()
+        add_goal_contribution(
+            db,
+            goal,
+            amount=100,
+            entry_type="deposit",
+            contribution_date=date.today(),
+            source_type="opening_balance",
+            idempotency_key=f"opening:{goal.id}",
+        )
+        goal_id = goal.id
+        db.commit()
+
+    def record(amount, entry_type, key, gate):
+        with SessionLocal() as db:
+            goal = db.get(Goal, goal_id)
+            gate.wait()
+            try:
+                entry = add_goal_contribution(
+                    db,
+                    goal,
+                    amount=amount,
+                    entry_type=entry_type,
+                    contribution_date=date.today(),
+                    idempotency_key=key,
+                )
+                db.commit()
+                return ("recorded", entry.id, float(goal.current_saved))
+            except ValueError as exc:
+                db.rollback()
+                return ("rejected", str(exc))
+
+    duplicate_gate = Barrier(2)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        duplicate_results = list(
+            executor.map(
+                lambda _index: record(
+                    10, "deposit", "same-concurrent-operation", duplicate_gate
+                ),
+                range(2),
+            )
+        )
+    assert [result[0] for result in duplicate_results] == ["recorded", "recorded"]
+    assert len({result[1] for result in duplicate_results}) == 1
+    assert [result[2] for result in duplicate_results] == [110, 110]
+
+    withdrawal_gate = Barrier(2)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        withdrawal_results = list(
+            executor.map(
+                lambda index: record(
+                    80,
+                    "withdrawal",
+                    f"distinct-withdrawal-{index}",
+                    withdrawal_gate,
+                ),
+                range(2),
+            )
+        )
+    assert sorted(result[0] for result in withdrawal_results) == [
+        "recorded",
+        "rejected",
+    ]
+
+    with SessionLocal() as db:
+        goal = db.get(Goal, goal_id)
+        assert goal.current_saved == 30
+        assert (
+            db.query(GoalContribution)
+            .filter_by(goal_id=goal_id, entry_type="withdrawal")
+            .count()
+            == 1
+        )
+    engine.dispose()
+
+
 def test_fd_rd_suggestion_gate_assignment_none_and_source_reversal(
     auth_client,
     db_session,
@@ -258,6 +452,36 @@ def test_simulation_reference_zero_return_existing_savings_and_rounding():
     assert calculate_required_monthly_saving(10000, 10000, 12, 0) == 0
 
 
+def test_simulation_uses_calendar_month_ends_and_leap_year():
+    assert scheduled_month_end_contributions(
+        date(2028, 1, 31),
+        date(2028, 3, 31),
+    ) == [date(2028, 1, 31), date(2028, 2, 29), date(2028, 3, 31)]
+    assert scheduled_month_end_contributions(
+        date(2028, 2, 1),
+        date(2028, 2, 28),
+    ) == []
+    assert scheduled_month_end_contributions(
+        date(2028, 2, 1),
+        date(2028, 3, 1),
+    ) == [date(2028, 2, 29)]
+
+
+def test_simulation_partial_deadline_reports_amount_due_before_month_end(db_session):
+    result = simulate_goal(
+        db_session,
+        target_amount=10000,
+        current_saved=2500,
+        deadline=date(2028, 1, 30),
+        annual_return_rate=0,
+        as_of=date(2028, 1, 15),
+    )
+    assert result.months_remaining == 0
+    assert result.required_monthly == 7500
+    assert result.assumptions["amount_due_before_first_month_end"] is True
+    assert result.assumptions["first_contribution_date"] is None
+
+
 def test_simulation_capacity_uses_complete_historical_months(db_session):
     today = date.today()
     first = _shift_months(date(today.year, today.month, 15), -1)
@@ -295,7 +519,7 @@ def test_simulation_capacity_uses_complete_historical_months(db_session):
     assert result.baseline_surplus == 20000
     assert result.reducible_flexible_spend == 5000
     assert result.max_saveable == 25000
-    assert result.calculation_version == "2.0"
+    assert result.calculation_version == "2.1"
 
 
 @pytest.mark.parametrize(
