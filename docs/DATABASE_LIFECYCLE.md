@@ -16,9 +16,13 @@ revision chain.
    Each revision has an explicit apply function and postcondition validator.
 5. Run SQLAlchemy `Base.metadata.create_all()` so a fresh empty profile receives
    every current table, constraint, and index.
-6. Run restart-safe data backfills, then data-only seeds with existence checks.
+6. Run the idempotent migration registry again after table creation. This
+   installs registry-owned indexes, precision columns, and write guards on a
+   fresh database and on any table that did not exist during the pre-create
+   pass. The verified recovery point remains the single backup from step 3.
+7. Run restart-safe data backfills, then data-only seeds with existence checks.
    Seeds never mutate schema.
-7. Record the current revision only after all schema and data work succeeds,
+8. Record the current revision only after all schema and data work succeeds,
    then verify `quick_check`, foreign keys, revision, and migration
    postconditions before the application becomes available.
 

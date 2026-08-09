@@ -2,8 +2,11 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.core import startup_migrations
+from app.core.database import Base
 from app.core.startup_migrations import (
     CURRENT_SCHEMA_REVISION,
     SchemaMigrationError,
@@ -14,6 +17,51 @@ from app.core.startup_migrations import (
     validate_schema_postconditions,
 )
 from app.models.app_setting import AppSetting
+
+
+def test_fresh_database_post_create_pass_installs_all_registry_invariants(
+    tmp_path,
+):
+    db_path = tmp_path / "godfin.db"
+
+    # The first pass intentionally has no schema to update on a brand-new
+    # installation. This mirrors the production lifespan ordering.
+    apply_additive_schema_updates(str(db_path))
+    assert not db_path.exists()
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(bind=engine)
+
+    # The post-create pass must materialize every migration invariant before
+    # the schema revision is recorded and startup validation runs.
+    apply_additive_schema_updates(str(db_path))
+    TestSession = sessionmaker(bind=engine)
+    with TestSession() as db:
+        record_schema_revision(db)
+    engine.dispose()
+
+    validate_schema_postconditions(str(db_path))
+    assert read_schema_revision(str(db_path)) == CURRENT_SCHEMA_REVISION
+
+    connection = sqlite3.connect(db_path)
+    try:
+        installed = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type IN ('index', 'trigger')"
+            ).fetchall()
+        }
+    finally:
+        connection.close()
+
+    assert {
+        "uq_monthly_aggregates_global_month",
+        "uq_recurring_patterns_global_merchant",
+        "trg_monthly_aggregates_financial_guard_insert",
+        "trg_recurring_patterns_financial_guard_insert",
+        "trg_net_worth_items_precision_guard_insert",
+    }.issubset(installed)
 
 
 def _create_legacy_database(path: Path) -> None:

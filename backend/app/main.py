@@ -65,6 +65,14 @@ async def lifespan(app: FastAPI):
     # its single local SQLite lifecycle. Seeds never mutate schema.
     Base.metadata.create_all(bind=engine)
 
+    # A fresh database (or a legacy database missing a newly introduced table)
+    # has nothing for the pre-create migration pass to update. Re-run the
+    # restart-safe registry after every declared table exists so indexes,
+    # precision columns, and write guards are installed before seeds or API
+    # traffic can write to them. The only backup remains the pre-create backup
+    # above; this second pass never changes that recovery point.
+    apply_additive_schema_updates(DB_PATH)
+
     # Run database seeds
     db = SessionLocal()
     try:
