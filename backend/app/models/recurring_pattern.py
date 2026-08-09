@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -82,6 +83,15 @@ class RecurringPattern(Base):
             name="ck_recurring_patterns_active_status",
         ),
         CheckConstraint(
+            "json_valid(evidence_transaction_ids_json) "
+            "AND json_type(evidence_transaction_ids_json) = 'array'",
+            name="ck_recurring_patterns_evidence_json",
+        ),
+        CheckConstraint(
+            "length(trim(detection_version)) BETWEEN 1 AND 20",
+            name="ck_recurring_patterns_detection_version",
+        ),
+        CheckConstraint(
             f"avg_amount_minor BETWEEN 1 AND {MAX_MONEY_MINOR}",
             name="ck_recurring_patterns_avg_amount_minor",
         ),
@@ -128,6 +138,16 @@ class RecurringPattern(Base):
     category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     evidence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    evidence_transaction_ids_json: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="[]",
+    )
+    detection_version: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="2.0",
+    )
     interval_variability: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     amount_variability: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     detection_status: Mapped[str] = mapped_column(

@@ -67,6 +67,12 @@ temporary floating compatibility representation cannot lose integer identity.
 Compatibility shadows cannot be removed until every supported private build
 has crossed the migration boundary.
 
+Revision 16 adds durable recurring-detection provenance. Every stored pattern
+now records the exact local transaction IDs used as evidence and the detector
+version that interpreted them. Existing patterns receive an empty evidence
+array and are repopulated by the next scan. SQLite JSON/version guards reject
+malformed provenance on both fresh and upgraded databases.
+
 This strategy is intentional for a packaged, single-user, local-only
 application. A schema change must remain safe to run repeatedly against both an
 empty database and every supported prior local revision.

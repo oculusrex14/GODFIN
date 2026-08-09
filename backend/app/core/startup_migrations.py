@@ -26,7 +26,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 15
+CURRENT_SCHEMA_REVISION = 16
 
 
 class SchemaMigrationError(RuntimeError):
@@ -1407,6 +1407,94 @@ def _validate_revision_15(connection: sqlite3.Connection) -> None:
                 )
 
 
+def _recurring_provenance_is_supported(
+    connection: sqlite3.Connection,
+) -> bool:
+    columns = _table_columns(connection, "recurring_patterns")
+    return bool(columns) and {
+        "id",
+        "merchant_normalized",
+        "frequency",
+        "evidence_count",
+    }.issubset(columns)
+
+
+def _recurring_provenance_invalid_sql(*, prefix: str = "") -> str:
+    evidence = f'{prefix}"evidence_transaction_ids_json"'
+    version = f'{prefix}"detection_version"'
+    return (
+        f"{evidence} IS NULL OR json_valid({evidence}) = 0 OR "
+        f"json_type({evidence}) <> 'array' OR "
+        f"{version} IS NULL OR length(trim({version})) NOT BETWEEN 1 AND 20"
+    )
+
+
+def _install_recurring_provenance_guards(
+    connection: sqlite3.Connection,
+) -> None:
+    invalid = _recurring_provenance_invalid_sql(prefix="NEW.")
+    for operation in ("insert", "update"):
+        trigger = f"trg_recurring_patterns_provenance_{operation}"
+        connection.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')
+        connection.execute(
+            f'CREATE TRIGGER "{trigger}" '
+            f'BEFORE {operation.upper()} ON "recurring_patterns" '
+            f"FOR EACH ROW WHEN {invalid} BEGIN "
+            "SELECT RAISE(ABORT, "
+            "'GODFIN recurring evidence invariant failed'); "
+            "END"
+        )
+
+
+def _apply_revision_16(connection: sqlite3.Connection) -> None:
+    """Add durable recurring-detection provenance and algorithm versioning."""
+    if not _recurring_provenance_is_supported(connection):
+        return
+    columns = _table_columns(connection, "recurring_patterns")
+    if "evidence_transaction_ids_json" not in columns:
+        connection.execute(
+            "ALTER TABLE recurring_patterns ADD COLUMN "
+            "evidence_transaction_ids_json TEXT NOT NULL DEFAULT '[]'"
+        )
+    if "detection_version" not in columns:
+        connection.execute(
+            "ALTER TABLE recurring_patterns ADD COLUMN "
+            "detection_version TEXT NOT NULL DEFAULT '2.0'"
+        )
+    _install_recurring_provenance_guards(connection)
+
+
+def _validate_revision_16(connection: sqlite3.Connection) -> None:
+    if not _recurring_provenance_is_supported(connection):
+        return
+    columns = _table_columns(connection, "recurring_patterns")
+    required = {"evidence_transaction_ids_json", "detection_version"}
+    missing = required.difference(columns)
+    if missing:
+        raise SchemaMigrationError(
+            "The recurring-pattern provenance columns were not installed."
+        )
+    invalid = connection.execute(
+        "SELECT COUNT(*) FROM recurring_patterns WHERE "
+        f"{_recurring_provenance_invalid_sql()}"
+    ).fetchone()[0]
+    if invalid:
+        raise SchemaMigrationError(
+            f"The recurring-pattern table contains {invalid} invalid "
+            "provenance row(s)."
+        )
+    for operation in ("insert", "update"):
+        trigger = f"trg_recurring_patterns_provenance_{operation}"
+        installed = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()
+        if not installed:
+            raise SchemaMigrationError(
+                "The recurring-pattern provenance guard was not installed."
+            )
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -1437,6 +1525,12 @@ MIGRATION_REGISTRY = (
         name="add_exact_net_worth_and_fx_precision",
         apply=_apply_revision_15,
         validate=_validate_revision_15,
+    ),
+    SchemaMigration(
+        revision=16,
+        name="add_recurring_detection_provenance",
+        apply=_apply_revision_16,
+        validate=_validate_revision_16,
     ),
 )
 

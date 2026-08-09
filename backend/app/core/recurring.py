@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import calendar
+import json
 import statistics
 import uuid
 from dataclasses import dataclass
 from datetime import date
 from typing import Iterable, Optional
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, or_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,8 @@ from app.core.transaction_semantics import (
 )
 
 _EXCLUDED_STATUSES = {"deleted", "reversed", "reversal", "voided"}
+DETECTION_VERSION = "2.0"
+_STALE_CYCLES = {"monthly": 3, "quarterly": 2, "annual": 2}
 
 
 @dataclass
@@ -71,10 +74,28 @@ def _add_months(value: date, months: int) -> date:
     return date(year, month, day)
 
 
-def _next_expected(last_date: date, frequency: str) -> date:
-    return _add_months(
+def _next_expected(
+    last_date: date,
+    frequency: str,
+    *,
+    after: date,
+) -> date:
+    months = {"monthly": 1, "quarterly": 3, "annual": 12}[frequency]
+    cycles = 1
+    expected = _add_months(last_date, months)
+    while expected <= after:
+        cycles += 1
+        # Always project from the observed date so a February clamp does not
+        # permanently move a 29th/30th billing anchor to month-end.
+        expected = _add_months(last_date, months * cycles)
+    return expected
+
+
+def _is_stale(last_date: date, frequency: str, *, as_of: date) -> bool:
+    months = {"monthly": 1, "quarterly": 3, "annual": 12}[frequency]
+    return as_of > _add_months(
         last_date,
-        {"monthly": 1, "quarterly": 3, "annual": 12}[frequency],
+        months * _STALE_CYCLES[frequency],
     )
 
 
@@ -180,7 +201,7 @@ def _insert_pattern_if_absent(
     merchant: str,
     account_id: Optional[str],
     values: dict,
-) -> bool:
+) -> str | None:
     """Insert one pattern behind the database uniqueness boundary."""
     insert_values = dict(values)
     money_values = exact_money_statement_values(
@@ -212,17 +233,21 @@ def _insert_pattern_if_absent(
             ],
             index_where=RecurringPattern.account_id.is_not(None),
         )
-    return db.execute(statement).rowcount == 1
+    return db.execute(
+        statement.returning(RecurringPattern.id)
+    ).scalar_one_or_none()
 
 
 def detect_recurring_patterns(
     db: Session,
     *,
     merchant_keys: Iterable[tuple[str, str | None]] | None = None,
+    as_of: date | None = None,
 ) -> DetectionSummary:
     requested_keys = set(merchant_keys or [])
-    query = (
-        db.query(Transaction.merchant_normalized, Transaction.account_id)
+    reference_date = as_of or date.today()
+    transaction_query = (
+        db.query(Transaction)
         .filter(
             Transaction.status.notin_(_EXCLUDED_STATUSES),
             spending_clause(Transaction),
@@ -230,7 +255,7 @@ def detect_recurring_patterns(
         )
     )
     if requested_keys:
-        query = query.filter(
+        transaction_query = transaction_query.filter(
             or_(
                 *[
                     and_(
@@ -241,44 +266,77 @@ def detect_recurring_patterns(
                 ]
             )
         )
-    rows = (
-        query.group_by(Transaction.merchant_normalized, Transaction.account_id)
-        .having(func.count(Transaction.id) >= 2)
+    transactions = (
+        transaction_query.order_by(
+            Transaction.merchant_normalized,
+            Transaction.account_id,
+            Transaction.date,
+            Transaction.id,
+        )
         .all()
     )
-    scanned_keys = {(row.merchant_normalized, row.account_id) for row in rows}
+    grouped: dict[tuple[str, str | None], list[Transaction]] = {}
+    for transaction in transactions:
+        if _is_reversal(transaction):
+            continue
+        grouped.setdefault(
+            (transaction.merchant_normalized, transaction.account_id),
+            [],
+        ).append(transaction)
+    scanned_keys = {
+        key for key, values in grouped.items() if len(values) >= 2
+    }
     if requested_keys:
         scanned_keys |= requested_keys
 
     summary = DetectionSummary(scanned=len(scanned_keys))
     supported_pattern_ids: set[str] = set()
-    for merchant, account_id in sorted(scanned_keys, key=lambda item: (item[0], item[1] or "")):
-        txns = (
-            db.query(Transaction)
-            .filter(
-                Transaction.merchant_normalized == merchant,
-                Transaction.account_id == account_id,
-                Transaction.status.notin_(_EXCLUDED_STATUSES),
-                spending_clause(Transaction),
+    existing_query = db.query(RecurringPattern)
+    if requested_keys:
+        existing_query = existing_query.filter(
+            or_(
+                *[
+                    and_(
+                        RecurringPattern.merchant_normalized == merchant,
+                        RecurringPattern.account_id == account_id,
+                    )
+                    for merchant, account_id in requested_keys
+                ]
             )
-            .order_by(Transaction.date)
-            .all()
         )
-        txns = [transaction for transaction in txns if not _is_reversal(transaction)]
+    existing_by_key = {
+        (pattern.merchant_normalized, pattern.account_id): pattern
+        for pattern in existing_query.all()
+    }
+
+    for merchant, account_id in sorted(
+        scanned_keys,
+        key=lambda item: (item[0], item[1] or ""),
+    ):
+        txns = grouped.get((merchant, account_id), [])
         analysis = _analyze_pattern(txns)
-        existing = (
-            db.query(RecurringPattern)
-            .filter_by(merchant_normalized=merchant, account_id=account_id)
-            .first()
-        )
+        existing = existing_by_key.get((merchant, account_id))
         if analysis is None:
-            if existing and existing.is_active:
+            if existing and existing.detection_status in {"active", "candidate"}:
+                was_active = existing.is_active
                 existing.is_active = False
                 existing.detection_status = "retired"
-                summary.deactivated += 1
+                existing.next_expected = None
+                existing.detection_version = DETECTION_VERSION
+                existing.evidence_transaction_ids_json = "[]"
+                existing.evidence_count = 0
+                if was_active:
+                    summary.deactivated += 1
             continue
 
         last_date = txns[-1].date
+        stale = _is_stale(
+            last_date,
+            analysis.frequency,
+            as_of=reference_date,
+        )
+        if stale and existing is None:
+            continue
         category = next(
             (transaction.category for transaction in reversed(txns) if transaction.category),
             None,
@@ -289,45 +347,68 @@ def detect_recurring_patterns(
             "frequency": analysis.frequency,
             "avg_interval_days": analysis.median_interval_days,
             "last_occurrence": last_date,
-            "next_expected": _next_expected(last_date, analysis.frequency),
+            "next_expected": (
+                None
+                if stale
+                else _next_expected(
+                    last_date,
+                    analysis.frequency,
+                    after=reference_date,
+                )
+            ),
             "times_detected": len(txns),
             "category": category,
             "confidence": analysis.confidence,
             "evidence_count": analysis.evidence_count,
             "interval_variability": analysis.interval_variability,
             "amount_variability": analysis.amount_variability,
-            "detection_status": "active" if analysis.is_active else "candidate",
-            "is_active": analysis.is_active,
+            "detection_status": (
+                "retired"
+                if stale
+                else "active" if analysis.is_active else "candidate"
+            ),
+            "is_active": analysis.is_active and not stale,
+            "evidence_transaction_ids_json": json.dumps(
+                [transaction.id for transaction in txns],
+                separators=(",", ":"),
+            ),
+            "detection_version": DETECTION_VERSION,
         }
         if existing:
             was_supported = existing.detection_status in {"active", "candidate"}
             was_active = existing.is_active
             for key, value in values.items():
                 setattr(existing, key, value)
-            supported_pattern_ids.add(existing.id)
-            if was_supported:
+            if not stale:
+                supported_pattern_ids.add(existing.id)
+            if stale:
+                if was_active:
+                    summary.deactivated += 1
+            elif was_supported:
                 summary.updated += 1
             else:
                 summary.created += 1
-            if was_active and not analysis.is_active:
+            if was_active and not analysis.is_active and not stale:
                 summary.deactivated += 1
         else:
-            created = _insert_pattern_if_absent(
+            created_id = _insert_pattern_if_absent(
                 db,
                 merchant=merchant,
                 account_id=account_id,
                 values=values,
             )
-            pattern = (
-                db.query(RecurringPattern)
-                .filter_by(merchant_normalized=merchant, account_id=account_id)
-                .one()
-            )
-            if not created:
+            if created_id is None:
+                pattern = (
+                    db.query(RecurringPattern)
+                    .filter_by(merchant_normalized=merchant, account_id=account_id)
+                    .one()
+                )
                 for key, value in values.items():
                     setattr(pattern, key, value)
-            supported_pattern_ids.add(pattern.id)
-            if created:
+                supported_pattern_ids.add(pattern.id)
+            else:
+                supported_pattern_ids.add(created_id)
+            if created_id is not None:
                 summary.created += 1
             else:
                 summary.updated += 1
@@ -345,6 +426,10 @@ def detect_recurring_patterns(
                 summary.deactivated += 1
             stale.is_active = False
             stale.detection_status = "retired"
+            stale.next_expected = None
+            stale.evidence_count = 0
+            stale.evidence_transaction_ids_json = "[]"
+            stale.detection_version = DETECTION_VERSION
 
     db.flush()
     return summary

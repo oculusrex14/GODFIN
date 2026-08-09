@@ -61,7 +61,75 @@ def test_fresh_database_post_create_pass_installs_all_registry_invariants(
         "trg_monthly_aggregates_financial_guard_insert",
         "trg_recurring_patterns_financial_guard_insert",
         "trg_net_worth_items_precision_guard_insert",
+        "trg_recurring_patterns_provenance_insert",
     }.issubset(installed)
+
+
+def test_revision_16_adds_guarded_recurring_provenance_idempotently(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE recurring_patterns (
+                id TEXT PRIMARY KEY,
+                merchant_normalized TEXT NOT NULL,
+                account_id TEXT,
+                avg_amount REAL NOT NULL,
+                amount_stddev REAL,
+                frequency TEXT NOT NULL,
+                avg_interval_days INTEGER,
+                last_occurrence DATE,
+                next_expected DATE,
+                times_detected INTEGER NOT NULL,
+                category TEXT,
+                confidence REAL NOT NULL,
+                evidence_count INTEGER NOT NULL,
+                interval_variability REAL,
+                amount_variability REAL,
+                detection_status TEXT NOT NULL,
+                is_active BOOLEAN NOT NULL,
+                created_at DATETIME
+            );
+            INSERT INTO recurring_patterns VALUES (
+                'pattern-1', 'SERVICE', NULL, 499.0, 0.0, 'monthly',
+                30, '2026-07-01', '2026-08-01', 4, 'UTILITIES & BILLS',
+                0.9, 4, 0.0, 0.0, 'active', 1, '2026-07-01T00:00:00'
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        columns = {
+            row[1] for row in connection.execute(
+                "PRAGMA table_info(recurring_patterns)"
+            )
+        }
+        provenance = connection.execute(
+            "SELECT evidence_transaction_ids_json, detection_version "
+            "FROM recurring_patterns WHERE id='pattern-1'"
+        ).fetchone()
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE recurring_patterns "
+                "SET evidence_transaction_ids_json='not-json' "
+                "WHERE id='pattern-1'"
+            )
+    finally:
+        connection.close()
+
+    assert {
+        "evidence_transaction_ids_json",
+        "detection_version",
+    }.issubset(columns)
+    assert provenance == ("[]", "2.0")
 
 
 def _create_legacy_database(path: Path) -> None:
