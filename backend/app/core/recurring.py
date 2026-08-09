@@ -11,6 +11,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.core.money import exact_money_statement_values
 from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
 from app.core.transaction_semantics import (
@@ -181,12 +182,23 @@ def _insert_pattern_if_absent(
     values: dict,
 ) -> bool:
     """Insert one pattern behind the database uniqueness boundary."""
-    statement = sqlite_insert(RecurringPattern).values(
-        id=str(uuid.uuid4()),
-        merchant_normalized=merchant,
-        account_id=account_id,
-        **values,
+    insert_values = dict(values)
+    money_values = exact_money_statement_values(
+        RecurringPattern.__table__,
+        {
+            "avg_amount": insert_values.pop("avg_amount"),
+            "amount_stddev": insert_values.pop("amount_stddev"),
+        },
     )
+    insert_values.update(money_values)
+    insert_values.update(
+        {
+            "id": str(uuid.uuid4()),
+            "merchant_normalized": merchant,
+            "account_id": account_id,
+        }
+    )
+    statement = sqlite_insert(RecurringPattern).values(insert_values)
     if account_id is None:
         statement = statement.on_conflict_do_nothing(
             index_elements=[RecurringPattern.merchant_normalized],

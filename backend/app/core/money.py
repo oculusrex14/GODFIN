@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from sqlalchemy import BigInteger
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.types import TypeDecorator
 
 MONEY_SCALE = 100
@@ -76,3 +77,51 @@ def set_money_columns(instance, value: Any, *, legacy_attr: str, exact_attr: str
     normalized = money_decimal(value)
     setattr(instance, legacy_attr, float(normalized))
     setattr(instance, exact_attr, normalized)
+
+
+def exact_money_hybrid(legacy_attr: str, exact_attr: str):
+    """Create a Decimal hybrid backed by exact and compatibility columns."""
+
+    def getter(instance):
+        exact_value = getattr(instance, exact_attr)
+        if exact_value is not None:
+            return money_decimal(exact_value)
+        legacy_value = getattr(instance, legacy_attr)
+        if legacy_value is None:
+            return None
+        return money_decimal(legacy_value)
+
+    def setter(instance, value):
+        if value is None:
+            setattr(instance, legacy_attr, None)
+            setattr(instance, exact_attr, None)
+            return
+        set_money_columns(
+            instance,
+            value,
+            legacy_attr=legacy_attr,
+            exact_attr=exact_attr,
+        )
+
+    def expression(owner):
+        return getattr(owner, exact_attr)
+
+    prop = hybrid_property(getter)
+    prop = prop.setter(setter)
+    return prop.expression(expression)
+
+
+def exact_money_statement_values(table, values: dict[str, Any]) -> dict:
+    """Build physical-column values for atomic Core inserts and upserts."""
+    result = {}
+    for field, value in values.items():
+        legacy_column = table.c[field]
+        exact_column = table.c[f"{field}_minor"]
+        if value is None:
+            result[legacy_column] = None
+            result[exact_column] = None
+            continue
+        normalized = money_decimal(value)
+        result[legacy_column] = float(normalized)
+        result[exact_column] = normalized
+    return result

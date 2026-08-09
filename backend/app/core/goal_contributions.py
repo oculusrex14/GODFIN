@@ -86,7 +86,7 @@ def calculate_goal_balance(db: Session, goal_id: str) -> float:
 
 def recompute_goal_balance(db: Session, goal: Goal) -> float:
     goal.current_saved = calculate_goal_balance(db, goal.id)
-    return goal.current_saved
+    return float(goal.current_saved)
 
 
 def add_goal_contribution(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
@@ -18,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.money import MAX_MONEY_MINOR, MoneyMinorUnits, exact_money_hybrid
 from app.core.time import utcnow_naive
 
 
@@ -66,6 +68,33 @@ class MonthlyAggregate(Base):
             "is_finalized IN (0, 1)",
             name="ck_monthly_aggregates_is_finalized",
         ),
+        CheckConstraint(
+            "total_spend_minor BETWEEN 0 AND "
+            f"{MAX_MONEY_MINOR} AND total_income_minor BETWEEN 0 AND "
+            f"{MAX_MONEY_MINOR} AND fixed_total_minor BETWEEN 0 AND "
+            f"{MAX_MONEY_MINOR} AND semi_flexible_total_minor BETWEEN 0 AND "
+            f"{MAX_MONEY_MINOR} AND flexible_total_minor BETWEEN 0 AND "
+            f"{MAX_MONEY_MINOR} AND transfer_total_minor BETWEEN 0 AND "
+            f"{MAX_MONEY_MINOR} AND recurring_total_minor BETWEEN 0 AND "
+            f"{MAX_MONEY_MINOR}",
+            name="ck_monthly_aggregates_exact_totals_range",
+        ),
+        CheckConstraint(
+            "total_spend_minor = CAST(ROUND(total_spend * 100, 0) AS INTEGER) "
+            "AND total_income_minor = "
+            "CAST(ROUND(total_income * 100, 0) AS INTEGER) "
+            "AND fixed_total_minor = "
+            "CAST(ROUND(fixed_total * 100, 0) AS INTEGER) "
+            "AND semi_flexible_total_minor = "
+            "CAST(ROUND(semi_flexible_total * 100, 0) AS INTEGER) "
+            "AND flexible_total_minor = "
+            "CAST(ROUND(flexible_total * 100, 0) AS INTEGER) "
+            "AND transfer_total_minor = "
+            "CAST(ROUND(transfer_total * 100, 0) AS INTEGER) "
+            "AND recurring_total_minor = "
+            "CAST(ROUND(recurring_total * 100, 0) AS INTEGER)",
+            name="ck_monthly_aggregates_money_shadows_consistent",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -73,14 +102,66 @@ class MonthlyAggregate(Base):
     account_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True
     )
-    total_spend: Mapped[float] = mapped_column(Float, default=0)
-    total_income: Mapped[float] = mapped_column(Float, default=0)
+    _legacy_total_spend: Mapped[float] = mapped_column(
+        "total_spend", Float, default=0
+    )
+    _exact_total_spend: Mapped[Decimal] = mapped_column(
+        "total_spend_minor", MoneyMinorUnits(), default=Decimal("0.00")
+    )
+    total_spend = exact_money_hybrid("_legacy_total_spend", "_exact_total_spend")
+    _legacy_total_income: Mapped[float] = mapped_column(
+        "total_income", Float, default=0
+    )
+    _exact_total_income: Mapped[Decimal] = mapped_column(
+        "total_income_minor", MoneyMinorUnits(), default=Decimal("0.00")
+    )
+    total_income = exact_money_hybrid(
+        "_legacy_total_income", "_exact_total_income"
+    )
     savings_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    fixed_total: Mapped[float] = mapped_column(Float, default=0)
-    semi_flexible_total: Mapped[float] = mapped_column(Float, default=0)
-    flexible_total: Mapped[float] = mapped_column(Float, default=0)
-    transfer_total: Mapped[float] = mapped_column(Float, default=0)
-    recurring_total: Mapped[float] = mapped_column(Float, default=0)
+    _legacy_fixed_total: Mapped[float] = mapped_column(
+        "fixed_total", Float, default=0
+    )
+    _exact_fixed_total: Mapped[Decimal] = mapped_column(
+        "fixed_total_minor", MoneyMinorUnits(), default=Decimal("0.00")
+    )
+    fixed_total = exact_money_hybrid("_legacy_fixed_total", "_exact_fixed_total")
+    _legacy_semi_flexible_total: Mapped[float] = mapped_column(
+        "semi_flexible_total", Float, default=0
+    )
+    _exact_semi_flexible_total: Mapped[Decimal] = mapped_column(
+        "semi_flexible_total_minor", MoneyMinorUnits(), default=Decimal("0.00")
+    )
+    semi_flexible_total = exact_money_hybrid(
+        "_legacy_semi_flexible_total", "_exact_semi_flexible_total"
+    )
+    _legacy_flexible_total: Mapped[float] = mapped_column(
+        "flexible_total", Float, default=0
+    )
+    _exact_flexible_total: Mapped[Decimal] = mapped_column(
+        "flexible_total_minor", MoneyMinorUnits(), default=Decimal("0.00")
+    )
+    flexible_total = exact_money_hybrid(
+        "_legacy_flexible_total", "_exact_flexible_total"
+    )
+    _legacy_transfer_total: Mapped[float] = mapped_column(
+        "transfer_total", Float, default=0
+    )
+    _exact_transfer_total: Mapped[Decimal] = mapped_column(
+        "transfer_total_minor", MoneyMinorUnits(), default=Decimal("0.00")
+    )
+    transfer_total = exact_money_hybrid(
+        "_legacy_transfer_total", "_exact_transfer_total"
+    )
+    _legacy_recurring_total: Mapped[float] = mapped_column(
+        "recurring_total", Float, default=0
+    )
+    _exact_recurring_total: Mapped[Decimal] = mapped_column(
+        "recurring_total_minor", MoneyMinorUnits(), default=Decimal("0.00")
+    )
+    recurring_total = exact_money_hybrid(
+        "_legacy_recurring_total", "_exact_recurring_total"
+    )
     category_breakdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     transaction_count: Mapped[int] = mapped_column(Integer, default=0)
     is_finalized: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -9,6 +9,7 @@ from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, Numeric,
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.money import MAX_MONEY_MINOR, MoneyMinorUnits, exact_money_hybrid
 from app.core.time import utcnow_naive
 
 
@@ -41,13 +42,25 @@ class Subscription(Base):
             "fx_rate_fetched_at IS NOT NULL))",
             name="ck_subscriptions_fx_provenance_complete",
         ),
+        CheckConstraint(
+            f"amount_minor BETWEEN 1 AND {MAX_MONEY_MINOR}",
+            name="ck_subscriptions_amount_minor_range",
+        ),
+        CheckConstraint(
+            "amount_minor = CAST(ROUND(amount * 100, 0) AS INTEGER)",
+            name="ck_subscriptions_amount_shadow_consistent",
+        ),
     )
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    _legacy_amount: Mapped[float] = mapped_column("amount", Float, nullable=False)
+    _exact_amount: Mapped[Decimal] = mapped_column(
+        "amount_minor", MoneyMinorUnits(), nullable=False
+    )
+    amount = exact_money_hybrid("_legacy_amount", "_exact_amount")
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     frequency: Mapped[str] = mapped_column(
         String(20), nullable=False, default="monthly"

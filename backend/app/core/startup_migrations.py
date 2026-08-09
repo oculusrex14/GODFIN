@@ -15,7 +15,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 13
+CURRENT_SCHEMA_REVISION = 14
 
 
 class SchemaMigrationError(RuntimeError):
@@ -53,6 +53,72 @@ _EXACT_MONEY_SHADOWS = {
     },
 }
 _MAX_MONEY_MINOR = 100000000000000000
+
+# Each field definition is (minimum minor units, maximum minor units, nullable).
+# Table signatures keep the migration from acting on intentionally minimal test
+# or third-party tables that happen to share a generic column name.
+_PRODUCT_EXACT_MONEY_SHADOWS = {
+    "goals": (
+        {"id", "name", "deadline_date", "target_amount", "current_saved"},
+        {
+            "target_amount": (1, _MAX_MONEY_MINOR, False),
+            "current_saved": (0, _MAX_MONEY_MINOR, False),
+            "minimum_flexible_floor": (0, _MAX_MONEY_MINOR, False),
+        },
+    ),
+    "goal_contributions": (
+        {"id", "goal_id", "amount", "entry_type", "source_type"},
+        {"amount": (-_MAX_MONEY_MINOR, _MAX_MONEY_MINOR, False)},
+    ),
+    "goal_contribution_suggestions": (
+        {"id", "transaction_id", "amount", "deposit_type", "evidence"},
+        {"amount": (1, _MAX_MONEY_MINOR, False)},
+    ),
+    "income_sources": (
+        {"id", "source_name", "expected_amount", "frequency"},
+        {
+            "expected_amount": (1, _MAX_MONEY_MINOR, True),
+            "last_detected_amount": (1, _MAX_MONEY_MINOR, True),
+        },
+    ),
+    "subscriptions": (
+        {"id", "name", "amount", "currency", "frequency"},
+        {"amount": (1, _MAX_MONEY_MINOR, False)},
+    ),
+    "recurring_patterns": (
+        {"id", "merchant_normalized", "avg_amount", "frequency"},
+        {
+            "avg_amount": (1, _MAX_MONEY_MINOR, False),
+            "amount_stddev": (0, _MAX_MONEY_MINOR, True),
+        },
+    ),
+    "subscription_suggestions": (
+        {"id", "recurring_pattern_id", "merchant", "avg_amount", "frequency"},
+        {"avg_amount": (1, _MAX_MONEY_MINOR, False)},
+    ),
+    "monthly_aggregates": (
+        {
+            "id",
+            "month",
+            "total_spend",
+            "total_income",
+            "fixed_total",
+            "semi_flexible_total",
+            "flexible_total",
+            "transfer_total",
+            "recurring_total",
+        },
+        {
+            "total_spend": (0, _MAX_MONEY_MINOR, False),
+            "total_income": (0, _MAX_MONEY_MINOR, False),
+            "fixed_total": (0, _MAX_MONEY_MINOR, False),
+            "semi_flexible_total": (0, _MAX_MONEY_MINOR, False),
+            "flexible_total": (0, _MAX_MONEY_MINOR, False),
+            "transfer_total": (0, _MAX_MONEY_MINOR, False),
+            "recurring_total": (0, _MAX_MONEY_MINOR, False),
+        },
+    ),
+}
 
 _INCOME_SOURCE_COLUMNS = {
     "next_expected_date": "DATE",
@@ -811,6 +877,183 @@ def _validate_revision_13(connection: sqlite3.Connection) -> None:
                 )
 
 
+def _product_exact_money_table_is_supported(
+    connection: sqlite3.Connection,
+    table: str,
+    signature: set[str],
+    fields: dict[str, tuple[int, int, bool]],
+) -> bool:
+    columns = _table_columns(connection, table)
+    required = signature.union(fields)
+    return bool(columns) and required.issubset(columns)
+
+
+def _legacy_money_invalid_sql(
+    field: str,
+    minimum_minor: int,
+    maximum_minor: int,
+    nullable: bool,
+    *,
+    prefix: str = "",
+) -> str:
+    legacy = f'{prefix}"{field}"'
+    invalid_value = (
+        f"typeof({legacy}) NOT IN ('integer', 'real') "
+        f"OR ({legacy} * 100) < {minimum_minor} "
+        f"OR ({legacy} * 100) > {maximum_minor} "
+        f"OR ABS(({legacy} * 100) - ROUND({legacy} * 100, 0)) > 0.000001"
+    )
+    if nullable:
+        return f"({legacy} IS NOT NULL AND ({invalid_value}))"
+    return f"({legacy} IS NULL OR {invalid_value})"
+
+
+def _exact_money_invalid_sql(
+    field: str,
+    minimum_minor: int,
+    maximum_minor: int,
+    nullable: bool,
+    *,
+    prefix: str = "",
+) -> str:
+    legacy = f'{prefix}"{field}"'
+    exact = f'{prefix}"{field}_minor"'
+    populated_invalid = (
+        f"{_legacy_money_invalid_sql(field, minimum_minor, maximum_minor, False, prefix=prefix)} "
+        f"OR {exact} IS NULL "
+        f"OR typeof({exact}) <> 'integer' "
+        f"OR {exact} < {minimum_minor} "
+        f"OR {exact} > {maximum_minor} "
+        f"OR CAST(ROUND({legacy} * 100, 0) AS INTEGER) <> {exact}"
+    )
+    if nullable:
+        return (
+            f"(({legacy} IS NULL AND {exact} IS NOT NULL) OR "
+            f"({legacy} IS NOT NULL AND ({populated_invalid})))"
+        )
+    return f"({populated_invalid})"
+
+
+def _install_product_exact_money_guard(
+    connection: sqlite3.Connection,
+    table: str,
+    fields: dict[str, tuple[int, int, bool]],
+) -> None:
+    invalid_conditions = [
+        _exact_money_invalid_sql(
+            field,
+            minimum_minor,
+            maximum_minor,
+            nullable,
+            prefix="NEW.",
+        )
+        for field, (minimum_minor, maximum_minor, nullable) in fields.items()
+    ]
+    if table == "goal_contributions":
+        invalid_conditions.append(
+            "((NEW.entry_type = 'deposit' AND NEW.amount_minor <= 0) OR "
+            "(NEW.entry_type = 'withdrawal' AND NEW.amount_minor >= 0))"
+        )
+    invalid = " OR ".join(invalid_conditions)
+    for operation in ("insert", "update"):
+        trigger = f"trg_{table}_product_exact_money_{operation}"
+        connection.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')
+        connection.execute(
+            f'CREATE TRIGGER "{trigger}" '
+            f'BEFORE {operation.upper()} ON "{table}" '
+            f"FOR EACH ROW WHEN {invalid} BEGIN "
+            f"SELECT RAISE(ABORT, "
+            f"'GODFIN exact-money invariant failed: {table}'); "
+            "END"
+        )
+
+
+def _apply_revision_14(connection: sqlite3.Connection) -> None:
+    """Extend authoritative minor-unit storage to remaining product totals."""
+    supported: list[tuple[str, dict[str, tuple[int, int, bool]]]] = []
+    for table, (signature, fields) in _PRODUCT_EXACT_MONEY_SHADOWS.items():
+        if not _product_exact_money_table_is_supported(
+            connection,
+            table,
+            signature,
+            fields,
+        ):
+            continue
+        supported.append((table, fields))
+        for field, (minimum_minor, maximum_minor, nullable) in fields.items():
+            invalid = connection.execute(
+                f'SELECT COUNT(*) FROM "{table}" WHERE '
+                f"{_legacy_money_invalid_sql(field, minimum_minor, maximum_minor, nullable)}"
+            ).fetchone()[0]
+            if invalid:
+                raise SchemaMigrationError(
+                    f"The {table}.{field} field contains {invalid} value(s) "
+                    "that cannot be converted to exact minor units safely."
+                )
+
+    for table, fields in supported:
+        columns = _table_columns(connection, table)
+        for field, (minimum_minor, maximum_minor, nullable) in fields.items():
+            exact = f"{field}_minor"
+            if exact in columns:
+                existing_invalid = connection.execute(
+                    f'SELECT COUNT(*) FROM "{table}" WHERE "{exact}" IS NOT NULL '
+                    f"AND ({_exact_money_invalid_sql(field, minimum_minor, maximum_minor, nullable)})"
+                ).fetchone()[0]
+                if existing_invalid:
+                    raise SchemaMigrationError(
+                        f"The {table}.{exact} field contains {existing_invalid} "
+                        "invalid exact-money value(s)."
+                    )
+            else:
+                connection.execute(
+                    f'ALTER TABLE "{table}" ADD COLUMN "{exact}" INTEGER'
+                )
+            connection.execute(
+                f'UPDATE "{table}" SET "{exact}" = '
+                f'CAST(ROUND("{field}" * 100, 0) AS INTEGER) '
+                f'WHERE "{field}" IS NOT NULL AND "{exact}" IS NULL'
+            )
+        _install_product_exact_money_guard(connection, table, fields)
+
+
+def _validate_revision_14(connection: sqlite3.Connection) -> None:
+    for table, (signature, fields) in _PRODUCT_EXACT_MONEY_SHADOWS.items():
+        if not _product_exact_money_table_is_supported(
+            connection,
+            table,
+            signature,
+            fields,
+        ):
+            continue
+        columns = _table_columns(connection, table)
+        for field, (minimum_minor, maximum_minor, nullable) in fields.items():
+            exact = f"{field}_minor"
+            if exact not in columns:
+                raise SchemaMigrationError(
+                    f"The {table}.{exact} exact-money column was not installed."
+                )
+            invalid = connection.execute(
+                f'SELECT COUNT(*) FROM "{table}" WHERE '
+                f"{_exact_money_invalid_sql(field, minimum_minor, maximum_minor, nullable)}"
+            ).fetchone()[0]
+            if invalid:
+                raise SchemaMigrationError(
+                    f"The {table}.{field} field contains {invalid} invalid "
+                    "exact-money row(s)."
+                )
+        for operation in ("insert", "update"):
+            trigger = f"trg_{table}_product_exact_money_{operation}"
+            installed = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
+            ).fetchone()
+            if not installed:
+                raise SchemaMigrationError(
+                    f"The {table} product exact-money guard was not installed."
+                )
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -829,6 +1072,12 @@ MIGRATION_REGISTRY = (
         name="introduce_exact_ledger_minor_units",
         apply=_apply_revision_13,
         validate=_validate_revision_13,
+    ),
+    SchemaMigration(
+        revision=14,
+        name="extend_exact_product_minor_units",
+        apply=_apply_revision_14,
+        validate=_validate_revision_14,
     ),
 )
 

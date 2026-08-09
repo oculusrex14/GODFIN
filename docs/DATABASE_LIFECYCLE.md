@@ -40,9 +40,18 @@ authoritative integer minor-unit value used by the ORM for reads, comparisons,
 ordering, and aggregation. Existing cent-exact rows are backfilled inside the
 startup transaction. Ambiguous sub-cent history fails closed instead of being
 silently rounded, and restart-safe INSERT/UPDATE guards require the exact and
-compatibility shadows to agree. Remaining product-money tables are migrated in
-later reviewed revisions under `GF-DATA-002` before the compatibility shadows
-can be removed.
+compatibility shadows to agree.
+
+Revision 14 extends the same invariant to goals, goal contributions and
+suggestions, income-source amounts, subscriptions, recurring-pattern amounts,
+subscription suggestions, and all monetary monthly-aggregate totals. Nullable
+amounts retain exact null parity, signed withdrawals retain their direction,
+and atomic aggregate/recurring upserts write both physical columns together.
+Historical values must be finite, within range, and cent-exact before any new
+column is added. Net-worth quantities, prices, and FX rates remain a separate
+precision-scale review under `GF-DATA-002`; compatibility shadows cannot be
+removed until every supported private build has crossed the migration
+boundary.
 
 This strategy is intentional for a packaged, single-user, local-only
 application. A schema change must remain safe to run repeatedly against both an
