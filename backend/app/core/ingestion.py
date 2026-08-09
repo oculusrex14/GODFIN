@@ -6,6 +6,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.account_mapping import (
@@ -77,6 +78,15 @@ def _record_fetch_status(
         result.error_details.extend(fetched.errors)
 
 
+def _is_email_identity_conflict(exc: IntegrityError) -> bool:
+    """Return whether SQLite rejected a duplicate Gmail message identity."""
+    detail = str(exc.orig).lower()
+    return (
+        "unique constraint failed: transactions.email_message_id" in detail
+        or "uq_transactions_email_message_id" in detail
+    )
+
+
 def _process_message_with_savepoint(
     db: Session,
     message: dict,
@@ -95,6 +105,21 @@ def _process_message_with_savepoint(
         )
         logger.info(
             "A Gmail transaction was held because its accounting period is finalized"
+        )
+    except IntegrityError as exc:
+        if not _is_email_identity_conflict(exc):
+            result.errors += 1
+            result.error_details.append(
+                f"Message {message.get('id', '?')}: database validation failed"
+            )
+            logger.warning(
+                "A Gmail message failed database validation; "
+                "the rest of the batch will continue"
+            )
+            return
+        result.skipped_duplicate += 1
+        logger.info(
+            "A concurrently imported Gmail message was safely deduplicated"
         )
     except Exception as exc:
         result.errors += 1

@@ -4,6 +4,7 @@ import json
 from datetime import date, datetime, timezone
 
 from sqlalchemy import func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.core.budget import ELASTICITY
@@ -274,29 +275,41 @@ def _compute_aggregate(
         .scalar()
     )
 
-    # Upsert aggregate
+    # Upsert the derived aggregate atomically. The partial unique index is the
+    # final race boundary for concurrent finalization attempts.
     month_str = f'{year}-{month:02d}'
-    agg = db.query(MonthlyAggregate).filter_by(month=month_str, account_id=None).first()
-    if agg is None:
-        agg = MonthlyAggregate(month=month_str)
-        db.add(agg)
-
-    agg.total_spend = round(total_spend, 2)
-    agg.total_income = round(total_income, 2)
-    agg.savings_rate = savings_rate
-    agg.fixed_total = round(fixed_total, 2)
-    agg.semi_flexible_total = round(semi_flex_total, 2)
-    agg.flexible_total = round(flex_total, 2)
-    agg.transfer_total = round(transfer_total, 2)
-    agg.recurring_total = round(recurring_total, 2)
-    agg.category_breakdown = json.dumps(cat_breakdown)
-    agg.transaction_count = transaction_count
-    agg.is_finalized = True
-    agg.audit_session_id = session_id
-    agg.computed_at = datetime.now(timezone.utc)
-
+    aggregate_values = {
+        "total_spend": round(total_spend, 2),
+        "total_income": round(total_income, 2),
+        "savings_rate": savings_rate,
+        "fixed_total": round(fixed_total, 2),
+        "semi_flexible_total": round(semi_flex_total, 2),
+        "flexible_total": round(flex_total, 2),
+        "transfer_total": round(transfer_total, 2),
+        "recurring_total": round(recurring_total, 2),
+        "category_breakdown": json.dumps(cat_breakdown),
+        "transaction_count": transaction_count,
+        "is_finalized": True,
+        "audit_session_id": session_id,
+        "computed_at": datetime.now(timezone.utc),
+    }
+    statement = sqlite_insert(MonthlyAggregate).values(
+        month=month_str,
+        account_id=None,
+        **aggregate_values,
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=[MonthlyAggregate.month],
+        index_where=MonthlyAggregate.account_id.is_(None),
+        set_=aggregate_values,
+    )
+    db.execute(statement)
     db.flush()
-    return agg
+    return (
+        db.query(MonthlyAggregate)
+        .filter_by(month=month_str, account_id=None)
+        .one()
+    )
 
 
 def _update_merchant_memory_from_corrections(db: Session, txns: list) -> None:

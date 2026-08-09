@@ -524,7 +524,7 @@ def test_failed_revision_rolls_back_prior_schema_changes(tmp_path):
                 key TEXT PRIMARY KEY, value TEXT NOT NULL
             );
             INSERT INTO app_settings VALUES (
-                'schema_revision', '{CURRENT_SCHEMA_REVISION - 1}'
+                'schema_revision', '{CURRENT_SCHEMA_REVISION - 2}'
             );
             CREATE TABLE subscriptions (
                 id TEXT PRIMARY KEY,
@@ -596,3 +596,237 @@ def test_locked_database_fails_without_partial_schema_changes(tmp_path, monkeypa
         connection.close()
 
     assert tables == {"app_settings"}
+
+
+def _create_revision_11_identity_fixture(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO app_settings VALUES ('schema_revision', '11');
+
+            CREATE TABLE monthly_aggregates (
+                id TEXT PRIMARY KEY,
+                month TEXT NOT NULL,
+                account_id TEXT,
+                total_spend REAL NOT NULL DEFAULT 0,
+                total_income REAL NOT NULL DEFAULT 0,
+                savings_rate REAL,
+                fixed_total REAL NOT NULL DEFAULT 0,
+                semi_flexible_total REAL NOT NULL DEFAULT 0,
+                flexible_total REAL NOT NULL DEFAULT 0,
+                transfer_total REAL NOT NULL DEFAULT 0,
+                recurring_total REAL NOT NULL DEFAULT 0,
+                transaction_count INTEGER NOT NULL DEFAULT 0,
+                is_finalized INTEGER NOT NULL DEFAULT 0,
+                computed_at TEXT
+            );
+
+            CREATE TABLE recurring_patterns (
+                id TEXT PRIMARY KEY,
+                merchant_normalized TEXT NOT NULL,
+                account_id TEXT,
+                avg_amount REAL NOT NULL,
+                amount_stddev REAL,
+                frequency TEXT NOT NULL,
+                avg_interval_days INTEGER,
+                last_occurrence TEXT,
+                next_expected TEXT,
+                times_detected INTEGER NOT NULL DEFAULT 2,
+                confidence REAL NOT NULL DEFAULT 0,
+                evidence_count INTEGER NOT NULL DEFAULT 0,
+                interval_variability REAL,
+                amount_variability REAL,
+                detection_status TEXT NOT NULL DEFAULT 'active',
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT
+            );
+
+            CREATE TABLE subscription_suggestions (
+                id TEXT PRIMARY KEY,
+                recurring_pattern_id TEXT NOT NULL UNIQUE,
+                avg_amount REAL NOT NULL,
+                frequency TEXT NOT NULL,
+                status TEXT NOT NULL,
+                snoozed_until TEXT,
+                confirmed_subscription_id TEXT,
+                updated_at TEXT,
+                created_at TEXT
+            );
+
+            CREATE TABLE transactions (
+                id TEXT PRIMARY KEY,
+                email_message_id TEXT,
+                amount REAL NOT NULL,
+                type TEXT NOT NULL,
+                confidence REAL,
+                status TEXT NOT NULL,
+                semantic_type TEXT NOT NULL
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_revision_12_cleans_derived_duplicates_and_installs_identities(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    _create_revision_11_identity_fixture(db_path)
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            INSERT INTO monthly_aggregates (
+                id, month, account_id, is_finalized, computed_at
+            ) VALUES
+                ('ma-old', '2026-07', NULL, 0, '2026-08-01'),
+                ('ma-new', '2026-07', NULL, 1, '2026-08-02');
+
+            INSERT INTO recurring_patterns (
+                id, merchant_normalized, account_id, avg_amount, frequency,
+                times_detected, confidence, evidence_count, detection_status,
+                is_active, created_at
+            ) VALUES
+                ('rp-old', 'NETFLIX', NULL, 499, 'monthly', 2, 0.4, 2,
+                 'retired', 0, '2026-07-01'),
+                ('rp-new', 'NETFLIX', NULL, 499, 'monthly', 4, 0.9, 4,
+                 'active', 1, '2026-08-01');
+
+            INSERT INTO subscription_suggestions (
+                id, recurring_pattern_id, avg_amount, frequency, status,
+                confirmed_subscription_id, updated_at, created_at
+            ) VALUES
+                ('ss-old', 'rp-old', 499, 'monthly', 'ignored', NULL,
+                 '2026-07-01', '2026-07-01'),
+                ('ss-new', 'rp-new', 499, 'monthly', 'confirmed', 'sub-1',
+                 '2026-08-01', '2026-08-01');
+
+            INSERT INTO transactions (
+                id, email_message_id, amount, type, status, semantic_type
+            ) VALUES ('tx-1', 'gmail-message-1', 499, 'debit', 'settled',
+                      'expense');
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        aggregate_ids = connection.execute(
+            "SELECT id FROM monthly_aggregates"
+        ).fetchall()
+        pattern_ids = connection.execute(
+            "SELECT id FROM recurring_patterns"
+        ).fetchall()
+        suggestion = connection.execute(
+            "SELECT id, recurring_pattern_id FROM subscription_suggestions"
+        ).fetchone()
+        indexes = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+        triggers = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            ).fetchall()
+        }
+    finally:
+        connection.close()
+
+    assert aggregate_ids == [("ma-new",)]
+    assert pattern_ids == [("rp-new",)]
+    assert suggestion == ("ss-new", "rp-new")
+    assert {
+        "uq_monthly_aggregates_global_month",
+        "uq_monthly_aggregates_account_month",
+        "uq_recurring_patterns_global_merchant",
+        "uq_recurring_patterns_account_merchant",
+        "uq_transactions_email_message_id",
+    }.issubset(indexes)
+    assert {
+        "trg_monthly_aggregates_financial_guard_insert",
+        "trg_recurring_patterns_financial_guard_insert",
+        "trg_subscription_suggestions_financial_guard_insert",
+    }.issubset(triggers)
+
+
+def test_revision_12_duplicate_gmail_identity_rolls_back_cleanup(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    _create_revision_11_identity_fixture(db_path)
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            INSERT INTO monthly_aggregates (id, month, account_id)
+            VALUES ('ma-1', '2026-07', NULL), ('ma-2', '2026-07', NULL);
+            INSERT INTO transactions (
+                id, email_message_id, amount, type, status, semantic_type
+            ) VALUES
+                ('tx-1', 'duplicate-message', 100, 'debit', 'settled',
+                 'expense'),
+                ('tx-2', 'duplicate-message', 100, 'debit', 'settled',
+                 'expense');
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(SchemaMigrationError, match="Duplicate Gmail message"):
+        apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM monthly_aggregates"
+        ).fetchone() == (2,)
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' "
+            "AND name='uq_transactions_email_message_id'"
+        ).fetchone() is None
+    finally:
+        connection.close()
+
+
+def test_revision_12_legacy_guards_reject_invalid_derived_rows(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    _create_revision_11_identity_fixture(db_path)
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="monthly_aggregates"):
+            connection.execute(
+                "INSERT INTO monthly_aggregates "
+                "(id, month, total_spend) VALUES ('bad-month', '2026-13', -1)"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="recurring_patterns"):
+            connection.execute(
+                "INSERT INTO recurring_patterns "
+                "(id, merchant_normalized, avg_amount, frequency, "
+                "times_detected, confidence, evidence_count, "
+                "detection_status, is_active) VALUES "
+                "('bad-pattern', 'INVALID', -1, 'weekly', 1, 2, -1, "
+                "'unknown', 1)"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="subscription_suggestions"):
+            connection.execute(
+                "INSERT INTO subscription_suggestions "
+                "(id, recurring_pattern_id, avg_amount, frequency, status) "
+                "VALUES ('bad-suggestion', 'missing', 0, 'weekly', 'unknown')"
+            )
+    finally:
+        connection.rollback()
+        connection.close()

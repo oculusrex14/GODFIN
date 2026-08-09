@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import calendar
 import statistics
+import uuid
 from dataclasses import dataclass
 from datetime import date
 from typing import Iterable, Optional
 
 from sqlalchemy import and_, func, or_
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.models.recurring_pattern import RecurringPattern
@@ -171,6 +173,36 @@ def _analyze_pattern(txns: list[Transaction]) -> Optional[PatternAnalysis]:
     )
 
 
+def _insert_pattern_if_absent(
+    db: Session,
+    *,
+    merchant: str,
+    account_id: Optional[str],
+    values: dict,
+) -> bool:
+    """Insert one pattern behind the database uniqueness boundary."""
+    statement = sqlite_insert(RecurringPattern).values(
+        id=str(uuid.uuid4()),
+        merchant_normalized=merchant,
+        account_id=account_id,
+        **values,
+    )
+    if account_id is None:
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[RecurringPattern.merchant_normalized],
+            index_where=RecurringPattern.account_id.is_(None),
+        )
+    else:
+        statement = statement.on_conflict_do_nothing(
+            index_elements=[
+                RecurringPattern.merchant_normalized,
+                RecurringPattern.account_id,
+            ],
+            index_where=RecurringPattern.account_id.is_not(None),
+        )
+    return db.execute(statement).rowcount == 1
+
+
 def detect_recurring_patterns(
     db: Session,
     *,
@@ -268,15 +300,25 @@ def detect_recurring_patterns(
             if was_active and not analysis.is_active:
                 summary.deactivated += 1
         else:
-            pattern = RecurringPattern(
-                merchant_normalized=merchant,
+            created = _insert_pattern_if_absent(
+                db,
+                merchant=merchant,
                 account_id=account_id,
-                **values,
+                values=values,
             )
-            db.add(pattern)
-            db.flush()
+            pattern = (
+                db.query(RecurringPattern)
+                .filter_by(merchant_normalized=merchant, account_id=account_id)
+                .one()
+            )
+            if not created:
+                for key, value in values.items():
+                    setattr(pattern, key, value)
             supported_pattern_ids.add(pattern.id)
-            summary.created += 1
+            if created:
+                summary.created += 1
+            else:
+                summary.updated += 1
 
     if merchant_keys is None:
         stale_query = db.query(RecurringPattern).filter(

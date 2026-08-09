@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from datetime import date
 
+from sqlalchemy.exc import IntegrityError
+
 from app.core.gmail_service import GmailFetchResult
-from app.core.ingestion import run_ingestion, run_initial_sync
+from app.core.ingestion import (
+    IngestionResult,
+    _process_message_with_savepoint,
+    run_ingestion,
+    run_initial_sync,
+)
 from app.models.app_setting import AppSetting
 from app.models.audit_session import AuditSession
 from app.models.transaction import Transaction
@@ -166,6 +173,68 @@ def test_ingestion_dedup_by_message_id(db_session):
     result2 = run_ingestion(db_session, mock_messages=messages)
     assert result2.created == 0
     assert result2.skipped_duplicate == 1
+
+
+def test_concurrent_gmail_identity_conflict_is_a_safe_duplicate(
+    db_session,
+    monkeypatch,
+):
+    def reject_duplicate(*_args, **_kwargs):
+        raise IntegrityError(
+            "INSERT INTO transactions",
+            {},
+            Exception(
+                "UNIQUE constraint failed: transactions.email_message_id"
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.core.ingestion._process_message",
+        reject_duplicate,
+    )
+    result = IngestionResult()
+
+    _process_message_with_savepoint(
+        db_session,
+        {"id": "concurrent-message"},
+        result,
+    )
+
+    assert result.processed == 1
+    assert result.skipped_duplicate == 1
+    assert result.errors == 0
+    assert result.error_details == []
+
+
+def test_unrelated_gmail_integrity_error_remains_an_error(
+    db_session,
+    monkeypatch,
+):
+    def reject_invalid_row(*_args, **_kwargs):
+        raise IntegrityError(
+            "INSERT INTO transactions",
+            {},
+            Exception("CHECK constraint failed: ck_transaction_amount"),
+        )
+
+    monkeypatch.setattr(
+        "app.core.ingestion._process_message",
+        reject_invalid_row,
+    )
+    result = IngestionResult()
+
+    _process_message_with_savepoint(
+        db_session,
+        {"id": "invalid-message"},
+        result,
+    )
+
+    assert result.processed == 1
+    assert result.skipped_duplicate == 0
+    assert result.errors == 1
+    assert result.error_details == [
+        "Message invalid-message: database validation failed"
+    ]
 
 
 def test_ingestion_all_mock_emails(db_session):

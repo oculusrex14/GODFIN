@@ -15,7 +15,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 11
+CURRENT_SCHEMA_REVISION = 12
 
 
 class SchemaMigrationError(RuntimeError):
@@ -77,6 +77,104 @@ _NET_WORTH_QUOTE_FX_COLUMNS = {
 }
 
 _FINANCIAL_GUARDS = {
+    "monthly_aggregates": (
+        {
+            "month",
+            "total_spend",
+            "total_income",
+            "savings_rate",
+            "fixed_total",
+            "semi_flexible_total",
+            "flexible_total",
+            "transfer_total",
+            "recurring_total",
+            "transaction_count",
+            "is_finalized",
+        },
+        "length(NEW.month) = 7 "
+        "AND NEW.month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' "
+        "AND CAST(substr(NEW.month, 1, 4) AS INTEGER) BETWEEN 2000 AND 9999 "
+        "AND CAST(substr(NEW.month, 6, 2) AS INTEGER) BETWEEN 1 AND 12 "
+        "AND typeof(NEW.total_spend) IN ('integer', 'real') "
+        "AND NEW.total_spend >= 0 AND NEW.total_spend <= 1000000000000000 "
+        "AND typeof(NEW.total_income) IN ('integer', 'real') "
+        "AND NEW.total_income >= 0 AND NEW.total_income <= 1000000000000000 "
+        "AND typeof(NEW.fixed_total) IN ('integer', 'real') "
+        "AND NEW.fixed_total >= 0 AND NEW.fixed_total <= 1000000000000000 "
+        "AND typeof(NEW.semi_flexible_total) IN ('integer', 'real') "
+        "AND NEW.semi_flexible_total >= 0 "
+        "AND NEW.semi_flexible_total <= 1000000000000000 "
+        "AND typeof(NEW.flexible_total) IN ('integer', 'real') "
+        "AND NEW.flexible_total >= 0 "
+        "AND NEW.flexible_total <= 1000000000000000 "
+        "AND typeof(NEW.transfer_total) IN ('integer', 'real') "
+        "AND NEW.transfer_total >= 0 "
+        "AND NEW.transfer_total <= 1000000000000000 "
+        "AND typeof(NEW.recurring_total) IN ('integer', 'real') "
+        "AND NEW.recurring_total >= 0 "
+        "AND NEW.recurring_total <= 1000000000000000 "
+        "AND (NEW.savings_rate IS NULL OR "
+        "(typeof(NEW.savings_rate) IN ('integer', 'real') "
+        "AND NEW.savings_rate >= -1000000 AND NEW.savings_rate <= 100)) "
+        "AND typeof(NEW.transaction_count) = 'integer' "
+        "AND NEW.transaction_count >= 0 "
+        "AND NEW.is_finalized IN (0, 1)",
+    ),
+    "recurring_patterns": (
+        {
+            "avg_amount",
+            "amount_stddev",
+            "frequency",
+            "avg_interval_days",
+            "times_detected",
+            "confidence",
+            "evidence_count",
+            "interval_variability",
+            "amount_variability",
+            "detection_status",
+            "is_active",
+        },
+        "typeof(NEW.avg_amount) IN ('integer', 'real') "
+        "AND NEW.avg_amount > 0 AND NEW.avg_amount <= 1000000000000000 "
+        "AND (NEW.amount_stddev IS NULL OR "
+        "(typeof(NEW.amount_stddev) IN ('integer', 'real') "
+        "AND NEW.amount_stddev >= 0)) "
+        "AND NEW.frequency IN ('monthly', 'quarterly', 'annual') "
+        "AND (NEW.avg_interval_days IS NULL OR "
+        "(typeof(NEW.avg_interval_days) = 'integer' "
+        "AND NEW.avg_interval_days > 0)) "
+        "AND typeof(NEW.times_detected) = 'integer' "
+        "AND NEW.times_detected >= 2 "
+        "AND typeof(NEW.confidence) IN ('integer', 'real') "
+        "AND NEW.confidence >= 0 AND NEW.confidence <= 1 "
+        "AND typeof(NEW.evidence_count) = 'integer' "
+        "AND NEW.evidence_count >= 0 "
+        "AND (NEW.interval_variability IS NULL OR "
+        "(typeof(NEW.interval_variability) IN ('integer', 'real') "
+        "AND NEW.interval_variability >= 0)) "
+        "AND (NEW.amount_variability IS NULL OR "
+        "(typeof(NEW.amount_variability) IN ('integer', 'real') "
+        "AND NEW.amount_variability >= 0)) "
+        "AND NEW.detection_status IN ('active', 'candidate', 'retired') "
+        "AND NEW.is_active IN (0, 1) "
+        "AND ((NEW.detection_status = 'active' AND NEW.is_active = 1) OR "
+        "(NEW.detection_status IN ('candidate', 'retired') "
+        "AND NEW.is_active = 0))",
+    ),
+    "subscription_suggestions": (
+        {
+            "avg_amount",
+            "frequency",
+            "status",
+            "snoozed_until",
+            "confirmed_subscription_id",
+        },
+        "typeof(NEW.avg_amount) IN ('integer', 'real') "
+        "AND NEW.avg_amount > 0 AND NEW.avg_amount <= 1000000000000000 "
+        "AND NEW.frequency IN ('monthly', 'quarterly', 'annual') "
+        "AND NEW.status IN ('pending', 'snoozed', 'ignored', 'confirmed') "
+        "AND (NEW.status != 'snoozed' OR NEW.snoozed_until IS NOT NULL)",
+    ),
     "subscriptions": (
         {
             "amount",
@@ -382,12 +480,236 @@ def _validate_revision_11(connection: sqlite3.Connection) -> None:
             )
 
 
+def _delete_duplicate_monthly_aggregates(
+    connection: sqlite3.Connection,
+) -> None:
+    if not _table_columns(connection, "monthly_aggregates"):
+        return
+    rows = connection.execute(
+        "SELECT id, month, account_id FROM monthly_aggregates "
+        "ORDER BY month, account_id, is_finalized DESC, "
+        "COALESCE(computed_at, '') DESC, rowid DESC"
+    ).fetchall()
+    seen: set[tuple[str, Optional[str]]] = set()
+    duplicate_ids: list[str] = []
+    for aggregate_id, month, account_id in rows:
+        key = (month, account_id)
+        if key in seen:
+            duplicate_ids.append(aggregate_id)
+        else:
+            seen.add(key)
+    for aggregate_id in duplicate_ids:
+        connection.execute(
+            "DELETE FROM monthly_aggregates WHERE id=?",
+            (aggregate_id,),
+        )
+
+
+def _suggestion_priority(row: tuple) -> tuple:
+    status_priority = {
+        "confirmed": 0,
+        "pending": 1,
+        "snoozed": 2,
+        "ignored": 3,
+    }
+    return (
+        -status_priority.get(row[2], 4),
+        1 if row[3] else 0,
+        row[4] or "",
+        row[5] or "",
+        row[6],
+    )
+
+
+def _merge_recurring_pattern_suggestions(
+    connection: sqlite3.Connection,
+    keeper_id: str,
+    duplicate_ids: list[str],
+) -> None:
+    if not duplicate_ids or not _table_columns(connection, "subscription_suggestions"):
+        return
+    pattern_ids = [keeper_id, *duplicate_ids]
+    placeholders = ", ".join("?" for _ in pattern_ids)
+    suggestions = connection.execute(
+        "SELECT id, recurring_pattern_id, status, confirmed_subscription_id, "
+        "updated_at, created_at, rowid FROM subscription_suggestions "
+        f"WHERE recurring_pattern_id IN ({placeholders})",
+        pattern_ids,
+    ).fetchall()
+    if not suggestions:
+        return
+    winner = max(suggestions, key=_suggestion_priority)
+    for suggestion in suggestions:
+        if suggestion[0] != winner[0]:
+            connection.execute(
+                "DELETE FROM subscription_suggestions WHERE id=?",
+                (suggestion[0],),
+            )
+    if winner[1] != keeper_id:
+        connection.execute(
+            "UPDATE subscription_suggestions SET recurring_pattern_id=? WHERE id=?",
+            (keeper_id, winner[0]),
+        )
+
+
+def _delete_duplicate_recurring_patterns(
+    connection: sqlite3.Connection,
+) -> None:
+    if not _table_columns(connection, "recurring_patterns"):
+        return
+    rows = connection.execute(
+        "SELECT id, merchant_normalized, account_id FROM recurring_patterns "
+        "ORDER BY merchant_normalized, account_id, is_active DESC, "
+        "CASE detection_status "
+        "WHEN 'active' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END, "
+        "evidence_count DESC, COALESCE(last_occurrence, '') DESC, "
+        "COALESCE(created_at, '') DESC, rowid DESC"
+    ).fetchall()
+    grouped: dict[tuple[str, Optional[str]], list[str]] = {}
+    for pattern_id, merchant, account_id in rows:
+        grouped.setdefault((merchant, account_id), []).append(pattern_id)
+    for pattern_ids in grouped.values():
+        keeper_id, *duplicate_ids = pattern_ids
+        if not duplicate_ids:
+            continue
+        _merge_recurring_pattern_suggestions(
+            connection,
+            keeper_id,
+            duplicate_ids,
+        )
+        placeholders = ", ".join("?" for _ in duplicate_ids)
+        connection.execute(
+            f"DELETE FROM recurring_patterns WHERE id IN ({placeholders})",
+            duplicate_ids,
+        )
+
+
+def _reject_duplicate_gmail_message_ids(
+    connection: sqlite3.Connection,
+) -> None:
+    columns = _table_columns(connection, "transactions")
+    if not columns or "email_message_id" not in columns:
+        return
+    duplicate = connection.execute(
+        "SELECT email_message_id FROM transactions "
+        "WHERE email_message_id IS NOT NULL "
+        "GROUP BY email_message_id HAVING COUNT(*) > 1 LIMIT 1"
+    ).fetchone()
+    if duplicate:
+        raise SchemaMigrationError(
+            "Duplicate Gmail message identities require review before GODFIN "
+            "can enforce ingestion idempotency."
+        )
+
+
+def _apply_revision_12(connection: sqlite3.Connection) -> None:
+    """Install race-safe identities for derived and Gmail-ingested rows."""
+    _delete_duplicate_monthly_aggregates(connection)
+    _delete_duplicate_recurring_patterns(connection)
+    _reject_duplicate_gmail_message_ids(connection)
+
+    if _table_columns(connection, "monthly_aggregates"):
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_monthly_aggregates_global_month "
+            "ON monthly_aggregates(month) WHERE account_id IS NULL"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_monthly_aggregates_account_month "
+            "ON monthly_aggregates(month, account_id) "
+            "WHERE account_id IS NOT NULL"
+        )
+    if _table_columns(connection, "recurring_patterns"):
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_recurring_patterns_global_merchant "
+            "ON recurring_patterns(merchant_normalized) "
+            "WHERE account_id IS NULL"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_recurring_patterns_account_merchant "
+            "ON recurring_patterns(merchant_normalized, account_id) "
+            "WHERE account_id IS NOT NULL"
+        )
+    transaction_columns = _table_columns(connection, "transactions")
+    if "email_message_id" in transaction_columns:
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_transactions_email_message_id "
+            "ON transactions(email_message_id) "
+            "WHERE email_message_id IS NOT NULL"
+        )
+    _install_financial_guards(connection)
+
+
+def _validate_revision_12(connection: sqlite3.Connection) -> None:
+    expected_indexes = {
+        "monthly_aggregates": {
+            "uq_monthly_aggregates_global_month",
+            "uq_monthly_aggregates_account_month",
+        },
+        "recurring_patterns": {
+            "uq_recurring_patterns_global_merchant",
+            "uq_recurring_patterns_account_merchant",
+        },
+    }
+    transaction_columns = _table_columns(connection, "transactions")
+    if "email_message_id" in transaction_columns:
+        expected_indexes["transactions"] = {
+            "uq_transactions_email_message_id"
+        }
+    for table, names in expected_indexes.items():
+        if not _table_columns(connection, table):
+            continue
+        installed = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name=?",
+                (table,),
+            ).fetchall()
+        }
+        missing = names.difference(installed)
+        if missing:
+            raise SchemaMigrationError(
+                f"The {table} identity indexes were not installed: "
+                f"{', '.join(sorted(missing))}."
+            )
+
+    _reject_duplicate_gmail_message_ids(connection)
+    for table in (
+        "monthly_aggregates",
+        "recurring_patterns",
+        "subscription_suggestions",
+    ):
+        if not _table_columns(connection, table):
+            continue
+        for operation in ("insert", "update"):
+            trigger_name = f"trg_{table}_financial_guard_{operation}"
+            trigger = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger_name,),
+            ).fetchone()
+            if not trigger:
+                raise SchemaMigrationError(
+                    f"The {table} write guard was not installed."
+                )
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
         name="consolidate_pre_registry_compatibility_repairs",
         apply=_apply_revision_11,
         validate=_validate_revision_11,
+    ),
+    SchemaMigration(
+        revision=12,
+        name="enforce_derived_and_ingestion_identities",
+        apply=_apply_revision_12,
+        validate=_validate_revision_12,
     ),
 )
 

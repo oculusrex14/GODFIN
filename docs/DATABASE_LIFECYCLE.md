@@ -26,6 +26,13 @@ Revision 11 is the consolidation boundary for pre-registry private builds. It
 absorbs their previously scattered compatibility SQL. All later revisions must
 be appended to `MIGRATION_REGISTRY`; no other module may issue upgrade DDL.
 
+Revision 12 installs race-safe identities for global/account monthly
+aggregates, global/account recurring patterns, and non-null Gmail message IDs.
+It deterministically collapses duplicate derived aggregate/pattern rows while
+preserving the strongest linked subscription suggestion. Duplicate Gmail
+message identities fail closed because ledger rows are authoritative and must
+never be silently deleted by a migration.
+
 This strategy is intentional for a packaged, single-user, local-only
 application. A schema change must remain safe to run repeatedly against both an
 empty database and every supported prior local revision.
@@ -44,6 +51,32 @@ empty database and every supported prior local revision.
   revision, interruption/rollback, lock/failure, and postcondition tests.
 - Preserve the verified pre-migration backup for release rollback and recovery.
 - Never move desktop financial records into Supabase or another remote store.
+
+## Authoritative and derived data
+
+Authoritative financial records include transactions, splits, confirmed
+transfer links, audit sessions, goal contributions, confirmed subscriptions,
+net-worth items and quotes, account routing, settings, and license state. A
+migration may validate or backfill these records, but it must not silently pick
+one of two conflicting authoritative rows.
+
+Monthly aggregates, recurring patterns, and subscription suggestions are
+rebuildable projections. Their database identities are enforced with partial
+unique indexes so both account-specific and global (`account_id IS NULL`) rows
+remain race-safe. The writers use SQLite conflict handling instead of a
+read-then-insert assumption.
+
+`email_message_id` is the authoritative Gmail ingestion identity and is unique
+when present. Source and canonical transaction checksums remain indexed but
+non-unique: two legitimate transactions may share the current coarse canonical
+fingerprint, and statement text can contain repeated identical rows. These
+checksums are review/deduplication signals, not safe ledger primary keys.
+
+Fresh databases receive reviewed `CHECK` and foreign-key actions from the ORM
+metadata. Older private databases receive equivalent restart-safe write guards
+and the revision-12 identity indexes. Remaining historical foreign-key action
+normalization requires a later reviewed table-rebuild migration; application
+deletion continues to use the centralized dependency order until then.
 
 The retired `backend/alembic` files were removed because production never ran
 them and their chain could not bootstrap the current schema. Running Alembic is

@@ -4,7 +4,19 @@ import uuid
 from datetime import date, datetime, time
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, CheckConstraint, Date, Float, ForeignKey, Index, Integer, String, Text, Time
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Time,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -24,6 +36,12 @@ class Transaction(Base):
         Index("ix_transactions_email_message_id", "email_message_id"),
         Index("ix_transactions_checksum_source", "checksum_source"),
         Index("ix_transactions_checksum_canonical", "checksum_canonical"),
+        Index(
+            "uq_transactions_email_message_id",
+            "email_message_id",
+            unique=True,
+            sqlite_where=text("email_message_id IS NOT NULL"),
+        ),
         CheckConstraint(
             "amount > 0 AND amount <= 1000000000000000",
             name="ck_transactions_amount_range",
@@ -58,7 +76,9 @@ class Transaction(Base):
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     type: Mapped[str] = mapped_column(String(10), nullable=False)
     instrument: Mapped[str] = mapped_column(String(20), nullable=False)
-    account_id: Mapped[str] = mapped_column(String(36), ForeignKey("accounts.id"), nullable=False)
+    account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False
+    )
     category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     subcategory: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -83,7 +103,7 @@ class Transaction(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     classification_version: Mapped[int] = mapped_column(Integer, default=1)
     audit_session_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("audit_sessions.id"), nullable=True
+        String(36), ForeignKey("audit_sessions.id", ondelete="SET NULL"), nullable=True
     )
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(default=utcnow_naive)
