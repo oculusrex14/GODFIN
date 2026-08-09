@@ -1,5 +1,4 @@
 import json
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.account import Account
@@ -207,54 +206,7 @@ def seed_classification_rules(db: Session) -> None:
     db.commit()
 
 
-def _migrate_schema(db: Session) -> None:
-    """Add columns that may be missing from older databases."""
-    # GODFIN intentionally uses a lightweight create-on-start migration
-    # strategy for its single local SQLite database. These tables are
-    # idempotent and are also represented by SQLAlchemy models.
-    conn = db.connection()
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            id VARCHAR(36) PRIMARY KEY,
-            token_hash VARCHAR(64) NOT NULL UNIQUE,
-            expires_at DATETIME NOT NULL,
-            created_at DATETIME NOT NULL,
-            last_seen_at DATETIME NOT NULL,
-            user_agent VARCHAR(500),
-            ip_address VARCHAR(64)
-        )
-    """))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS ix_sessions_expires_at ON sessions (expires_at)"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS ix_sessions_created_at ON sessions (created_at)"
-    ))
-    conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS pin_attempts (
-            client_ip VARCHAR(64) PRIMARY KEY,
-            failed_attempts INTEGER NOT NULL DEFAULT 0,
-            window_started_at DATETIME NOT NULL,
-            blocked_until DATETIME,
-            updated_at DATETIME NOT NULL
-        )
-    """))
-
-    migrations = [
-        "ALTER TABLE income_sources ADD COLUMN next_expected_date DATE",
-        "ALTER TABLE income_sources ADD COLUMN enforce_current_month BOOLEAN DEFAULT 0",
-        "ALTER TABLE subscriptions ADD COLUMN currency VARCHAR(3) DEFAULT 'INR'",
-    ]
-    for sql in migrations:
-        try:
-            conn.execute(text(sql))
-        except Exception:
-            pass  # Column already exists
-    db.commit()
-
-
 def run_seeds(db: Session) -> None:
-    _migrate_schema(db)
     seed_accounts(db)
     seed_app_settings(db)
     seed_classification_rules(db)

@@ -3,12 +3,15 @@ from pathlib import Path
 
 import pytest
 
+from app.core import startup_migrations
 from app.core.startup_migrations import (
     CURRENT_SCHEMA_REVISION,
+    SchemaMigrationError,
     apply_additive_schema_updates,
     backup_before_schema_update,
     read_schema_revision,
     record_schema_revision,
+    validate_schema_postconditions,
 )
 from app.models.app_setting import AppSetting
 
@@ -300,7 +303,8 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
             ("valid-sub", 499, "INR", "monthly"),
         )
         connection.execute(
-            "INSERT INTO income_sources VALUES (?, ?, ?)",
+            "INSERT INTO income_sources "
+            "(id, expected_amount, frequency) VALUES (?, ?, ?)",
             ("valid-income", 75000, "monthly"),
         )
         connection.execute(
@@ -346,7 +350,8 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
                 ("bad-fx-provenance", 499, "USD", "monthly", 80),
             ),
             (
-                "INSERT INTO income_sources VALUES (?, ?, ?)",
+                "INSERT INTO income_sources "
+                "(id, expected_amount, frequency) VALUES (?, ?, ?)",
                 ("bad-income", -1, "monthly"),
             ),
             (
@@ -422,3 +427,172 @@ def test_fresh_schema_declares_financial_check_constraints(db_engine):
     schema = "\n".join(row[0] or "" for row in rows)
 
     assert expected.issubset({name for name in expected if name in schema})
+
+
+def test_revision_11_absorbs_former_seed_schema_changes(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE income_sources (
+                id TEXT PRIMARY KEY,
+                expected_amount REAL,
+                frequency TEXT NOT NULL
+            );
+            CREATE TABLE subscriptions (
+                id TEXT PRIMARY KEY,
+                amount REAL NOT NULL,
+                frequency TEXT NOT NULL
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        income_columns = {
+            row[1]: row for row in connection.execute("PRAGMA table_info(income_sources)")
+        }
+        subscription_columns = {
+            row[1]: row for row in connection.execute("PRAGMA table_info(subscriptions)")
+        }
+    finally:
+        connection.close()
+
+    assert {"next_expected_date", "enforce_current_month"}.issubset(income_columns)
+    assert income_columns["enforce_current_month"][3] == 1
+    assert income_columns["enforce_current_month"][4] == "0"
+    assert subscription_columns["currency"][3] == 1
+    assert subscription_columns["currency"][4] == "'INR'"
+
+
+def test_future_schema_revision_fails_closed_before_backup_or_migration(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    backup_dir = tmp_path / "backups"
+    _create_legacy_database(db_path)
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?)",
+            ("schema_revision", str(CURRENT_SCHEMA_REVISION + 1)),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(SchemaMigrationError, match="newer GODFIN version"):
+        backup_before_schema_update(str(db_path), str(backup_dir))
+    with pytest.raises(SchemaMigrationError, match="newer GODFIN version"):
+        apply_additive_schema_updates(str(db_path))
+
+    assert not backup_dir.exists()
+
+
+@pytest.mark.parametrize("revision", ["not-a-number", "-1"])
+def test_invalid_schema_revision_fails_closed(tmp_path, revision):
+    db_path = tmp_path / "godfin.db"
+    _create_legacy_database(db_path)
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?)",
+            ("schema_revision", revision),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(SchemaMigrationError, match="invalid schema revision"):
+        read_schema_revision(str(db_path))
+    with pytest.raises(SchemaMigrationError, match="invalid schema revision"):
+        apply_additive_schema_updates(str(db_path))
+
+
+def test_failed_revision_rolls_back_prior_schema_changes(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            f"""
+            CREATE TABLE app_settings (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL
+            );
+            INSERT INTO app_settings VALUES (
+                'schema_revision', '{CURRENT_SCHEMA_REVISION - 1}'
+            );
+            CREATE TABLE subscriptions (
+                id TEXT PRIMARY KEY,
+                amount REAL NOT NULL,
+                frequency TEXT NOT NULL
+            );
+            CREATE TABLE audit_sessions (
+                id TEXT PRIMARY KEY,
+                period_year INTEGER NOT NULL,
+                period_month INTEGER NOT NULL,
+                created_at TEXT
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(SchemaMigrationError, match="audit schema is incomplete"):
+        apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        subscription_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(subscriptions)")
+        }
+    finally:
+        connection.close()
+    assert "currency" not in subscription_columns
+
+
+def test_schema_postconditions_require_current_recorded_revision(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    _create_legacy_database(db_path)
+
+    with pytest.raises(SchemaMigrationError, match="did not finish updating"):
+        validate_schema_postconditions(str(db_path))
+
+
+def test_locked_database_fails_without_partial_schema_changes(tmp_path, monkeypatch):
+    db_path = tmp_path / "godfin.db"
+    _create_legacy_database(db_path)
+    real_connect = sqlite3.connect
+    lock_connection = real_connect(db_path)
+    lock_connection.execute("BEGIN EXCLUSIVE")
+
+    def connect_without_waiting(*args, **kwargs):
+        kwargs.setdefault("timeout", 0.05)
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(startup_migrations.sqlite3, "connect", connect_without_waiting)
+    try:
+        with pytest.raises(SchemaMigrationError, match="could not be read safely"):
+            apply_additive_schema_updates(str(db_path))
+    finally:
+        lock_connection.rollback()
+        lock_connection.close()
+
+    connection = real_connect(db_path)
+    try:
+        assert read_schema_revision(str(db_path)) == 0
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    finally:
+        connection.close()
+
+    assert tables == {"app_settings"}

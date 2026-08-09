@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -14,7 +15,21 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 10
+CURRENT_SCHEMA_REVISION = 11
+
+
+class SchemaMigrationError(RuntimeError):
+    """Raised when the local schema cannot be upgraded or trusted safely."""
+
+
+@dataclass(frozen=True)
+class SchemaMigration:
+    """One ordered, restart-safe compatibility revision."""
+
+    revision: int
+    name: str
+    apply: Callable[[sqlite3.Connection], None]
+    validate: Callable[[sqlite3.Connection], None]
 
 _RECURRING_PATTERN_COLUMNS = {
     "confidence": "REAL NOT NULL DEFAULT 0",
@@ -26,6 +41,15 @@ _RECURRING_PATTERN_COLUMNS = {
 
 _TRANSACTION_COLUMNS = {
     "semantic_type": "TEXT NOT NULL DEFAULT 'unknown'",
+}
+
+_INCOME_SOURCE_COLUMNS = {
+    "next_expected_date": "DATE",
+    "enforce_current_month": "BOOLEAN NOT NULL DEFAULT 0",
+}
+
+_SUBSCRIPTION_BASE_COLUMNS = {
+    "currency": "VARCHAR(3) NOT NULL DEFAULT 'INR'",
 }
 
 _SUBSCRIPTION_FX_COLUMNS = {
@@ -247,6 +271,127 @@ def _install_financial_guards(connection: sqlite3.Connection) -> None:
             )
 
 
+def _table_columns(
+    connection: sqlite3.Connection,
+    table: str,
+) -> dict[str, tuple]:
+    return {
+        row[1]: row
+        for row in connection.execute(f'PRAGMA table_info("{table}")').fetchall()
+    }
+
+
+def _add_missing_columns(
+    connection: sqlite3.Connection,
+    table: str,
+    definitions: dict[str, str],
+) -> None:
+    exists = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    if not exists:
+        return
+    existing = _table_columns(connection, table)
+    for column, definition in definitions.items():
+        if column not in existing:
+            connection.execute(
+                f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'
+            )
+
+
+def _apply_revision_11(connection: sqlite3.Connection) -> None:
+    """Consolidate every compatibility repair from pre-registry builds."""
+    for table, columns in (
+        ("income_sources", _INCOME_SOURCE_COLUMNS),
+        ("recurring_patterns", _RECURRING_PATTERN_COLUMNS),
+        ("transactions", _TRANSACTION_COLUMNS),
+        ("subscriptions", _SUBSCRIPTION_BASE_COLUMNS),
+        ("subscriptions", _SUBSCRIPTION_FX_COLUMNS),
+        ("net_worth_items", _NET_WORTH_ITEM_FX_COLUMNS),
+        ("net_worth_quotes", _NET_WORTH_QUOTE_FX_COLUMNS),
+    ):
+        _add_missing_columns(connection, table, columns)
+
+    audit_columns = _table_columns(connection, "audit_sessions")
+    if audit_columns:
+        required = {"id", "period_year", "period_month", "status", "created_at"}
+        missing = required.difference(audit_columns)
+        if missing:
+            raise SchemaMigrationError(
+                "The audit schema is incomplete and cannot be upgraded safely."
+            )
+        # Older releases could leave both the previous finalized session and
+        # its replacement draft/finalized session active. Keep only the newest
+        # row authoritative before installing the invariant.
+        active_rows = connection.execute(
+            "SELECT id, period_year, period_month "
+            "FROM audit_sessions "
+            "WHERE status IN ('draft', 'finalized', 'locked') "
+            "ORDER BY period_year, period_month, "
+            "COALESCE(created_at, '') DESC, rowid DESC"
+        ).fetchall()
+        seen_periods: set[tuple[int, int]] = set()
+        superseded_ids: list[str] = []
+        for audit_id, year, month in active_rows:
+            period = (year, month)
+            if period in seen_periods:
+                superseded_ids.append(audit_id)
+            else:
+                seen_periods.add(period)
+        for audit_id in superseded_ids:
+            connection.execute(
+                "UPDATE audit_sessions SET status='discarded' WHERE id=?",
+                (audit_id,),
+            )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_audit_sessions_active_period "
+            "ON audit_sessions(period_year, period_month) "
+            "WHERE status IN ('draft', 'finalized', 'locked')"
+        )
+
+    _install_financial_guards(connection)
+
+
+def _validate_revision_11(connection: sqlite3.Connection) -> None:
+    for table, columns in (
+        ("income_sources", _INCOME_SOURCE_COLUMNS),
+        ("recurring_patterns", _RECURRING_PATTERN_COLUMNS),
+        ("transactions", _TRANSACTION_COLUMNS),
+        ("subscriptions", _SUBSCRIPTION_BASE_COLUMNS),
+        ("subscriptions", _SUBSCRIPTION_FX_COLUMNS),
+        ("net_worth_items", _NET_WORTH_ITEM_FX_COLUMNS),
+        ("net_worth_quotes", _NET_WORTH_QUOTE_FX_COLUMNS),
+    ):
+        existing = _table_columns(connection, table)
+        if existing and not set(columns).issubset(existing):
+            raise SchemaMigrationError(
+                f"The {table} schema did not satisfy revision 11 postconditions."
+            )
+
+    audit_columns = _table_columns(connection, "audit_sessions")
+    if audit_columns:
+        index = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' "
+            "AND name='uq_audit_sessions_active_period'"
+        ).fetchone()
+        if not index:
+            raise SchemaMigrationError(
+                "The audit-period uniqueness invariant was not installed."
+            )
+
+
+MIGRATION_REGISTRY = (
+    SchemaMigration(
+        revision=11,
+        name="consolidate_pre_registry_compatibility_repairs",
+        apply=_apply_revision_11,
+        validate=_validate_revision_11,
+    ),
+)
+
+
 def read_schema_revision(db_path: str) -> int:
     path = Path(db_path).expanduser()
     if not path.exists() or path.stat().st_size == 0:
@@ -266,94 +411,103 @@ def read_schema_revision(db_path: str) -> int:
             ).fetchone()
         finally:
             connection.close()
-    except sqlite3.Error:
-        return 0
+    except sqlite3.Error as exc:
+        raise SchemaMigrationError(
+            "The local database schema revision could not be read safely."
+        ) from exc
 
     if not row:
         return 0
     try:
-        return max(0, int(row[0]))
-    except (TypeError, ValueError):
-        return 0
+        revision = int(row[0])
+    except (TypeError, ValueError) as exc:
+        raise SchemaMigrationError(
+            "The local database contains an invalid schema revision."
+        ) from exc
+    if revision < 0:
+        raise SchemaMigrationError(
+            "The local database contains an invalid schema revision."
+        )
+    return revision
 
 
 def backup_before_schema_update(db_path: str, backup_dir: str) -> Optional[str]:
     path = Path(db_path).expanduser()
     if not path.exists() or path.stat().st_size == 0:
         return None
-    if read_schema_revision(str(path)) >= CURRENT_SCHEMA_REVISION:
+    revision = read_schema_revision(str(path))
+    if revision > CURRENT_SCHEMA_REVISION:
+        raise SchemaMigrationError(
+            "This database was created by a newer GODFIN version. "
+            "Install that version instead of opening it here."
+        )
+    if revision == CURRENT_SCHEMA_REVISION:
         return None
     return create_backup(str(path), backup_dir)
 
 
 def apply_additive_schema_updates(db_path: str) -> None:
-    """Apply restart-safe column additions before SQLAlchemy maps the schema."""
+    """Apply the ordered compatibility registry in one SQLite transaction."""
     path = Path(db_path).expanduser()
     if not path.exists() or path.stat().st_size == 0:
         return
 
-    connection = sqlite3.connect(path)
-    try:
-        for table, columns in (
-            ("recurring_patterns", _RECURRING_PATTERN_COLUMNS),
-            ("transactions", _TRANSACTION_COLUMNS),
-            ("subscriptions", _SUBSCRIPTION_FX_COLUMNS),
-            ("net_worth_items", _NET_WORTH_ITEM_FX_COLUMNS),
-            ("net_worth_quotes", _NET_WORTH_QUOTE_FX_COLUMNS),
-        ):
-            exists = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (table,),
-            ).fetchone()
-            if not exists:
-                continue
-            existing = {
-                row[1]
-                for row in connection.execute(
-                    f'PRAGMA table_info("{table}")'
-                ).fetchall()
-            }
-            for column, definition in columns.items():
-                if column not in existing:
-                    connection.execute(
-                        f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'
-                    )
+    revision = read_schema_revision(str(path))
+    if revision > CURRENT_SCHEMA_REVISION:
+        raise SchemaMigrationError(
+            "This database was created by a newer GODFIN version. "
+            "Install that version instead of opening it here."
+        )
 
-        audit_table = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='audit_sessions'"
-        ).fetchone()
-        if audit_table:
-            # Older releases could leave both the previous finalized session
-            # and its replacement draft/finalized session active. Keep only
-            # the newest row authoritative before installing the invariant.
-            active_rows = connection.execute(
-                "SELECT id, period_year, period_month "
-                "FROM audit_sessions "
-                "WHERE status IN ('draft', 'finalized', 'locked') "
-                "ORDER BY period_year, period_month, "
-                "COALESCE(created_at, '') DESC, rowid DESC"
-            ).fetchall()
-            seen_periods: set[tuple[int, int]] = set()
-            superseded_ids: list[str] = []
-            for audit_id, year, month in active_rows:
-                period = (year, month)
-                if period in seen_periods:
-                    superseded_ids.append(audit_id)
-                else:
-                    seen_periods.add(period)
-            for audit_id in superseded_ids:
-                connection.execute(
-                    "UPDATE audit_sessions SET status='discarded' WHERE id=?",
-                    (audit_id,),
-                )
-            connection.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS "
-                "uq_audit_sessions_active_period "
-                "ON audit_sessions(period_year, period_month) "
-                "WHERE status IN ('draft', 'finalized', 'locked')"
+    connection = sqlite3.connect(path, timeout=1.0)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("BEGIN IMMEDIATE")
+        for migration in MIGRATION_REGISTRY:
+            if revision < migration.revision:
+                migration.apply(connection)
+            migration.validate(connection)
+
+        quick_check = connection.execute("PRAGMA quick_check").fetchone()
+        if quick_check != ("ok",):
+            raise SchemaMigrationError(
+                "The local database failed its migration integrity check."
             )
-        _install_financial_guards(connection)
+        foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchone()
+        if foreign_key_errors is not None:
+            raise SchemaMigrationError(
+                "The local database contains broken relationships after migration."
+            )
         connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def validate_schema_postconditions(db_path: str) -> None:
+    """Verify the recorded revision and database integrity after startup."""
+    revision = read_schema_revision(db_path)
+    if revision != CURRENT_SCHEMA_REVISION:
+        raise SchemaMigrationError(
+            "GODFIN did not finish updating the local database schema."
+        )
+    connection = sqlite3.connect(
+        f"file:{Path(db_path).expanduser().resolve()}?mode=ro",
+        uri=True,
+    )
+    try:
+        for migration in MIGRATION_REGISTRY:
+            migration.validate(connection)
+        if connection.execute("PRAGMA quick_check").fetchone() != ("ok",):
+            raise SchemaMigrationError(
+                "The local database failed its post-migration integrity check."
+            )
+        if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise SchemaMigrationError(
+                "The local database contains broken relationships."
+            )
     finally:
         connection.close()
 
@@ -388,6 +542,17 @@ def run_post_create_migrations(db: Session) -> None:
 
 def record_schema_revision(db: Session) -> None:
     setting = db.query(AppSetting).filter_by(key=SCHEMA_REVISION_KEY).first()
+    if setting is not None:
+        try:
+            existing_revision = int(setting.value)
+        except (TypeError, ValueError) as exc:
+            raise SchemaMigrationError(
+                "The local database contains an invalid schema revision."
+            ) from exc
+        if existing_revision > CURRENT_SCHEMA_REVISION:
+            raise SchemaMigrationError(
+                "This database was created by a newer GODFIN version."
+            )
     value = str(CURRENT_SCHEMA_REVISION)
     if setting is None:
         db.add(AppSetting(key=SCHEMA_REVISION_KEY, value=value))

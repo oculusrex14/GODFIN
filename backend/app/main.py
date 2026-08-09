@@ -61,9 +61,8 @@ async def lifespan(app: FastAPI):
         logger.info("Created pre-migration backup: %s", migration_backup)
     apply_additive_schema_updates(DB_PATH)
 
-    # GODFIN intentionally uses create_all + idempotent seed migrations for its
-    # local SQLite lifecycle. This makes a first launch work with an empty path
-    # and keeps packaged builds independent from a separate migration command.
+    # GODFIN intentionally uses create_all plus the ordered startup registry for
+    # its single local SQLite lifecycle. Seeds never mutate schema.
     Base.metadata.create_all(bind=engine)
 
     # Run database seeds
@@ -73,10 +72,12 @@ async def lifespan(app: FastAPI):
         from app.core.startup_migrations import (
             record_schema_revision,
             run_post_create_migrations,
+            validate_schema_postconditions,
         )
 
         run_post_create_migrations(db)
         record_schema_revision(db)
+        validate_schema_postconditions(DB_PATH)
 
         # Load persistent auth token from database
         from app.core.auth import load_token_from_db

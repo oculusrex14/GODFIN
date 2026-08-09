@@ -8,7 +8,7 @@ GODFIN is a local-first, AI-augmented personal finance tracker for HDFC Bank use
 
 ## Commands
 
-### Backend (FastAPI + Python 3.9)
+### Backend (FastAPI + Python 3.12)
 
 ```bash
 # Navigate to backend directory
@@ -21,14 +21,8 @@ source venv/bin/activate  # On macOS/Linux
 # Install dependencies
 pip install -r requirements.txt
 
-# Run database migrations
-alembic upgrade head
-
-# Create a new migration
-alembic revision --autogenerate -m "description"
-
 # Run backend server (port 5100)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 5100
+uvicorn app.main:app --reload --host 127.0.0.1 --port 5100
 
 # Run tests
 pytest
@@ -43,7 +37,7 @@ cd frontend
 # Install dependencies
 npm install
 
-# Run dev server (port 5173)
+# Run dev server (port 5200)
 npm run dev
 
 # Build for production
@@ -103,11 +97,11 @@ src/
    - Layer 4: Embedding similarity (sentence-transformers)
    - Layer 5: LLM fallback (OpenAI/Anthropic/Google with PII sanitization)
 
-2. **Audit State Machine**: Transactions flow through states: `draft` → `finalized` → `locked`. Finalized months are immutable without explicit reopening.
+2. **Audit State Machine**: Periods use `draft`, `finalized`, `locked`, and `discarded`. Finalized or locked months are immutable without explicit reopening.
 
-3. **Database**: SQLite with WAL mode enabled, busy_timeout=5000ms, foreign_keys=ON. Use Alembic for all schema changes.
+3. **Database**: SQLite with WAL mode enabled, busy_timeout=5000ms, and foreign_keys=ON. Fresh tables use SQLAlchemy `create_all`; upgrades use only the ordered registry in `app/core/startup_migrations.py`. Seeds never alter schema. See `docs/DATABASE_LIFECYCLE.md`.
 
-4. **API Convention**: All routes use `/api/v1/` prefix. CORS enabled for all origins (local-first app).
+4. **API Convention**: All routes use `/api/v1/` prefix. CORS is restricted to the local frontend, backend, and Electron application origins unless explicitly configured.
 
 5. **Frontend State**: React Query for server state, custom contexts for auth/theme/audit/toast.
 
@@ -115,13 +109,13 @@ src/
 
 - `GODFIN_Final_Build_Specification_v1 .md` — Single source of truth for project requirements
 - `Claude_Build_Plan.md` — 10-phase build strategy with skill usage guidelines
-- `backend/alembic.ini` — Database migration configuration
+- `backend/app/core/startup_migrations.py` — Authoritative ordered local database migrations
 - `backend/app/core/taxonomy.py` — Category/subcategory definitions (do not modify without spec alignment)
 - `backend/app/models/` — All data models; understand relationships before modifying
 
 ## Development Notes
 
-- The virtual environment (`backend/venv/`) is Python 3.9
+- The supported backend runtime is Python 3.12
 - Backend runs on port 5100 (configurable via `PORT` env var)
 - Frontend uses Tailwind CSS v4 with Vite plugin (no tailwind.config.js needed)
 - The app uses a PIN-based auth system with persistent token storage
@@ -130,7 +124,7 @@ src/
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **GODFIN** (8155 symbols, 16270 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **GODFIN** (10002 symbols, 19084 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
