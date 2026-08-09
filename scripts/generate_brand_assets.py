@@ -23,8 +23,8 @@ SOURCE = BRAND_ROOT / "godfin-vault-dial-source.png"
 MARK = BRAND_ROOT / "godfin-vault-dial-mark.png"
 APP_ICON = BRAND_ROOT / "godfin-app-icon.png"
 
-SOURCE_SHA256 = "bc12b6bf74d3867e999c147fc90f7612d02efb4402cacea0cf576d1f76345a96"
-MARK_CROP = (383, 75, 1151, 843)
+SOURCE_SHA256 = "02304401ded78fbc7e59c661f4fc6b39b85667562df09ed0a5587f8c0b32b4a9"
+MARK_CROP = (395, 130, 1163, 898)
 DEEP_NAVY = (11, 29, 51, 255)
 
 COPIES = {
