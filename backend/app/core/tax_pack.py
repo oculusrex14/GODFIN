@@ -4,11 +4,12 @@ import csv
 import hashlib
 import io
 import json
-import zipfile
+import re
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Iterable
 
+import pyzipper
 from fpdf import FPDF
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.models.account import Account
 from app.models.audit_session import AuditSession
 from app.models.transaction import Transaction
+from app.core.money import money_decimal
 from app.core.transaction_semantics import (
     TransactionSemantic,
     is_spending,
@@ -25,10 +27,14 @@ from app.core.transaction_semantics import (
     semantic_type_for,
 )
 
-TAX_PACK_SCHEMA_VERSION = "1.0"
-TAX_GUIDE_VERSION = "1.0"
+TAX_PACK_SCHEMA_VERSION = "2.0"
+TAX_GUIDE_VERSION = "1.1"
 LOW_CONFIDENCE_THRESHOLD = 0.75
-OFFICIAL_DOWNLOADS_URL = "https://www.incometax.gov.in/iec/foportal/downloads"
+MIN_TAX_PACK_PASSPHRASE_LENGTH = 12
+MAX_TAX_PACK_PASSPHRASE_LENGTH = 128
+OFFICIAL_DOWNLOADS_URL = (
+    "https://www.incometax.gov.in/iec/foportal/downloads/income-tax-returns"
+)
 OFFICIAL_AIS_URL = (
     "https://www.incometax.gov.in/iec/foportal/help/all-topics/"
     "e-filing-services/ais%20-%20annual%20information%20statement-faqs"
@@ -44,7 +50,7 @@ TRANSACTION_COLUMNS = [
     "Time",
     "Account",
     "Merchant",
-    "Raw narration",
+    "Narration (locally redacted)",
     "Amount (INR)",
     "Type",
     "Instrument",
@@ -61,8 +67,21 @@ TRANSACTION_COLUMNS = [
     "Reconciled",
     "Duplicate risk",
     "Tags",
-    "Notes",
+    "Notes (locally redacted)",
 ]
+
+_EMAIL_PATTERN = re.compile(
+    r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![A-Z0-9])",
+    re.IGNORECASE,
+)
+_UPI_PATTERN = re.compile(
+    r"(?<![A-Z0-9._+-])[A-Z0-9._+-]{2,}@[A-Z][A-Z0-9._-]{1,}(?![A-Z0-9._-])",
+    re.IGNORECASE,
+)
+_PHONE_PATTERN = re.compile(r"(?<!\d)(?:\+?91[\s-]?)?[6-9]\d{9}(?!\d)")
+_LONG_NUMBER_PATTERN = re.compile(r"(?<!\d)\d{6,}(?!\d)")
+_CONTROL_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_MAX_REDACTED_TEXT_LENGTH = 500
 
 
 def _safe_text(value: Any) -> Any:
@@ -76,12 +95,26 @@ def _safe_text(value: Any) -> Any:
     return cleaned
 
 
+def _redact_sensitive_text(value: Any) -> str:
+    """Minimize common personal identifiers before a tax pack leaves GODFIN."""
+    if value is None:
+        return ""
+    cleaned = _CONTROL_PATTERN.sub(" ", str(value)).strip()
+    cleaned = _EMAIL_PATTERN.sub("[EMAIL REDACTED]", cleaned)
+    cleaned = _UPI_PATTERN.sub("[UPI ID REDACTED]", cleaned)
+    cleaned = _PHONE_PATTERN.sub("[PHONE REDACTED]", cleaned)
+    cleaned = _LONG_NUMBER_PATTERN.sub("[REFERENCE NUMBER REDACTED]", cleaned)
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > _MAX_REDACTED_TEXT_LENGTH:
+        cleaned = f"{cleaned[:_MAX_REDACTED_TEXT_LENGTH].rstrip()}…"
+    return str(_safe_text(cleaned))
+
+
 def _masked_account(account: Account | None) -> str:
     if not account:
         return "Unknown account"
-    nickname = f"{account.nickname} - " if account.nickname else ""
     return (
-        f"{nickname}{account.bank} "
+        f"{account.bank} "
         f"{account.account_type.replace('_', ' ')} ****{account.last_4_digits}"
     )
 
@@ -100,8 +133,12 @@ def _transaction_row(
         "Date": transaction.date,
         "Time": transaction.time,
         "Account": _masked_account(accounts.get(transaction.account_id)),
-        "Merchant": transaction.merchant_normalized or transaction.merchant_raw,
-        "Raw narration": transaction.raw_text,
+        "Merchant": _redact_sensitive_text(
+            transaction.merchant_normalized or transaction.merchant_raw
+        ),
+        "Narration (locally redacted)": _redact_sensitive_text(
+            transaction.raw_text
+        ),
         "Amount (INR)": round(float(transaction.amount), 2),
         "Type": transaction.type,
         "Instrument": transaction.instrument,
@@ -124,8 +161,8 @@ def _transaction_row(
             transaction.checksum_canonical
             and transaction.checksum_canonical in duplicate_checksums
         ),
-        "Tags": transaction.tags,
-        "Notes": transaction.notes,
+        "Tags": _redact_sensitive_text(transaction.tags),
+        "Notes (locally redacted)": _redact_sensitive_text(transaction.notes),
     }
 
 
@@ -186,8 +223,10 @@ def _quality_exceptions(
                     "Transaction ID": transaction.id,
                     "Date": transaction.date,
                     "Account": _masked_account(accounts.get(transaction.account_id)),
-                    "Merchant": transaction.merchant_normalized
-                    or transaction.merchant_raw,
+                    "Merchant": _redact_sensitive_text(
+                        transaction.merchant_normalized
+                        or transaction.merchant_raw
+                    ),
                     "Amount (INR)": round(float(transaction.amount), 2),
                     "Issue": code,
                     "Required review": action,
@@ -206,15 +245,15 @@ def _month_keys(start_year: int) -> list[tuple[int, int]]:
     ]
 
 
-def _period_warnings(
+def _period_review_rows(
     db: Session,
     transactions: list[Transaction],
     start_year: int,
 ) -> list[dict[str, Any]]:
-    transaction_months = {
+    transaction_counts = Counter(
         (transaction.date.year, transaction.date.month)
         for transaction in transactions
-    }
+    )
     sessions = (
         db.query(AuditSession)
         .filter(
@@ -224,37 +263,54 @@ def _period_warnings(
         .order_by(AuditSession.created_at.desc())
         .all()
     )
-    latest = {}
+    by_period: dict[tuple[int, int], list[AuditSession]] = {}
     for session in sessions:
-        latest.setdefault((session.period_year, session.period_month), session)
+        by_period.setdefault(
+            (session.period_year, session.period_month), []
+        ).append(session)
 
-    warnings = []
+    rows = []
     for year, month in _month_keys(start_year):
-        session = latest.get((year, month))
-        if (year, month) not in transaction_months:
-            warnings.append(
-                {
-                    "Period": f"{month:02d}-{year}",
-                    "Issue": "No transactions present",
-                    "Status": session.status if session else "no audit session",
-                    "Required review": (
-                        "Confirm that the period is genuinely inactive or import the "
-                        "missing statement/email data."
-                    ),
-                }
+        period_sessions = by_period.get((year, month), [])
+        session = period_sessions[0] if len(period_sessions) == 1 else None
+        issues = []
+        actions = []
+        if not transaction_counts[(year, month)]:
+            issues.append("No transactions present")
+            actions.append(
+                "Confirm that the period is genuinely inactive or import the missing statement/email data."
+            )
+        if len(period_sessions) > 1:
+            issues.append("Multiple active audit sessions")
+            actions.append(
+                "Resolve the audit-session conflict before relying on this period."
             )
         if not session or session.status not in {"finalized", "locked"}:
-            warnings.append(
-                {
-                    "Period": f"{month:02d}-{year}",
-                    "Issue": "Month not finalized",
-                    "Status": session.status if session else "no audit session",
-                    "Required review": (
-                        "Review and finalize the month before treating the pack as complete."
-                    ),
-                }
+            issues.append("Month not finalized")
+            actions.append(
+                "Review and finalize the month before treating the pack as complete."
             )
-    return warnings
+        rows.append(
+            {
+                "Period": f"{month:02d}-{year}",
+                "Transaction count": transaction_counts[(year, month)],
+                "Authoritative audit session": session.id if session else "",
+                "Audit status": session.status if session else "no audit session",
+                "Finalized UTC": (
+                    session.finalized_at.isoformat()
+                    if session and session.finalized_at
+                    else ""
+                ),
+                "Review required": bool(issues),
+                "Issue": "; ".join(issues) if issues else "No automated period issue",
+                "Required review": (
+                    " ".join(actions)
+                    if actions
+                    else "Reconcile external tax records before filing."
+                ),
+            }
+        )
+    return rows
 
 
 def _append_table(
@@ -455,6 +511,15 @@ def _filing_guide_pdf(
 
     sections = [
         (
+            "Protect and share this pack safely",
+            [
+                "Every file in this ZIP uses AES-256 encryption. Use an AES-capable archive app if the operating system's built-in extractor cannot open it.",
+                "Send the ZIP and its passphrase through different channels. Do not place the password in the same email or message as the archive.",
+                "GODFIN does not store the passphrase and cannot recover it. ZIP filenames remain visible even though file contents are encrypted.",
+                "Common emails, UPI IDs, phone numbers and long reference numbers are locally redacted, but dates, amounts and tax-review details remain sensitive.",
+            ],
+        ),
+        (
             "1. Review GODFIN's completeness warnings",
             [
                 f"Resolve or explain {exception_count} transaction-level exceptions.",
@@ -530,7 +595,23 @@ def _filing_guide_pdf(
     return bytes(pdf.output())
 
 
-def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
+def build_financial_year_tax_pack(
+    db: Session,
+    start_year: int,
+    *,
+    passphrase: str,
+) -> bytes:
+    if not (
+        MIN_TAX_PACK_PASSPHRASE_LENGTH
+        <= len(passphrase)
+        <= MAX_TAX_PACK_PASSPHRASE_LENGTH
+    ):
+        raise ValueError(
+            "Tax-pack passphrase must be between 12 and 128 characters"
+        )
+    if any(ord(character) < 32 or ord(character) == 127 for character in passphrase):
+        raise ValueError("Tax-pack passphrase cannot contain control characters")
+
     start = date(start_year, 4, 1)
     end = date(start_year + 1, 4, 1)
     generated = datetime.now(UTC).replace(microsecond=0)
@@ -585,14 +666,23 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
     exceptions = _quality_exceptions(
         transactions, accounts, duplicate_checksums
     )
-    period_warnings = _period_warnings(db, transactions, start_year)
+    period_rows = _period_review_rows(db, transactions, start_year)
+    period_warning_count = sum(
+        1 for row in period_rows if row["Review required"]
+    )
     fy_label = f"FY {start_year}-{str(start_year + 1)[-2:]}"
     ay_label = f"AY {start_year + 1}-{str(start_year + 2)[-2:]}"
-    total_income = round(
-        sum(float(row["Amount (INR)"]) for row in income_rows), 2
+    total_income = money_decimal(
+        sum(
+            (money_decimal(row["Amount (INR)"]) for row in income_rows),
+            money_decimal(0),
+        )
     )
-    total_expense = round(
-        sum(float(row["Amount (INR)"]) for row in expense_rows), 2
+    total_expense = money_decimal(
+        sum(
+            (money_decimal(row["Amount (INR)"]) for row in expense_rows),
+            money_decimal(0),
+        )
     )
 
     metadata = [
@@ -610,7 +700,7 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
             "Field": "Readiness",
             "Value": (
                 "REVIEW REQUIRED"
-                if exceptions or period_warnings
+                if exceptions or period_warning_count
                 else "No automated exceptions; external evidence still required"
             ),
         },
@@ -619,6 +709,20 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
             "Value": (
                 "Local transaction organizer only; not an ITR, tax computation, "
                 "or substitute for a Chartered Accountant."
+            ),
+        },
+        {
+            "Field": "Privacy",
+            "Value": (
+                "AES-256 encrypted. Common identifiers in narration, merchant, tags "
+                "and notes are locally redacted; ZIP filenames remain visible."
+            ),
+        },
+        {
+            "Field": "Password sharing",
+            "Value": (
+                "Send the passphrase to the intended CA through a different channel "
+                "from the archive. GODFIN never stores it."
             ),
         },
     ]
@@ -665,7 +769,7 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
         expense_rows=expense_rows,
         transfer_rows=transfer_rows,
         exception_rows=exceptions,
-        period_rows=period_warnings,
+        period_rows=period_rows,
         evidence_rows=evidence_rows,
         filing_rows=filing_rows,
     )
@@ -675,11 +779,11 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
         "financial_year": fy_label,
         "assessment_year": ay_label,
         "transaction_count": len(transaction_rows),
-        "income_candidate_total_inr": total_income,
-        "expense_review_total_inr": total_expense,
+        "income_candidate_total_inr": float(total_income),
+        "expense_review_total_inr": float(total_expense),
         "transfer_or_reversal_count": len(transfer_rows),
         "data_quality_exception_count": len(exceptions),
-        "period_warning_count": len(period_warnings),
+        "period_warning_count": period_warning_count,
         "duplicate_risk_count": sum(
             1 for row in transaction_rows if row["Duplicate risk"]
         ),
@@ -688,12 +792,13 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
         ),
         "readiness": (
             "review_required"
-            if exceptions or period_warnings
+            if exceptions or period_warning_count
             else "automated_checks_clear_external_reconciliation_required"
         ),
         "warning": (
             "GODFIN cannot determine the correct return or filing readiness from "
-            "transaction data alone."
+            "transaction data alone. Send this encrypted archive and its passphrase "
+            "through separate channels."
         ),
     }
     reconciliation_bytes = json.dumps(
@@ -704,13 +809,13 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
         ay_label=ay_label,
         generated_at=generated.isoformat(),
         exception_count=len(exceptions),
-        period_warning_count=len(period_warnings),
+        period_warning_count=period_warning_count,
     )
 
     short_label = f"fy{start_year}-{str(start_year + 1)[-2:]}"
     files = {
         f"godfin_ca_{short_label}.xlsx": workbook_bytes,
-        f"godfin_ca_{short_label}_raw.csv": csv_bytes,
+        f"godfin_ca_{short_label}_transactions.csv": csv_bytes,
         "reconciliation_summary.json": reconciliation_bytes,
         f"filing_guide_{ay_label.lower().replace(' ', '').replace('-', '_')}_v{TAX_GUIDE_VERSION}.pdf": guide_bytes,
     }
@@ -722,6 +827,21 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
         "period_start": start.isoformat(),
         "period_end_exclusive": end.isoformat(),
         "generated_at_utc": generated.isoformat(),
+        "encryption": {
+            "format": "WinZip AES",
+            "algorithm": "AES-256",
+            "passphrase_stored": False,
+            "filenames_encrypted": False,
+        },
+        "privacy": {
+            "raw_narration_included": False,
+            "free_text_locally_redacted": True,
+            "account_numbers_masked": True,
+            "warning": (
+                "Archive filenames are visible without the passphrase. Share the "
+                "passphrase through a separate channel."
+            ),
+        },
         "summary": reconciliation,
         "files": {
             name: {
@@ -737,9 +857,14 @@ def build_financial_year_tax_pack(db: Session, start_year: int) -> bytes:
     ).encode("utf-8")
 
     archive = io.BytesIO()
-    with zipfile.ZipFile(
-        archive, "w", compression=zipfile.ZIP_DEFLATED
+    with pyzipper.AESZipFile(
+        archive,
+        "w",
+        compression=pyzipper.ZIP_DEFLATED,
+        encryption=pyzipper.WZ_AES,
     ) as package:
+        package.setpassword(passphrase.encode("utf-8"))
+        package.setencryption(pyzipper.WZ_AES, nbits=256)
         for name, content in files.items():
             package.writestr(name, content)
     return archive.getvalue()

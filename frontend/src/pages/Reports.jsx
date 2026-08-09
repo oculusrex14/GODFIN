@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { format, subMonths } from 'date-fns';
 import {
   FileText, Download, ChevronLeft, ChevronRight, TrendingDown, TrendingUp,
   PiggyBank, Sparkles, FileSpreadsheet, AlertTriangle, CheckCircle2,
-  Info, Lightbulb, CalendarRange, ShieldCheck, Repeat2
+  Info, Lightbulb, CalendarRange, ShieldCheck, Repeat2, KeyRound, X
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar,
@@ -123,6 +123,11 @@ export default function Reports() {
   const [aiReportData, setAIReportData] = useState(null);
   const now = new Date();
   const [fyStart, setFyStart] = useState(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1);
+  const [taxPackOpen, setTaxPackOpen] = useState(false);
+  const [taxPackPassphrase, setTaxPackPassphrase] = useState('');
+  const [taxPackConfirmation, setTaxPackConfirmation] = useState('');
+  const taxPackPassphraseRef = useRef(null);
+  const taxPackDialogRef = useRef(null);
   const d = new Date(month + '-01');
   const prev = format(subMonths(d, 1), 'yyyy-MM');
   const next = format(new Date(d.getFullYear(), d.getMonth() + 1, 1), 'yyyy-MM');
@@ -165,6 +170,14 @@ export default function Reports() {
       ]);
     },
   });
+  const taxPackMutation = useMutation({
+    mutationFn: ({ startYear, passphrase }) => downloadFinancialYearPack(startYear, passphrase),
+    onSuccess: () => {
+      setTaxPackOpen(false);
+      setTaxPackPassphrase('');
+      setTaxPackConfirmation('');
+    },
+  });
 
   const insightsData = aiReportData?.month === month ? aiReportData : null;
   const insightsLoading = insightsMutation.isPending;
@@ -175,6 +188,53 @@ export default function Reports() {
     const frame = window.requestAnimationFrame(() => setContentReady(true));
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    if (!taxPackOpen) return undefined;
+    const previouslyFocused = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const frame = window.requestAnimationFrame(() => taxPackPassphraseRef.current?.focus());
+    const handleKeyDown = event => {
+      if (event.key === 'Escape' && !taxPackMutation.isPending) {
+        setTaxPackOpen(false);
+        setTaxPackPassphrase('');
+        setTaxPackConfirmation('');
+      }
+      if (event.key === 'Tab') {
+        const focusable = [...(taxPackDialogRef.current?.querySelectorAll(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) || [])];
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+    };
+  }, [taxPackOpen, taxPackMutation.isPending]);
+
+  const taxPackPassphraseValid = taxPackPassphrase.length >= 12
+    && taxPackPassphrase.length <= 128
+    && taxPackPassphrase === taxPackConfirmation;
+  const closeTaxPackDialog = () => {
+    if (taxPackMutation.isPending) return;
+    setTaxPackOpen(false);
+    setTaxPackPassphrase('');
+    setTaxPackConfirmation('');
+  };
 
   return (
     <div>
@@ -662,7 +722,7 @@ export default function Reports() {
               <div className="flex items-center gap-2 text-white/55 text-sm">
                 <CalendarRange size={15} /> Export for CA
               </div>
-              <p className="mt-1 text-white/25 text-xs">ZIP with a multi-sheet workbook, raw CSV, manifest, reconciliation summary, and AY filing guide.</p>
+              <p className="mt-1 text-white/25 text-xs">AES-256 encrypted ZIP with a multi-sheet workbook, privacy-minimized CSV, manifest, reconciliation summary, and AY filing guide.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <select
@@ -677,7 +737,7 @@ export default function Reports() {
                 })}
               </select>
               <button
-                onClick={() => downloadFinancialYearPack(fyStart)}
+                onClick={() => setTaxPackOpen(true)}
                 disabled={!insightsEnabled}
                 className="min-h-11 px-3 rounded-xl bg-cyan-400/[0.12] border border-cyan-300/[0.16] text-cyan-100/70 disabled:opacity-35 text-xs"
               >
@@ -690,6 +750,110 @@ export default function Reports() {
           )}
         </div>
       </motion.div>
+        </>
+      )}
+
+      {taxPackOpen && (
+        <>
+          <div
+            aria-hidden="true"
+            className="fixed inset-0 z-50 cursor-default bg-black/65 backdrop-blur-sm"
+            onClick={closeTaxPackDialog}
+          />
+          <section
+            ref={taxPackDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tax-pack-title"
+            aria-describedby="tax-pack-description"
+            className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[24px] border border-white/[0.14] bg-[#102342] p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-cyan-300/15 bg-cyan-300/[0.08] text-cyan-200/75">
+                  <KeyRound size={18} />
+                </span>
+                <div>
+                  <h2 id="tax-pack-title" className="text-lg font-medium text-white/90">Protect your CA tax pack</h2>
+                  <p id="tax-pack-description" className="mt-1 text-sm leading-relaxed text-white/45">
+                    This file contains sensitive dates, amounts, and tax-review details. GODFIN encrypts every file with AES-256 and never stores this passphrase.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeTaxPackDialog}
+                disabled={taxPackMutation.isPending}
+                aria-label="Close protected tax pack dialog"
+                className="rounded-lg p-1 text-white/30 hover:text-white/65 disabled:opacity-30"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form
+              className="mt-5 space-y-4"
+              onSubmit={event => {
+                event.preventDefault();
+                if (!taxPackPassphraseValid) return;
+                taxPackMutation.mutate({
+                  startYear: fyStart,
+                  passphrase: taxPackPassphrase,
+                });
+              }}
+            >
+              <label className="block text-sm text-white/60">
+                Archive passphrase
+                <input
+                  ref={taxPackPassphraseRef}
+                  type="password"
+                  value={taxPackPassphrase}
+                  onChange={event => setTaxPackPassphrase(event.target.value)}
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  spellCheck="false"
+                  className="mt-1.5 w-full rounded-xl border border-white/[0.13] bg-white/[0.06] px-3 py-2.5 text-white/85 outline-none focus:border-cyan-300/40"
+                />
+              </label>
+              <label className="block text-sm text-white/60">
+                Confirm archive passphrase
+                <input
+                  type="password"
+                  value={taxPackConfirmation}
+                  onChange={event => setTaxPackConfirmation(event.target.value)}
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  spellCheck="false"
+                  className="mt-1.5 w-full rounded-xl border border-white/[0.13] bg-white/[0.06] px-3 py-2.5 text-white/85 outline-none focus:border-cyan-300/40"
+                />
+              </label>
+              <div className="rounded-xl border border-amber-300/15 bg-amber-300/[0.06] p-3 text-xs leading-relaxed text-amber-100/55">
+                Use at least 12 characters—not your GODFIN PIN. Send the ZIP and passphrase to your CA through different channels. If you forget it, GODFIN cannot recover it. Some built-in archive apps may require an AES-capable extractor.
+              </div>
+              {taxPackConfirmation && taxPackPassphrase !== taxPackConfirmation && (
+                <p role="alert" className="text-xs text-rose-300/75">The two passphrases do not match.</p>
+              )}
+              <div className="flex justify-end gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={closeTaxPackDialog}
+                  disabled={taxPackMutation.isPending}
+                  className="min-h-11 px-4 text-sm text-white/50 hover:text-white/80 disabled:opacity-30"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!taxPackPassphraseValid || taxPackMutation.isPending}
+                  className="min-h-11 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.12] px-4 text-sm text-cyan-100/80 disabled:opacity-35"
+                >
+                  {taxPackMutation.isPending ? 'Encrypting locally…' : 'Encrypt and download'}
+                </button>
+              </div>
+            </form>
+          </section>
         </>
       )}
     </div>

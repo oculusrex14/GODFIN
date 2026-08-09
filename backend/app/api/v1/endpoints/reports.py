@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -51,6 +51,21 @@ class SavingsTargetResponse(BaseModel):
     minimum_percent: float
     maximum_percent: float
     applies_to: str
+
+
+class TaxPackRequest(BaseModel):
+    start_year: int = Field(ge=2000, le=2100)
+    passphrase: SecretStr
+
+    @field_validator("passphrase")
+    @classmethod
+    def validate_passphrase(cls, value: SecretStr) -> SecretStr:
+        raw = value.get_secret_value()
+        if not 12 <= len(raw) <= 128:
+            raise ValueError("Passphrase must be between 12 and 128 characters")
+        if any(ord(character) < 32 or ord(character) == 127 for character in raw):
+            raise ValueError("Passphrase cannot contain control characters")
+        return value
 
 
 def _default_month(db: Session) -> str:
@@ -382,25 +397,32 @@ def report_financial_year(
     )
 
 
-@router.get("/fy/pack")
+@router.post("/fy/pack")
 def report_financial_year_pack(
-    start_year: int = Query(ge=2000, le=2100),
+    body: TaxPackRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Build the review-oriented Indian FY ZIP tax pack for a CA."""
+    """Build an AES-256 encrypted, review-oriented Indian FY tax pack."""
     from app.api.v1.endpoints.license import enforce_feature
 
     enforce_feature(db, "advanced_reports")
-    content = build_financial_year_tax_pack(db, start_year)
-    label = f"fy{start_year}-{str(start_year + 1)[-2:]}"
+    content = build_financial_year_tax_pack(
+        db,
+        body.start_year,
+        passphrase=body.passphrase.get_secret_value(),
+    )
+    label = f"fy{body.start_year}-{str(body.start_year + 1)[-2:]}"
     return Response(
         content=content,
         media_type="application/zip",
         headers={
             "Content-Disposition": (
                 f'attachment; filename="godfin_ca_tax_pack_{label}.zip"'
-            )
+            ),
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

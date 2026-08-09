@@ -998,10 +998,14 @@ export async function downloadFinancialYear(startYear, format = 'csv') {
   URL.revokeObjectURL(url);
 }
 
-export async function downloadFinancialYearPack(startYear) {
+export async function downloadFinancialYearPack(startYear, passphrase) {
   const blob = await apiFetch(
-    `/reports/fy/pack?start_year=${startYear}`,
-    { responseType: 'blob' },
+    '/reports/fy/pack',
+    {
+      method: 'POST',
+      body: JSON.stringify({ start_year: startYear, passphrase }),
+      responseType: 'blob',
+    },
   );
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');

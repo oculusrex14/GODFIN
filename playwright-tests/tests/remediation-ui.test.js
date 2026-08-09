@@ -301,6 +301,13 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
         }],
       },
     };
+    if (path === '/reports/fy/pack') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/zip',
+        body: Buffer.from('encrypted-tax-pack-fixture'),
+      });
+    }
     const exact = responses[path];
     if (exact !== undefined) return route.fulfill({ json: exact });
     if (path.startsWith('/audit/sessions?')) return route.fulfill({ json: [] });
@@ -438,9 +445,41 @@ test('paid CA export is one review-oriented ZIP tax pack', async ({ page }) => {
   await page.getByRole('link', { name: 'Reports', exact: true }).click();
 
   await expect(page.getByRole('button', { name: 'Download CA Tax Pack' })).toBeEnabled();
-  await expect(page.getByText(/multi-sheet workbook, raw CSV, manifest/)).toBeVisible();
+  await expect(page.getByText(/multi-sheet workbook, privacy-minimized CSV, manifest/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'CA CSV' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'CA JSON' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Download CA Tax Pack' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Protect your CA tax pack' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(/AES-256/)).toBeVisible();
+  await expect(dialog.getByText(/different channels/)).toBeVisible();
+  const close = dialog.getByRole('button', { name: 'Close protected tax pack dialog' });
+  const cancel = dialog.getByRole('button', { name: 'Cancel' });
+  await expect(dialog.getByLabel('Archive passphrase', { exact: true })).toBeFocused();
+  await close.focus();
+  await close.press('Shift+Tab');
+  await expect(cancel).toBeFocused();
+  await cancel.press('Tab');
+  await expect(close).toBeFocused();
+  const submit = dialog.getByRole('button', { name: 'Encrypt and download' });
+  await expect(submit).toBeDisabled();
+  await dialog.getByLabel('Archive passphrase', { exact: true }).fill('Correct-Horse-Archive-2026');
+  await dialog.getByLabel('Confirm archive passphrase', { exact: true }).fill('Correct-Horse-Archive-2026');
+  await expect(submit).toBeEnabled();
+  const requestPromise = page.waitForRequest(request => (
+    request.url().endsWith('/api/v1/reports/fy/pack')
+    && request.method() === 'POST'
+  ));
+  const downloadPromise = page.waitForEvent('download');
+  await submit.click();
+  const [request, download] = await Promise.all([requestPromise, downloadPromise]);
+  expect(request.postDataJSON()).toEqual({
+    start_year: new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1,
+    passphrase: 'Correct-Horse-Archive-2026',
+  });
+  expect(download.suggestedFilename()).toMatch(/^godfin_ca_tax_pack_fy\d{4}-\d{2}\.zip$/);
+  await expect(dialog).toHaveCount(0);
 });
 
 test('review fixes expose the new brand, safe settings controls, and resumable app tour', async ({ page }) => {
