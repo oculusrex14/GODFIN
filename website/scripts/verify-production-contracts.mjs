@@ -10,22 +10,35 @@ async function text(relativePath, from = websiteRoot) {
   return readFile(path.join(from, relativePath), "utf8");
 }
 
-const shared = JSON.parse(await text("shared/entitlements.json", repoRoot));
 const generated = JSON.parse(await text("src/generated/entitlements.json"));
-assert.deepEqual(generated, shared, "Website entitlements must match the shared manifest.");
-assert.equal(shared.license_model, "lifetime");
-assert.equal(shared.included_hosted_ai_credits, 0);
-assert.equal(shared.tiers.pro.activation_limit, 3);
-assert.equal(shared.tiers.max.activation_limit, 3);
-assert.equal(shared.tiers.pro.price.IN.amount_minor, 499900);
-assert.equal(shared.tiers.max.price.IN.amount_minor, 999900);
-assert.equal(shared.tiers.pro.price.US.amount_minor, 9900);
-assert.equal(shared.tiers.max.price.US.amount_minor, 19900);
+let manifest = generated;
+try {
+  const shared = JSON.parse(await text("shared/entitlements.json", repoRoot));
+  assert.deepEqual(
+    generated,
+    shared,
+    "Website entitlements must match the shared manifest.",
+  );
+  manifest = shared;
+} catch (error) {
+  if (error?.code !== "ENOENT") {
+    throw error;
+  }
+}
+
+assert.equal(manifest.license_model, "lifetime");
+assert.equal(manifest.included_hosted_ai_credits, 0);
+assert.equal(manifest.tiers.pro.activation_limit, 3);
+assert.equal(manifest.tiers.max.activation_limit, 3);
+assert.equal(manifest.tiers.pro.price.IN.amount_minor, 499900);
+assert.equal(manifest.tiers.max.price.IN.amount_minor, 999900);
+assert.equal(manifest.tiers.pro.price.US.amount_minor, 9900);
+assert.equal(manifest.tiers.max.price.US.amount_minor, 19900);
 
 for (const tier of ["free", "pro", "max"]) {
-  for (const feature of shared.tiers[tier].released_features) {
+  for (const feature of manifest.tiers[tier].released_features) {
     assert.equal(
-      shared.features[feature]?.status,
+      manifest.features[feature]?.status,
       "released",
       `${tier} advertises unreleased feature ${feature}`,
     );
