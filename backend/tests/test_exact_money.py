@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import sqlite3
 
@@ -19,6 +19,7 @@ from app.models.goal_contribution import (
 )
 from app.models.income_source import IncomeSource
 from app.models.monthly_aggregate import MonthlyAggregate
+from app.models.net_worth import NetWorthItem, NetWorthQuote
 from app.models.recurring_pattern import RecurringPattern
 from app.models.subscription import Subscription
 from app.models.subscription_suggestion import SubscriptionSuggestion
@@ -265,6 +266,96 @@ def test_product_money_models_store_authoritative_minor_units(db_session):
     assert aggregate_row == (10, 20, 30, 40, 50, 60, 70)
     assert db_session.query(func.sum(MonthlyAggregate.total_spend)).scalar() == Decimal(
         "0.10"
+    )
+
+
+def test_net_worth_and_fx_models_use_field_specific_integer_scales(db_session):
+    now = datetime.now()
+    item = NetWorthItem(
+        id="exact-net-worth-item",
+        name="Exact holding",
+        item_type="asset",
+        asset_class="crypto",
+        valuation_mode="manual",
+        quantity=Decimal("0.123456789"),
+        currency="USD",
+        manual_value=Decimal("100.005"),
+        exchange_rate_to_base=Decimal("0.3333333333335"),
+        fx_source_currency="USD",
+        fx_base_currency="INR",
+        fx_rate_source="Test rates",
+        fx_rate_source_url="https://example.test/rates",
+        fx_rate_as_of=date.today(),
+        fx_rate_fetched_at=now,
+    )
+    subscription = Subscription(
+        id="exact-fx-subscription",
+        name="Exact FX subscription",
+        amount=Decimal("9.99"),
+        currency="USD",
+        frequency="monthly",
+        fx_rate_to_inr=Decimal("80.1234567890125"),
+        fx_rate_source="Test rates",
+        fx_rate_source_url="https://example.test/rates",
+        fx_rate_as_of=date.today(),
+        fx_rate_fetched_at=now,
+    )
+    db_session.add_all([item, subscription])
+    db_session.flush()
+    quote = NetWorthQuote(
+        id="exact-net-worth-quote",
+        item_id=item.id,
+        unit_price=Decimal("0.123456789"),
+        quote_currency="USD",
+        exchange_rate_to_base=Decimal("0.3333333333335"),
+        total_value_base=Decimal("12.345"),
+        base_currency="INR",
+        source="Test quote",
+        fx_rate_source="Test rates",
+        fx_rate_source_url="https://example.test/rates",
+        fx_rate_as_of=date.today(),
+        fx_rate_fetched_at=now,
+        quoted_at=now,
+        expires_at=now + timedelta(days=1),
+    )
+    db_session.add(quote)
+    db_session.commit()
+
+    raw = db_session.execute(
+        text(
+            "SELECT "
+            "(SELECT quantity_units FROM net_worth_items "
+            "WHERE id='exact-net-worth-item'), "
+            "(SELECT manual_value_minor FROM net_worth_items "
+            "WHERE id='exact-net-worth-item'), "
+            "(SELECT exchange_rate_to_base_units FROM net_worth_items "
+            "WHERE id='exact-net-worth-item'), "
+            "(SELECT unit_price_units FROM net_worth_quotes "
+            "WHERE id='exact-net-worth-quote'), "
+            "(SELECT exchange_rate_to_base_units FROM net_worth_quotes "
+            "WHERE id='exact-net-worth-quote'), "
+            "(SELECT total_value_base_minor FROM net_worth_quotes "
+            "WHERE id='exact-net-worth-quote'), "
+            "(SELECT fx_rate_to_inr_units FROM subscriptions "
+            "WHERE id='exact-fx-subscription')"
+        )
+    ).one()
+
+    assert item.quantity == Decimal("0.12345679")
+    assert item.manual_value == Decimal("100.01")
+    assert item.exchange_rate_to_base == Decimal("0.333333333334")
+    assert quote.unit_price == Decimal("0.12345679")
+    assert quote.exchange_rate_to_base == Decimal("0.333333333334")
+    assert quote.total_value_base == Decimal("12.35")
+    assert subscription.fx_rate_to_inr == Decimal("80.123456789013")
+    assert raw == (
+        12_345_679,
+        10_001,
+        333_333_333_334,
+        12_345_679,
+        333_333_333_334,
+        1_235,
+        80_123_456_789_013,
     )
 
 
@@ -602,5 +693,148 @@ def test_revision_14_rejects_ambiguous_product_sub_cent_history(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(goals)")
         }
         assert "target_amount_minor" not in columns
+    finally:
+        connection.close()
+
+
+def _create_revision_11_precision_fixture(path, *, manual_value="100.10"):
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            f"""
+            CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO app_settings VALUES ('schema_revision', '11');
+
+            CREATE TABLE subscriptions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                amount REAL NOT NULL,
+                currency TEXT NOT NULL,
+                frequency TEXT NOT NULL,
+                fx_rate_to_inr NUMERIC,
+                fx_rate_source TEXT,
+                fx_rate_source_url TEXT,
+                fx_rate_as_of DATE,
+                fx_rate_fetched_at DATETIME
+            );
+            INSERT INTO subscriptions VALUES (
+                'subscription', 'Precision subscription', 9.99, 'USD',
+                'monthly', 80.1234567890124, 'Test rates',
+                'https://example.test/rates', '2026-08-01',
+                '2026-08-01 00:00:00'
+            );
+
+            CREATE TABLE net_worth_items (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                item_type TEXT NOT NULL,
+                asset_class TEXT NOT NULL,
+                valuation_mode TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                manual_value REAL,
+                exchange_rate_to_base REAL NOT NULL,
+                currency TEXT NOT NULL,
+                fx_source_currency TEXT,
+                fx_base_currency TEXT,
+                fx_rate_source TEXT,
+                fx_rate_source_url TEXT,
+                fx_rate_as_of DATE,
+                fx_rate_fetched_at DATETIME
+            );
+            INSERT INTO net_worth_items VALUES (
+                'item', 'Precision item', 'asset', 'crypto', 'manual',
+                0.123456789, {manual_value}, 0.3333333333335, 'USD',
+                'USD', 'INR', 'Test rates', 'https://example.test/rates',
+                '2026-08-01', '2026-08-01 00:00:00'
+            );
+
+            CREATE TABLE net_worth_quotes (
+                id TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL,
+                unit_price REAL NOT NULL,
+                quote_currency TEXT NOT NULL,
+                exchange_rate_to_base REAL NOT NULL,
+                total_value_base REAL NOT NULL,
+                base_currency TEXT NOT NULL,
+                fx_rate_source TEXT,
+                fx_rate_source_url TEXT,
+                fx_rate_as_of DATE,
+                fx_rate_fetched_at DATETIME
+            );
+            INSERT INTO net_worth_quotes VALUES (
+                'quote', 'item', 123.123456789, 'USD', 0.3333333333335,
+                12.34, 'INR', 'Test rates', 'https://example.test/rates',
+                '2026-08-01', '2026-08-01 00:00:00'
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_revision_15_backfills_field_specific_precision_and_guards_idempotently(
+    tmp_path,
+):
+    db_path = tmp_path / "godfin.db"
+    _create_revision_11_precision_fixture(db_path)
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        assert connection.execute(
+            "SELECT quantity_units, manual_value_minor, "
+            "exchange_rate_to_base_units FROM net_worth_items"
+        ).fetchone() == (12_345_679, 10_010, 333_333_333_334)
+        assert connection.execute(
+            "SELECT unit_price_units, exchange_rate_to_base_units, "
+            "total_value_base_minor FROM net_worth_quotes"
+        ).fetchone() == (12_312_345_679, 333_333_333_334, 1_234)
+        assert connection.execute(
+            "SELECT fx_rate_to_inr_units FROM subscriptions"
+        ).fetchone() == (80_123_456_789_012,)
+        triggers = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' "
+                "AND name LIKE 'trg_%_precision_guard_%'"
+            )
+        }
+        assert len(triggers) == 6
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="GODFIN precision invariant failed: net_worth_items",
+        ):
+            connection.execute(
+                "UPDATE net_worth_items SET quantity=1 WHERE id='item'"
+            )
+    finally:
+        connection.close()
+
+
+def test_revision_15_rejects_ambiguous_manual_sub_cent_history_atomically(
+    tmp_path,
+):
+    db_path = tmp_path / "godfin.db"
+    _create_revision_11_precision_fixture(db_path, manual_value="1.005")
+
+    with pytest.raises(
+        SchemaMigrationError,
+        match="cannot be converted safely",
+    ):
+        apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        item_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(net_worth_items)")
+        }
+        subscription_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(subscriptions)")
+        }
+        assert "manual_value_minor" not in item_columns
+        assert "fx_rate_to_inr_units" not in subscription_columns
     finally:
         connection.close()

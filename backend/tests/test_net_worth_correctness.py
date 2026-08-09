@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, text
 
 from app.core.fx import (
     FRANKFURTER_RATES_URL,
@@ -554,3 +554,94 @@ def test_decimal_cross_rate_result_uses_half_up_cent_rounding(
 
     assert response.status_code == 201, response.text
     assert response.json()["value_base"] == 0.03
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("quantity", 0.123456789),
+        ("quantity", "0.12345678"),
+        ("manual_value", 10.001),
+        ("manual_value", "10.01"),
+    ],
+)
+def test_net_worth_user_inputs_enforce_numeric_field_precision(
+    auth_client,
+    db_session,
+    field,
+    value,
+):
+    _activate_max(db_session)
+    payload = _manual_payload(value=10.01)
+    payload["quantity"] = 0.12345678
+    payload[field] = value
+
+    response = auth_client.post("/api/v1/net-worth", json=payload)
+
+    assert response.status_code == 422, response.text
+
+
+def test_market_refresh_rounds_provider_price_once_and_persists_exact_units(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    from app.api.v1.endpoints import net_worth as endpoint
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"close": "100.123456789", "currency": "INR"}
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, _url, *, params, headers):
+            assert params == {"symbol": "TEST"}
+            assert headers["Authorization"].startswith("apikey ")
+            return FakeResponse()
+
+    _activate_max(db_session)
+    monkeypatch.setattr(endpoint.httpx, "Client", FakeClient)
+    configured = auth_client.put(
+        "/api/v1/net-worth/market-data/config",
+        json={"api_key": "exact-provider-price-fixture", "base_currency": "INR"},
+    )
+    created = auth_client.post(
+        "/api/v1/net-worth",
+        json={
+            "name": "Exact provider quote",
+            "item_type": "asset",
+            "asset_class": "stock",
+            "valuation_mode": "market",
+            "symbol": "TEST",
+            "quantity": 0.12345678,
+            "currency": "INR",
+        },
+    )
+
+    response = auth_client.post(
+        f"/api/v1/net-worth/{created.json()['id']}/refresh"
+    )
+
+    assert configured.status_code == 200, configured.text
+    assert created.status_code == 201, created.text
+    assert response.status_code == 200, response.text
+    assert response.json()["quote_history"][0]["unit_price"] == 100.12345679
+    assert response.json()["value_base"] == 12.36
+    stored = db_session.execute(
+        text(
+            "SELECT unit_price_units, total_value_base_minor "
+            "FROM net_worth_quotes WHERE item_id=:item_id"
+        ),
+        {"item_id": created.json()["id"]},
+    ).one()
+    assert stored == (10_012_345_679, 1_236)

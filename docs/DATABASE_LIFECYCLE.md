@@ -48,10 +48,20 @@ subscription suggestions, and all monetary monthly-aggregate totals. Nullable
 amounts retain exact null parity, signed withdrawals retain their direction,
 and atomic aggregate/recurring upserts write both physical columns together.
 Historical values must be finite, within range, and cent-exact before any new
-column is added. Net-worth quantities, prices, and FX rates remain a separate
-precision-scale review under `GF-DATA-002`; compatibility shadows cannot be
-removed until every supported private build has crossed the migration
-boundary.
+column is added.
+
+Revision 15 completes field-specific exact storage for the remaining
+net-worth and FX measurements. Holdings quantities and quote unit prices use
+eight decimal places, exchange rates use twelve decimal places, and manual or
+calculated currency values use integer minor units. Measurements are normalized
+once with decimal half-up rounding at their declared scale; historical manual
+and calculated money must already be cent-exact and otherwise fails closed.
+All authoritative values are stored as scaled SQLite integers while temporary
+`REAL`/`NUMERIC` shadows remain synchronized by restart-safe guards. The scales
+and supported maxima deliberately keep measurement units below `2**53`, so the
+temporary floating compatibility representation cannot lose integer identity.
+Compatibility shadows cannot be removed until every supported private build
+has crossed the migration boundary.
 
 This strategy is intentional for a packaged, single-user, local-only
 application. A schema change must remain safe to run repeatedly against both an

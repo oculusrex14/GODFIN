@@ -9,7 +9,15 @@ from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, Numeric,
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
-from app.core.money import MAX_MONEY_MINOR, MoneyMinorUnits, exact_money_hybrid
+from app.core.money import (
+    FX_RATE_SCALE,
+    MAX_EXACT_FX_RATE,
+    MAX_MONEY_MINOR,
+    MoneyMinorUnits,
+    ScaledIntegerUnits,
+    exact_money_hybrid,
+    exact_scaled_hybrid,
+)
 from app.core.time import utcnow_naive
 
 
@@ -30,7 +38,7 @@ class Subscription(Base):
         ),
         CheckConstraint(
             "fx_rate_to_inr IS NULL OR "
-            "(fx_rate_to_inr > 0 AND fx_rate_to_inr <= 1000000000)",
+            f"(fx_rate_to_inr > 0 AND fx_rate_to_inr <= {MAX_EXACT_FX_RATE})",
             name="ck_subscriptions_fx_rate_range",
         ),
         CheckConstraint(
@@ -49,6 +57,14 @@ class Subscription(Base):
         CheckConstraint(
             "amount_minor = CAST(ROUND(amount * 100, 0) AS INTEGER)",
             name="ck_subscriptions_amount_shadow_consistent",
+        ),
+        CheckConstraint(
+            "((fx_rate_to_inr IS NULL AND fx_rate_to_inr_units IS NULL) OR "
+            "(fx_rate_to_inr IS NOT NULL AND fx_rate_to_inr_units BETWEEN 1 AND "
+            f"{int(MAX_EXACT_FX_RATE * FX_RATE_SCALE)} AND "
+            "fx_rate_to_inr_units = "
+            f"CAST(ROUND(fx_rate_to_inr * {FX_RATE_SCALE}, 0) AS INTEGER)))",
+            name="ck_subscriptions_fx_rate_shadow_consistent",
         ),
     )
 
@@ -70,8 +86,26 @@ class Subscription(Base):
     next_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    fx_rate_to_inr: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(24, 12), nullable=True
+    _legacy_fx_rate_to_inr: Mapped[Optional[Decimal]] = mapped_column(
+        "fx_rate_to_inr", Numeric(24, 12), nullable=True
+    )
+    _exact_fx_rate_to_inr: Mapped[Optional[Decimal]] = mapped_column(
+        "fx_rate_to_inr_units",
+        ScaledIntegerUnits(
+            scale=FX_RATE_SCALE,
+            minimum=Decimal("0.000000000001"),
+            maximum=MAX_EXACT_FX_RATE,
+            field_name="Exchange rate",
+        ),
+        nullable=True,
+    )
+    fx_rate_to_inr = exact_scaled_hybrid(
+        "_legacy_fx_rate_to_inr",
+        "_exact_fx_rate_to_inr",
+        scale=FX_RATE_SCALE,
+        minimum=Decimal("0.000000000001"),
+        maximum=MAX_EXACT_FX_RATE,
+        field_name="Exchange rate",
     )
     fx_rate_source: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     fx_rate_source_url: Mapped[Optional[str]] = mapped_column(

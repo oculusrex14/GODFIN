@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import (
@@ -18,6 +19,19 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.money import (
+    FX_RATE_SCALE,
+    MAX_EXACT_FX_RATE,
+    MAX_NET_WORTH_MONEY,
+    MAX_NET_WORTH_MONEY_MINOR,
+    MAX_QUANTITY,
+    MAX_UNIT_PRICE,
+    MONEY_SCALE,
+    QUANTITY_SCALE,
+    ScaledIntegerUnits,
+    UNIT_PRICE_SCALE,
+    exact_scaled_hybrid,
+)
 from app.core.time import utcnow_naive
 
 
@@ -41,17 +55,43 @@ class NetWorthItem(Base):
             name="ck_net_worth_items_valuation_mode",
         ),
         CheckConstraint(
-            "quantity > 0 AND quantity <= 1000000000000000",
+            f"quantity > 0 AND quantity <= {MAX_QUANTITY}",
             name="ck_net_worth_items_quantity_range",
         ),
         CheckConstraint(
             "manual_value IS NULL OR "
-            "(manual_value >= 0 AND manual_value <= 1000000000000000)",
+            f"(manual_value >= 0 AND manual_value <= {MAX_NET_WORTH_MONEY})",
             name="ck_net_worth_items_manual_value_range",
         ),
         CheckConstraint(
-            "exchange_rate_to_base > 0 AND exchange_rate_to_base <= 1000000000",
+            "exchange_rate_to_base > 0 AND "
+            f"exchange_rate_to_base <= {MAX_EXACT_FX_RATE}",
             name="ck_net_worth_items_exchange_rate",
+        ),
+        CheckConstraint(
+            f"quantity_units BETWEEN 1 AND {int(MAX_QUANTITY * QUANTITY_SCALE)}",
+            name="ck_net_worth_items_quantity_units_range",
+        ),
+        CheckConstraint(
+            f"quantity_units = CAST(ROUND(quantity * {QUANTITY_SCALE}, 0) AS INTEGER)",
+            name="ck_net_worth_items_quantity_shadow_consistent",
+        ),
+        CheckConstraint(
+            "((manual_value IS NULL AND manual_value_minor IS NULL) OR "
+            "(manual_value IS NOT NULL AND manual_value_minor BETWEEN 0 AND "
+            f"{MAX_NET_WORTH_MONEY_MINOR} AND manual_value_minor = "
+            f"CAST(ROUND(manual_value * {MONEY_SCALE}, 0) AS INTEGER)))",
+            name="ck_net_worth_items_manual_value_shadow_consistent",
+        ),
+        CheckConstraint(
+            "exchange_rate_to_base_units BETWEEN 1 AND "
+            f"{int(MAX_EXACT_FX_RATE * FX_RATE_SCALE)}",
+            name="ck_net_worth_items_exchange_rate_units_range",
+        ),
+        CheckConstraint(
+            "exchange_rate_to_base_units = "
+            f"CAST(ROUND(exchange_rate_to_base * {FX_RATE_SCALE}, 0) AS INTEGER)",
+            name="ck_net_worth_items_exchange_rate_shadow_consistent",
         ),
         CheckConstraint(
             "length(currency) = 3 AND currency = upper(currency)",
@@ -82,11 +122,71 @@ class NetWorthItem(Base):
         String(12), nullable=False, default="manual"
     )
     symbol: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    _legacy_quantity: Mapped[float] = mapped_column(
+        "quantity", Float, nullable=False, default=1.0
+    )
+    _exact_quantity: Mapped[Decimal] = mapped_column(
+        "quantity_units",
+        ScaledIntegerUnits(
+            scale=QUANTITY_SCALE,
+            minimum=Decimal("0.00000001"),
+            maximum=MAX_QUANTITY,
+            field_name="Quantity",
+        ),
+        nullable=False,
+        default=Decimal("1"),
+    )
+    quantity = exact_scaled_hybrid(
+        "_legacy_quantity",
+        "_exact_quantity",
+        scale=QUANTITY_SCALE,
+        minimum=Decimal("0.00000001"),
+        maximum=MAX_QUANTITY,
+        field_name="Quantity",
+    )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
-    manual_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    exchange_rate_to_base: Mapped[float] = mapped_column(
-        Float, nullable=False, default=1.0
+    _legacy_manual_value: Mapped[Optional[float]] = mapped_column(
+        "manual_value", Float, nullable=True
+    )
+    _exact_manual_value: Mapped[Optional[Decimal]] = mapped_column(
+        "manual_value_minor",
+        ScaledIntegerUnits(
+            scale=MONEY_SCALE,
+            minimum=Decimal("0"),
+            maximum=MAX_NET_WORTH_MONEY,
+            field_name="Manual value",
+        ),
+        nullable=True,
+    )
+    manual_value = exact_scaled_hybrid(
+        "_legacy_manual_value",
+        "_exact_manual_value",
+        scale=MONEY_SCALE,
+        minimum=Decimal("0"),
+        maximum=MAX_NET_WORTH_MONEY,
+        field_name="Manual value",
+    )
+    _legacy_exchange_rate_to_base: Mapped[float] = mapped_column(
+        "exchange_rate_to_base", Float, nullable=False, default=1.0
+    )
+    _exact_exchange_rate_to_base: Mapped[Decimal] = mapped_column(
+        "exchange_rate_to_base_units",
+        ScaledIntegerUnits(
+            scale=FX_RATE_SCALE,
+            minimum=Decimal("0.000000000001"),
+            maximum=MAX_EXACT_FX_RATE,
+            field_name="Exchange rate",
+        ),
+        nullable=False,
+        default=Decimal("1"),
+    )
+    exchange_rate_to_base = exact_scaled_hybrid(
+        "_legacy_exchange_rate_to_base",
+        "_exact_exchange_rate_to_base",
+        scale=FX_RATE_SCALE,
+        minimum=Decimal("0.000000000001"),
+        maximum=MAX_EXACT_FX_RATE,
+        field_name="Exchange rate",
     )
     fx_source_currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
     fx_base_currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
@@ -128,6 +228,46 @@ class NetWorthQuote(Base):
             "AND fx_rate_as_of IS NOT NULL AND fx_rate_fetched_at IS NOT NULL))",
             name="ck_net_worth_quotes_fx_provenance_complete",
         ),
+        CheckConstraint(
+            f"unit_price > 0 AND unit_price <= {MAX_UNIT_PRICE}",
+            name="ck_net_worth_quotes_unit_price_range",
+        ),
+        CheckConstraint(
+            f"unit_price_units BETWEEN 1 AND {int(MAX_UNIT_PRICE * UNIT_PRICE_SCALE)}",
+            name="ck_net_worth_quotes_unit_price_units_range",
+        ),
+        CheckConstraint(
+            f"unit_price_units = CAST(ROUND(unit_price * {UNIT_PRICE_SCALE}, 0) AS INTEGER)",
+            name="ck_net_worth_quotes_unit_price_shadow_consistent",
+        ),
+        CheckConstraint(
+            "exchange_rate_to_base > 0 AND "
+            f"exchange_rate_to_base <= {MAX_EXACT_FX_RATE}",
+            name="ck_net_worth_quotes_exchange_rate_range",
+        ),
+        CheckConstraint(
+            "exchange_rate_to_base_units BETWEEN 1 AND "
+            f"{int(MAX_EXACT_FX_RATE * FX_RATE_SCALE)}",
+            name="ck_net_worth_quotes_exchange_rate_units_range",
+        ),
+        CheckConstraint(
+            "exchange_rate_to_base_units = "
+            f"CAST(ROUND(exchange_rate_to_base * {FX_RATE_SCALE}, 0) AS INTEGER)",
+            name="ck_net_worth_quotes_exchange_rate_shadow_consistent",
+        ),
+        CheckConstraint(
+            f"total_value_base >= 0 AND total_value_base <= {MAX_NET_WORTH_MONEY}",
+            name="ck_net_worth_quotes_total_value_range",
+        ),
+        CheckConstraint(
+            f"total_value_base_minor BETWEEN 0 AND {MAX_NET_WORTH_MONEY_MINOR}",
+            name="ck_net_worth_quotes_total_value_minor_range",
+        ),
+        CheckConstraint(
+            "total_value_base_minor = "
+            f"CAST(ROUND(total_value_base * {MONEY_SCALE}, 0) AS INTEGER)",
+            name="ck_net_worth_quotes_total_value_shadow_consistent",
+        ),
     )
 
     id: Mapped[str] = mapped_column(
@@ -136,10 +276,70 @@ class NetWorthQuote(Base):
     item_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("net_worth_items.id", ondelete="CASCADE"), nullable=False
     )
-    unit_price: Mapped[float] = mapped_column(Float, nullable=False)
+    _legacy_unit_price: Mapped[float] = mapped_column(
+        "unit_price", Float, nullable=False
+    )
+    _exact_unit_price: Mapped[Decimal] = mapped_column(
+        "unit_price_units",
+        ScaledIntegerUnits(
+            scale=UNIT_PRICE_SCALE,
+            minimum=Decimal("0.00000001"),
+            maximum=MAX_UNIT_PRICE,
+            field_name="Unit price",
+        ),
+        nullable=False,
+    )
+    unit_price = exact_scaled_hybrid(
+        "_legacy_unit_price",
+        "_exact_unit_price",
+        scale=UNIT_PRICE_SCALE,
+        minimum=Decimal("0.00000001"),
+        maximum=MAX_UNIT_PRICE,
+        field_name="Unit price",
+    )
     quote_currency: Mapped[str] = mapped_column(String(3), nullable=False)
-    exchange_rate_to_base: Mapped[float] = mapped_column(Float, nullable=False)
-    total_value_base: Mapped[float] = mapped_column(Float, nullable=False)
+    _legacy_exchange_rate_to_base: Mapped[float] = mapped_column(
+        "exchange_rate_to_base", Float, nullable=False
+    )
+    _exact_exchange_rate_to_base: Mapped[Decimal] = mapped_column(
+        "exchange_rate_to_base_units",
+        ScaledIntegerUnits(
+            scale=FX_RATE_SCALE,
+            minimum=Decimal("0.000000000001"),
+            maximum=MAX_EXACT_FX_RATE,
+            field_name="Exchange rate",
+        ),
+        nullable=False,
+    )
+    exchange_rate_to_base = exact_scaled_hybrid(
+        "_legacy_exchange_rate_to_base",
+        "_exact_exchange_rate_to_base",
+        scale=FX_RATE_SCALE,
+        minimum=Decimal("0.000000000001"),
+        maximum=MAX_EXACT_FX_RATE,
+        field_name="Exchange rate",
+    )
+    _legacy_total_value_base: Mapped[float] = mapped_column(
+        "total_value_base", Float, nullable=False
+    )
+    _exact_total_value_base: Mapped[Decimal] = mapped_column(
+        "total_value_base_minor",
+        ScaledIntegerUnits(
+            scale=MONEY_SCALE,
+            minimum=Decimal("0"),
+            maximum=MAX_NET_WORTH_MONEY,
+            field_name="Total value",
+        ),
+        nullable=False,
+    )
+    total_value_base = exact_scaled_hybrid(
+        "_legacy_total_value_base",
+        "_exact_total_value_base",
+        scale=MONEY_SCALE,
+        minimum=Decimal("0"),
+        maximum=MAX_NET_WORTH_MONEY,
+        field_name="Total value",
+    )
     base_currency: Mapped[str] = mapped_column(String(3), nullable=False)
     source: Mapped[str] = mapped_column(String(80), nullable=False)
     source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)

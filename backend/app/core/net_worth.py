@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from typing import Any, Iterable
 
 from sqlalchemy import select
@@ -20,6 +19,12 @@ from app.core.fx import (
     get_inr_rates,
     unavailable_fx_metadata,
 )
+from app.core.money import (
+    FX_RATE_SCALE,
+    MAX_EXACT_FX_RATE,
+    money_decimal,
+    scaled_decimal,
+)
 from app.core.time import utcnow_naive
 from app.models.app_setting import AppSetting
 from app.models.net_worth import NetWorthItem, NetWorthQuote
@@ -27,8 +32,7 @@ from app.models.net_worth import NetWorthItem, NetWorthQuote
 BASE_CURRENCY_KEY = "net_worth_base_currency"
 MARKET_DATA_KEY = "twelve_data_api_key"
 LIQUID_CLASSES = {"cash", "stock", "etf", "mutual_fund", "crypto", "bond", "metal"}
-CALCULATION_VERSION = "net_worth_v2"
-_MONEY_QUANTUM = Decimal("0.01")
+CALCULATION_VERSION = "net_worth_v3"
 
 
 @dataclass(frozen=True)
@@ -212,21 +216,26 @@ def _stored_rate(
     stored_source_currency: str | None,
     stored_base_currency: str | None,
     today: date,
-) -> tuple[float, dict[str, Any]] | None:
+) -> tuple[Decimal, dict[str, Any]] | None:
     rate = getattr(record, "exchange_rate_to_base", None)
     as_of = getattr(record, "fx_rate_as_of", None)
     source = getattr(record, "fx_rate_source", None)
     source_url = getattr(record, "fx_rate_source_url", None)
     fetched_at = getattr(record, "fx_rate_fetched_at", None)
     try:
-        numeric_rate = float(rate)
+        numeric_rate = scaled_decimal(
+            rate,
+            scale=FX_RATE_SCALE,
+            minimum=Decimal("0.000000000001"),
+            maximum=MAX_EXACT_FX_RATE,
+            field_name="Exchange rate",
+        )
     except (TypeError, ValueError, OverflowError):
         return None
     if (
         stored_source_currency != source_currency
         or stored_base_currency != base_currency
         or source_currency == base_currency
-        or not math.isfinite(numeric_rate)
         or numeric_rate <= 0
         or source != FX_PROVIDER
         or source_url != FRANKFURTER_RATES_URL
@@ -267,18 +276,18 @@ def _conversion(
     stored_base_currency: str | None,
     context: NetWorthValuationContext,
     today: date,
-) -> tuple[float | None, dict[str, Any]]:
+) -> tuple[Decimal | None, dict[str, Any]]:
     source = source_currency.strip().upper()
     base = context.base_currency
     if source == base:
-        return 1.0, {
+        return Decimal("1"), {
             "status": "not_required",
             "provider": "No conversion required",
             "source_url": None,
             "as_of": today.isoformat(),
             "age_days": 0,
             "stale": False,
-            "rate": 1.0,
+            "rate": Decimal("1"),
             "source_currency": source,
             "base_currency": base,
             "unavailable_reason": None,
@@ -290,14 +299,21 @@ def _conversion(
         except FxRateUnavailable:
             rate = None
         if rate is not None:
-            return rate, {
+            normalized_rate = scaled_decimal(
+                rate,
+                scale=FX_RATE_SCALE,
+                minimum=Decimal("0.000000000001"),
+                maximum=MAX_EXACT_FX_RATE,
+                field_name="Exchange rate",
+            )
+            return normalized_rate, {
                 "status": context.snapshot.status,
                 "provider": context.snapshot.provider,
                 "source_url": context.snapshot.source_url,
                 "as_of": context.snapshot.as_of.isoformat(),
                 "age_days": context.snapshot.age_days,
                 "stale": context.snapshot.stale,
-                "rate": rate,
+                "rate": normalized_rate,
                 "source_currency": source,
                 "base_currency": base,
                 "unavailable_reason": None,
@@ -331,11 +347,11 @@ def _conversion(
     }
 
 
-def _money_value(*values: float) -> float:
+def _money_value(*values: Any) -> Decimal:
     total = Decimal("1")
     for value in values:
         total *= Decimal(str(value))
-    return float(total.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP))
+    return money_decimal(total)
 
 
 def _unavailable_value(
@@ -392,7 +408,7 @@ def item_value(
                 base_currency=context.base_currency,
                 native_value=None,
             )
-        native_value = _money_value(float(quote.unit_price), float(item.quantity))
+        native_value = _money_value(quote.unit_price, item.quantity)
         common = {
             "source": quote.source,
             "source_url": quote.source_url,
@@ -442,8 +458,8 @@ def item_value(
                 conversion=conversion,
             )
         value = _money_value(
-            float(quote.unit_price),
-            float(item.quantity),
+            quote.unit_price,
+            item.quantity,
             rate,
         )
         return {
@@ -463,7 +479,7 @@ def item_value(
             "calculation_version": CALCULATION_VERSION,
         }
 
-    native_value = float(item.manual_value) if item.manual_value is not None else None
+    native_value = item.manual_value
     source = item.valuation_source or "Manual valuation"
     stale = item.expires_on is not None and item.expires_on < reference_day
     if native_value is None:
@@ -601,21 +617,27 @@ def net_worth_summary(db: Session) -> dict[str, Any]:
     unavailable = [item for item in serialized if not item["available"]]
     complete = not unavailable
     assets = sum(
-        item["value_base"]
-        for item in serialized
-        if item["item_type"] == "asset" and item["value_base"] is not None
+        (
+            item["value_base"]
+            for item in serialized
+            if item["item_type"] == "asset" and item["value_base"] is not None
+        ),
+        Decimal("0"),
     )
     liabilities = sum(
-        item["value_base"]
-        for item in serialized
-        if item["item_type"] == "liability" and item["value_base"] is not None
+        (
+            item["value_base"]
+            for item in serialized
+            if item["item_type"] == "liability" and item["value_base"] is not None
+        ),
+        Decimal("0"),
     )
     return {
         "base_currency": base_currency,
         "valuation_status": "complete" if complete else "incomplete",
-        "total_assets": round(assets, 2) if complete else None,
-        "total_liabilities": round(liabilities, 2) if complete else None,
-        "net_worth": round(assets - liabilities, 2) if complete else None,
+        "total_assets": money_decimal(assets) if complete else None,
+        "total_liabilities": money_decimal(liabilities) if complete else None,
+        "net_worth": money_decimal(assets - liabilities) if complete else None,
         "stale_count": sum(bool(item["stale"]) for item in serialized),
         "unavailable_item_count": len(unavailable),
         "valued_item_count": len(serialized) - len(unavailable),
@@ -640,4 +662,5 @@ def liquid_asset_total(db: Session) -> float | None:
     ]
     if any(not value["available"] for value in values):
         return None
-    return round(sum(value["value_base"] for value in values), 2)
+    total = sum((value["value_base"] for value in values), Decimal("0"))
+    return float(money_decimal(total))

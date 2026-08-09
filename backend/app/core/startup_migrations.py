@@ -4,18 +4,29 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
 from app.core.backup import create_backup
+from app.core.money import (
+    FX_RATE_SCALE,
+    MAX_EXACT_FX_RATE,
+    MAX_NET_WORTH_MONEY_MINOR,
+    MAX_QUANTITY,
+    MAX_UNIT_PRICE,
+    MONEY_SCALE,
+    QUANTITY_SCALE,
+    UNIT_PRICE_SCALE,
+)
 from app.models.app_setting import AppSetting
 from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 14
+CURRENT_SCHEMA_REVISION = 15
 
 
 class SchemaMigrationError(RuntimeError):
@@ -116,6 +127,110 @@ _PRODUCT_EXACT_MONEY_SHADOWS = {
             "flexible_total": (0, _MAX_MONEY_MINOR, False),
             "transfer_total": (0, _MAX_MONEY_MINOR, False),
             "recurring_total": (0, _MAX_MONEY_MINOR, False),
+        },
+    ),
+}
+
+# Each precision field is
+# (exact column, scale, minimum units, maximum units, nullable, reject sub-unit).
+# Net-worth quantities and market/rate measurements use documented half-up
+# normalization at their field scale. Currency totals reject ambiguous sub-cent
+# history, matching the ledger migration policy.
+_PRECISION_SHADOWS = {
+    "subscriptions": (
+        {
+            "id",
+            "name",
+            "amount",
+            "currency",
+            "frequency",
+            "fx_rate_to_inr",
+        },
+        {
+            "fx_rate_to_inr": (
+                "fx_rate_to_inr_units",
+                FX_RATE_SCALE,
+                1,
+                int(MAX_EXACT_FX_RATE * FX_RATE_SCALE),
+                True,
+                False,
+            ),
+        },
+    ),
+    "net_worth_items": (
+        {
+            "id",
+            "name",
+            "item_type",
+            "asset_class",
+            "valuation_mode",
+            "quantity",
+            "manual_value",
+            "exchange_rate_to_base",
+            "currency",
+        },
+        {
+            "quantity": (
+                "quantity_units",
+                QUANTITY_SCALE,
+                1,
+                int(MAX_QUANTITY * QUANTITY_SCALE),
+                False,
+                False,
+            ),
+            "manual_value": (
+                "manual_value_minor",
+                MONEY_SCALE,
+                0,
+                MAX_NET_WORTH_MONEY_MINOR,
+                True,
+                True,
+            ),
+            "exchange_rate_to_base": (
+                "exchange_rate_to_base_units",
+                FX_RATE_SCALE,
+                1,
+                int(MAX_EXACT_FX_RATE * FX_RATE_SCALE),
+                False,
+                False,
+            ),
+        },
+    ),
+    "net_worth_quotes": (
+        {
+            "id",
+            "item_id",
+            "unit_price",
+            "quote_currency",
+            "exchange_rate_to_base",
+            "total_value_base",
+            "base_currency",
+        },
+        {
+            "unit_price": (
+                "unit_price_units",
+                UNIT_PRICE_SCALE,
+                1,
+                int(MAX_UNIT_PRICE * UNIT_PRICE_SCALE),
+                False,
+                False,
+            ),
+            "exchange_rate_to_base": (
+                "exchange_rate_to_base_units",
+                FX_RATE_SCALE,
+                1,
+                int(MAX_EXACT_FX_RATE * FX_RATE_SCALE),
+                False,
+                False,
+            ),
+            "total_value_base": (
+                "total_value_base_minor",
+                MONEY_SCALE,
+                0,
+                MAX_NET_WORTH_MONEY_MINOR,
+                False,
+                True,
+            ),
         },
     ),
 }
@@ -1054,6 +1169,244 @@ def _validate_revision_14(connection: sqlite3.Connection) -> None:
                 )
 
 
+def _precision_table_is_supported(
+    connection: sqlite3.Connection,
+    table: str,
+    signature: set[str],
+    fields: dict[str, tuple[str, int, int, int, bool, bool]],
+) -> bool:
+    columns = _table_columns(connection, table)
+    return bool(columns) and signature.union(fields).issubset(columns)
+
+
+def _legacy_precision_units(
+    value,
+    *,
+    scale: int,
+    minimum_units: int,
+    maximum_units: int,
+    nullable: bool,
+    reject_subunit: bool,
+) -> int | None:
+    if value is None:
+        if nullable:
+            return None
+        raise ValueError("required value is missing")
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("value is not numeric") from exc
+    if not amount.is_finite():
+        raise ValueError("value is not finite")
+    scaled = amount * Decimal(scale)
+    integral = scaled.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    if reject_subunit and scaled != integral:
+        raise ValueError("value has unsupported sub-unit precision")
+    units = int(integral)
+    if units < minimum_units or units > maximum_units:
+        raise ValueError("value is outside the supported range")
+    return units
+
+
+def _precision_invalid_sql(
+    field: str,
+    exact: str,
+    scale: int,
+    minimum_units: int,
+    maximum_units: int,
+    nullable: bool,
+    *,
+    prefix: str = "",
+) -> str:
+    legacy_column = f'{prefix}"{field}"'
+    exact_column = f'{prefix}"{exact}"'
+    populated_invalid = (
+        f"typeof({legacy_column}) NOT IN ('integer', 'real') "
+        f"OR {legacy_column} != {legacy_column} "
+        f"OR {exact_column} IS NULL "
+        f"OR typeof({exact_column}) <> 'integer' "
+        f"OR {exact_column} < {minimum_units} "
+        f"OR {exact_column} > {maximum_units} "
+        f"OR CAST(ROUND({legacy_column} * {scale}, 0) AS INTEGER) "
+        f"<> {exact_column}"
+    )
+    if nullable:
+        return (
+            f"(({legacy_column} IS NULL AND {exact_column} IS NOT NULL) OR "
+            f"({legacy_column} IS NOT NULL AND ({populated_invalid})))"
+        )
+    return f"({legacy_column} IS NULL OR {populated_invalid})"
+
+
+def _install_precision_guard(
+    connection: sqlite3.Connection,
+    table: str,
+    fields: dict[str, tuple[str, int, int, int, bool, bool]],
+) -> None:
+    invalid = " OR ".join(
+        _precision_invalid_sql(
+            field,
+            exact,
+            scale,
+            minimum_units,
+            maximum_units,
+            nullable,
+            prefix="NEW.",
+        )
+        for field, (
+            exact,
+            scale,
+            minimum_units,
+            maximum_units,
+            nullable,
+            _reject_subunit,
+        ) in fields.items()
+    )
+    for operation in ("insert", "update"):
+        trigger = f"trg_{table}_precision_guard_{operation}"
+        connection.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')
+        connection.execute(
+            f'CREATE TRIGGER "{trigger}" '
+            f'BEFORE {operation.upper()} ON "{table}" '
+            f"FOR EACH ROW WHEN {invalid} BEGIN "
+            f"SELECT RAISE(ABORT, "
+            f"'GODFIN precision invariant failed: {table}'); "
+            "END"
+        )
+
+
+def _apply_revision_15(connection: sqlite3.Connection) -> None:
+    """Add exact field-specific storage for net-worth and FX measurements."""
+    prepared: dict[str, tuple[dict, list[tuple[object, dict[str, int | None]]]]] = {}
+    for table, (signature, fields) in _PRECISION_SHADOWS.items():
+        if not _precision_table_is_supported(connection, table, signature, fields):
+            continue
+        field_names = list(fields)
+        selected = ", ".join(['"id"', *[f'"{field}"' for field in field_names]])
+        rows = connection.execute(f'SELECT {selected} FROM "{table}"').fetchall()
+        converted: list[tuple[object, dict[str, int | None]]] = []
+        invalid = 0
+        for row in rows:
+            row_values: dict[str, int | None] = {}
+            for index, field in enumerate(field_names, start=1):
+                (
+                    _exact,
+                    scale,
+                    minimum_units,
+                    maximum_units,
+                    nullable,
+                    reject_subunit,
+                ) = fields[field]
+                try:
+                    row_values[field] = _legacy_precision_units(
+                        row[index],
+                        scale=scale,
+                        minimum_units=minimum_units,
+                        maximum_units=maximum_units,
+                        nullable=nullable,
+                        reject_subunit=reject_subunit,
+                    )
+                except ValueError:
+                    invalid += 1
+            converted.append((row[0], row_values))
+        if invalid:
+            raise SchemaMigrationError(
+                f"The {table} table contains {invalid} precision value(s) "
+                "that cannot be converted safely."
+            )
+
+        columns = _table_columns(connection, table)
+        for field, (
+            exact,
+            _scale,
+            _minimum_units,
+            _maximum_units,
+            _nullable,
+            _reject_subunit,
+        ) in fields.items():
+            if exact not in columns:
+                continue
+            existing = {
+                row[0]: (row[1], row[2])
+                for row in connection.execute(
+                    f'SELECT "id", "{exact}", typeof("{exact}") FROM "{table}"'
+                ).fetchall()
+            }
+            for row_id, row_values in converted:
+                stored, stored_type = existing[row_id]
+                expected = row_values[field]
+                if stored is None and expected is None:
+                    continue
+                if stored_type != "integer" or stored != expected:
+                    raise SchemaMigrationError(
+                        f"The {table}.{exact} field contains an invalid "
+                        "exact precision value."
+                    )
+        prepared[table] = (fields, converted)
+
+    for table, (fields, converted) in prepared.items():
+        columns = _table_columns(connection, table)
+        for (
+            field,
+            (
+                exact,
+                _scale,
+                _minimum_units,
+                _maximum_units,
+                _nullable,
+                _reject_subunit,
+            ),
+        ) in fields.items():
+            if exact not in columns:
+                connection.execute(
+                    f'ALTER TABLE "{table}" ADD COLUMN "{exact}" INTEGER'
+                )
+            connection.executemany(
+                f'UPDATE "{table}" SET "{exact}" = ? '
+                f'WHERE "id" = ? AND "{exact}" IS NULL',
+                [(row_values[field], row_id) for row_id, row_values in converted],
+            )
+        _install_precision_guard(connection, table, fields)
+
+
+def _validate_revision_15(connection: sqlite3.Connection) -> None:
+    for table, (signature, fields) in _PRECISION_SHADOWS.items():
+        if not _precision_table_is_supported(connection, table, signature, fields):
+            continue
+        columns = _table_columns(connection, table)
+        for field, (
+            exact,
+            scale,
+            minimum_units,
+            maximum_units,
+            nullable,
+            _reject_subunit,
+        ) in fields.items():
+            if exact not in columns:
+                raise SchemaMigrationError(
+                    f"The {table}.{exact} precision column was not installed."
+                )
+            invalid = connection.execute(
+                f'SELECT COUNT(*) FROM "{table}" WHERE '
+                f"{_precision_invalid_sql(field, exact, scale, minimum_units, maximum_units, nullable)}"
+            ).fetchone()[0]
+            if invalid:
+                raise SchemaMigrationError(
+                    f"The {table}.{field} field contains {invalid} invalid "
+                    "precision row(s)."
+                )
+        for operation in ("insert", "update"):
+            trigger = f"trg_{table}_precision_guard_{operation}"
+            installed = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
+            ).fetchone()
+            if not installed:
+                raise SchemaMigrationError(
+                    f"The {table} precision guard was not installed."
+                )
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -1078,6 +1431,12 @@ MIGRATION_REGISTRY = (
         name="extend_exact_product_minor_units",
         apply=_apply_revision_14,
         validate=_validate_revision_14,
+    ),
+    SchemaMigration(
+        revision=15,
+        name="add_exact_net_worth_and_fx_precision",
+        apply=_apply_revision_15,
+        validate=_validate_revision_15,
     ),
 )
 

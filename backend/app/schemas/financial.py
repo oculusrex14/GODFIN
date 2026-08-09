@@ -1,19 +1,21 @@
 """Shared validation contracts for financial API inputs.
 
-Revision 13 stores authoritative ledger amounts as integer minor units while
-temporarily mirroring legacy SQLite ``REAL`` columns. Other product-money
-tables still use legacy storage. These request types guard all boundaries
-against non-finite and unreasonable values while the remaining exact-money
-migrations proceed table by table.
+Revisions 13–15 store authoritative money and precision-sensitive product
+values as scaled integers while temporarily mirroring legacy SQLite columns.
+These request types guard all boundaries against non-finite, unreasonable, or
+over-precise values.
 """
 
 from __future__ import annotations
 
 import math
 from datetime import date
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BeforeValidator, Field
+
+from app.core.money import MAX_NET_WORTH_MONEY, MAX_QUANTITY
 
 
 MAX_FINANCIAL_VALUE = 1_000_000_000_000_000.0
@@ -62,6 +64,34 @@ FiniteUnitInterval = Annotated[
 ExpectedAnnualReturnRate = Annotated[
     float,
     Field(strict=True, ge=0, le=0.5, allow_inf_nan=False),
+]
+
+
+def _reject_bool_or_numeric_string(value):
+    if isinstance(value, (bool, str)):
+        raise ValueError("Value must be a JSON number")
+    return value
+
+
+NetWorthQuantity = Annotated[
+    Decimal,
+    BeforeValidator(_reject_bool_or_numeric_string),
+    Field(
+        gt=Decimal("0"),
+        le=MAX_QUANTITY,
+        multiple_of=Decimal("0.00000001"),
+        allow_inf_nan=False,
+    ),
+]
+NetWorthMoney = Annotated[
+    Decimal,
+    BeforeValidator(_reject_bool_or_numeric_string),
+    Field(
+        ge=Decimal("0"),
+        le=MAX_NET_WORTH_MONEY,
+        multiple_of=Decimal("0.01"),
+        allow_inf_nan=False,
+    ),
 ]
 
 SubscriptionFrequency = Literal["monthly", "quarterly", "annual"]

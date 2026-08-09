@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -13,6 +13,14 @@ from app.core.database import get_db
 from app.core.encryption import SecretDecryptionError, decrypt, encrypt
 from app.core.feature_flags import FeatureDisabledError, require_feature_flag
 from app.core.fx import FxRateUnavailable, get_inr_rates
+from app.core.money import (
+    FX_RATE_SCALE,
+    MAX_EXACT_FX_RATE,
+    MAX_UNIT_PRICE,
+    UNIT_PRICE_SCALE,
+    money_decimal,
+    scaled_decimal,
+)
 from app.core.net_worth import (
     BASE_CURRENCY_KEY,
     MARKET_DATA_KEY,
@@ -32,11 +40,10 @@ from app.schemas.financial import (
     CurrencyCode,
     NetWorthAssetClass,
     NetWorthItemType,
+    NetWorthMoney,
+    NetWorthQuantity,
     NetWorthValuationMode,
-    NonNegativeMoney,
-    PositiveFiniteNumber,
     SupportedSubscriptionCurrency,
-    require_positive_finite,
     reject_explicit_nulls,
 )
 
@@ -54,9 +61,9 @@ class NetWorthItemCreate(BaseModel):
     asset_class: NetWorthAssetClass
     valuation_mode: NetWorthValuationMode = "manual"
     symbol: str | None = Field(default=None, max_length=40)
-    quantity: PositiveFiniteNumber = 1
+    quantity: NetWorthQuantity = Decimal("1")
     currency: CurrencyCode = "INR"
-    manual_value: NonNegativeMoney | None = None
+    manual_value: NetWorthMoney | None = None
     valuation_source: str | None = Field(default=None, max_length=120)
     source_url: str | None = Field(default=None, max_length=500)
     valued_at: date | None = None
@@ -72,9 +79,9 @@ class NetWorthItemUpdate(BaseModel):
     asset_class: NetWorthAssetClass | None = None
     valuation_mode: NetWorthValuationMode | None = None
     symbol: str | None = Field(default=None, max_length=40)
-    quantity: PositiveFiniteNumber | None = None
+    quantity: NetWorthQuantity | None = None
     currency: CurrencyCode | None = None
-    manual_value: NonNegativeMoney | None = None
+    manual_value: NetWorthMoney | None = None
     valuation_source: str | None = Field(default=None, max_length=120)
     source_url: str | None = Field(default=None, max_length=500)
     valued_at: date | None = None
@@ -118,7 +125,7 @@ def _validate_item_payload(
     valuation_mode: str,
     asset_class: str,
     symbol: str | None,
-    manual_value: float | None,
+    manual_value: Decimal | None,
     valuation_source: str | None,
     valued_at: date | None,
     expires_on: date | None,
@@ -420,8 +427,11 @@ def refresh_quote(
                 raise ValueError(
                     str(quote_payload.get("message") or "Quote was unavailable.")
                 )
-            unit_price = require_positive_finite(
-                float(unit_price_value),
+            unit_price = scaled_decimal(
+                unit_price_value,
+                scale=UNIT_PRICE_SCALE,
+                minimum=Decimal("0.00000001"),
+                maximum=MAX_UNIT_PRICE,
                 field_name="Quote price",
             )
     except (httpx.HTTPError, ValueError, TypeError) as exc:
@@ -454,8 +464,14 @@ def refresh_quote(
             {quote_currency, base_currency},
             force_refresh=quote_currency != base_currency,
         )
-        rate = snapshot.rate_between(quote_currency, base_currency)
-    except FxRateUnavailable as exc:
+        rate = scaled_decimal(
+            snapshot.rate_between(quote_currency, base_currency),
+            scale=FX_RATE_SCALE,
+            minimum=Decimal("0.000000000001"),
+            maximum=MAX_EXACT_FX_RATE,
+            field_name="Exchange rate",
+        )
+    except (FxRateUnavailable, ValueError) as exc:
         raise HTTPException(
             status_code=502,
             detail=(
@@ -472,13 +488,7 @@ def refresh_quote(
         unit_price=unit_price,
         quote_currency=quote_currency,
         exchange_rate_to_base=rate,
-        total_value_base=float(
-            (
-                Decimal(str(unit_price))
-                * Decimal(str(item.quantity))
-                * Decimal(str(rate))
-            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        ),
+        total_value_base=money_decimal(unit_price * item.quantity * rate),
         base_currency=base_currency,
         source="Twelve Data",
         source_url="https://twelvedata.com/docs/advanced",
