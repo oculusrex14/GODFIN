@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "finding_id": "GF-CONTENT-001",
+  "scope": "Public website claims that must stay aligned with verified application behavior",
+  "claims": {
+    "desktop_data_boundary": "Ordinary desktop financial data remains in the local application database.",
+    "gmail_scope": "https://www.googleapis.com/auth/gmail.readonly",
+    "gmail_access": "The desktop Gmail integration can view messages and mailbox settings and does not request send, edit, or delete access.",
+    "hosted_ai": "Bring-your-own cloud AI is optional, separately consented, redacted, and still processed under the selected provider's retention terms.",
+    "hosted_credits": "GODFIN does not currently operate or sell a hosted AI credit service.",
+    "analytics": "Consent-gated Google Analytics can receive website usage and device context; it is not described as anonymous.",
+    "downloads": "No signed public installer is claimed until a verified release URL, signature, and checksum are configured.",
+    "commerce": "Checkout stays closed until verified support and privacy contacts are configured."
+  },
+  "prohibited_public_phrases": [
+    "credit packs are optional",
+    "anonymous analytics",
+    "allow anonymous analytics",
+    "replace this address",
+    "download the signed build",
+    "anonymous device hash"
+  ],
+  "required_privacy_disclosures": [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "vendor or merchant text",
+    "amount band",
+    "does not make the prompt anonymous",
+    "provider processes the remaining prompt",
+    "up to 14 months"
+  ],
+  "required_launch_gates": [
+    "NEXT_PUBLIC_SUPPORT_EMAIL",
+    "NEXT_PUBLIC_PRIVACY_EMAIL",
+    "CHECKOUT_ENABLED",
+    "RESEND_FROM_EMAIL"
+  ],
+  "external_review_required": [
+    "Qualified Indian consumer, privacy, tax, and software-license counsel must approve the final public policy text.",
+    "The owner must verify public contact mailboxes and provider-side retention settings before launch."
+  ]
+}

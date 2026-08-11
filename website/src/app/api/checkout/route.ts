@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { siteUrl } from "@/lib/env";
+import { commerceConfigured, siteUrl } from "@/lib/env";
 import {
   isProductCode,
   isRetiredHostedCreditCode,
@@ -15,6 +15,15 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    if (!commerceConfigured()) {
+      return NextResponse.json(
+        {
+          message:
+            "Checkout is closed until verified support and privacy contacts are configured.",
+        },
+        { status: 503 },
+      );
+    }
     const supabase = await createSupabaseServerClient();
     if (!supabase) {
       return NextResponse.json(

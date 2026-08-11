@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { PurchaseButton } from "@/components/purchase-button";
 import { ENTITLEMENTS } from "@/lib/entitlements";
+import { commerceConfigured } from "@/lib/env";
 import { formattedLicensePrice } from "@/lib/regional-pricing";
 
 export const metadata: Metadata = {
@@ -55,7 +56,7 @@ const plans = [
 ];
 
 export default function PricingPage() {
-  const checkoutEnabled = process.env.CHECKOUT_ENABLED === "true";
+  const checkoutEnabled = commerceConfigured();
   return (
     <>
       <section className="page-hero">
@@ -102,7 +103,7 @@ export default function PricingPage() {
                 </ul>
                 {plan.name === "Core" ? (
                   <Link className="button-secondary" href="/download">
-                    Download free
+                    Check availability
                   </Link>
                 ) : (
                   <PurchaseButton

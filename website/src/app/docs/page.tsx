@@ -34,9 +34,11 @@ export default function DocsPage() {
           <article className="content-card prose">
             <h2 id="install">Install</h2>
             <p>
-              Download the signed build for your operating system. On macOS,
-              move GODFIN to Applications and open it. The app starts a local
-              interface and local API bound to <code>127.0.0.1</code>.
+              Signed public installers are not published during the private
+              preview. When a release is available, use only the platform link
+              shown on the download page and verify its published signature and
+              checksum. The app starts a local interface and local API bound to
+              <code>127.0.0.1</code>.
             </p>
             <div className="callout">
               Leave “Allow network access” off unless you deliberately want to
@@ -69,9 +71,13 @@ export default function DocsPage() {
 
             <h2 id="gmail">Gmail</h2>
             <p>
-              Gmail is optional. OAuth credentials and tokens are encrypted
-              locally. GODFIN reads matching bank-alert messages; the website
-              account is not involved in this connection.
+              Gmail is optional and separate from website sign-in. The desktop
+              app requests the exact OAuth scope
+              <code>https://www.googleapis.com/auth/gmail.readonly</code>, which
+              permits message and mailbox-settings viewing. GODFIN uses it to
+              search matching bank-alert messages; it does not request Gmail
+              send, edit, or delete access. OAuth credentials and tokens are
+              encrypted locally, and the website account is not involved.
             </p>
 
             <h2 id="backup">Backups</h2>
@@ -89,7 +95,9 @@ export default function DocsPage() {
               <li>Paste the key and activate this device.</li>
             </ol>
             <p>
-              License verification sends the key and an anonymous device hash.
+              License verification sends the key and a random installation ID,
+              plus a generic operating-system/architecture label and app
+              version. The server hashes the installation ID before storage.
               It does not send transactions, statement files, balances, or
               merchant history.
             </p>

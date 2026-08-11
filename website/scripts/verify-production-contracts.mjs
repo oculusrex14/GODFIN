@@ -11,6 +11,9 @@ async function text(relativePath, from = websiteRoot) {
 }
 
 const generated = JSON.parse(await text("src/generated/entitlements.json"));
+const publicClaimsPolicy = JSON.parse(
+  await text("docs/production-remediation/PUBLIC_CLAIMS_POLICY.json", repoRoot),
+);
 let manifest = generated;
 try {
   const shared = JSON.parse(await text("shared/entitlements.json", repoRoot));
@@ -58,19 +61,52 @@ assert.match(checkout, /stripePriceIdForEnvironment/);
 assert.match(checkout, /isRetiredHostedCreditCode/);
 assert.match(checkout, /status:\s*410/);
 
-for (const publicPage of [
+const publicContentPaths = [
+  "src/app/page.tsx",
   "src/app/pricing/page.tsx",
   "src/app/docs/page.tsx",
+  "src/app/download/page.tsx",
+  "src/app/privacy/page.tsx",
   "src/app/terms/page.tsx",
   "src/app/account/page.tsx",
-]) {
+  "src/components/privacy-analytics.tsx",
+];
+const publicContent = [];
+for (const publicPage of publicContentPaths) {
   const page = await text(publicPage);
+  publicContent.push(page);
   assert.doesNotMatch(
     page,
-    /Buy (Starter|Regular|Power)|Purchased top-ups|AI top-up balance/,
+    /Buy (Starter|Regular|Power)|Purchased top-ups|AI top-up balance/i,
     `${publicPage} must not market or display unusable hosted-credit products.`,
   );
 }
+
+const joinedPublicContent = publicContent.join("\n").toLowerCase();
+for (const phrase of publicClaimsPolicy.prohibited_public_phrases) {
+  assert.equal(
+    joinedPublicContent.includes(phrase.toLowerCase()),
+    false,
+    `Public content contains prohibited claim or placeholder: ${phrase}`,
+  );
+}
+
+const privacyPage = await text("src/app/privacy/page.tsx");
+const normalizedPrivacyPage = privacyPage.replace(/\s+/g, " ").toLowerCase();
+for (const disclosure of publicClaimsPolicy.required_privacy_disclosures) {
+  assert.equal(
+    normalizedPrivacyPage.includes(disclosure.toLowerCase()),
+    true,
+    `Privacy policy is missing required disclosure: ${disclosure}`,
+  );
+}
+
+const envModule = await text("src/lib/env.ts");
+assert.match(envModule, /commerceConfigured/);
+assert.match(envModule, /waitlistConfigured/);
+assert.match(checkout, /commerceConfigured\(\)/);
+const waitlistRoute = await text("src/app/api/waitlist/route.ts");
+assert.match(waitlistRoute, /waitlistConfigured\(\)/);
 
 const webhook = await text("src/app/api/webhook/route.ts");
 assert.match(webhook, /webhooks\.constructEvent/);
@@ -98,8 +134,9 @@ for (const name of [
   "PPP_CHECKOUT_ENABLED",
   "LICENSE_SIGNING_SECRET",
   "RESEND_API_KEY",
+  ...publicClaimsPolicy.required_launch_gates,
 ]) {
   assert.match(envExample, new RegExp(`^${name}=`, "m"), `${name} is undocumented.`);
 }
 
-console.log("Website lifetime-payment, entitlement, PPP, licensing, and waitlist contracts pass.");
+console.log("Website payment, entitlement, privacy-claim, licensing, and launch-gate contracts pass.");

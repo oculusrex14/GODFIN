@@ -108,8 +108,9 @@ export function PrivacyAnalytics() {
           <div>
             <strong>Private by default</strong>
             <p>
-              GODFIN can collect anonymous website traffic to improve launch
-              pages. Desktop financial data is never included.
+              With your permission, Google Analytics can receive website page,
+              device, approximate-region, referrer, campaign, and interaction
+              information. Desktop financial data is never included.
             </p>
           </div>
           <div className="consent-actions">
@@ -117,7 +118,7 @@ export function PrivacyAnalytics() {
               No analytics
             </button>
             <button className="button" onClick={() => choose("granted")}>
-              Allow anonymous analytics
+              Allow site analytics
             </button>
           </div>
         </aside>
@@ -131,7 +132,7 @@ export function AnalyticsPreferences() {
   const { consent, choose } = useAnalyticsConsent();
 
   if (!measurementId) {
-    return <p>Anonymous analytics are not configured on this environment.</p>;
+    return <p>Website analytics are not configured in this environment.</p>;
   }
 
   return (
@@ -145,7 +146,7 @@ export function AnalyticsPreferences() {
           Disable analytics
         </button>
         <button className="button" onClick={() => choose("granted")}>
-          Allow anonymous analytics
+          Allow site analytics
         </button>
       </div>
     </div>

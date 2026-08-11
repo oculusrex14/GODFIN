@@ -115,8 +115,8 @@
     },
     "multi_bank": {
       "status": "released",
-      "label": "Multiple supported accounts",
-      "description": "Add supported accounts beyond the free HDFC account."
+      "label": "Multiple tracked accounts",
+      "description": "Track additional accounts; statement imports remain limited to bank parsers explicitly released in the app."
     },
     "ai_classification": {
       "status": "released",

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { sendWaitlistConfirmationEmail } from "@/lib/email";
-import { siteUrl } from "@/lib/env";
+import { siteUrl, waitlistConfigured } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -25,6 +25,15 @@ function safeAttribution(value: unknown): Record<string, string> {
 
 export async function POST(request: Request) {
   try {
+    if (!waitlistConfigured()) {
+      return NextResponse.json(
+        {
+          message:
+            "The waitlist is closed until confirmation email and a privacy contact are configured.",
+        },
+        { status: 503 },
+      );
+    }
     const body = (await request.json()) as Record<string, unknown>;
     if (typeof body.company === "string" && body.company.trim()) {
       return NextResponse.json({ accepted: true }, { status: 202 });

@@ -22,6 +22,7 @@ import { Suspense } from "react";
 import { ProductDemoVideo } from "@/components/product-demo-video";
 import { WaitlistForm } from "@/components/waitlist-form";
 import { ENTITLEMENTS } from "@/lib/entitlements";
+import { waitlistConfigured } from "@/lib/env";
 
 const features = [
   {
@@ -141,7 +142,7 @@ for (const feature of [
 }
 
 export default function HomePage() {
-  const waitlistEnabled = Boolean(process.env.RESEND_API_KEY);
+  const waitlistEnabled = waitlistConfigured();
   return (
     <>
       <section className="hero">
@@ -159,7 +160,7 @@ export default function HomePage() {
             </p>
             <div className="hero-actions">
               <Link className="button" href="/download">
-                Download Free for macOS <ArrowRight size={17} />
+                Check private preview <ArrowRight size={17} />
               </Link>
               <Link className="button-ghost" href="/pricing">
                 See pricing
@@ -356,7 +357,8 @@ export default function HomePage() {
             <h2>Start free. Upgrade once.</h2>
             <p>
               Core costs nothing. Pro and Max are lifetime desktop licenses.
-              Credit packs are optional one-time top-ups.
+              Neither plan includes hosted AI credits; use local AI, your own
+              supported provider key, or no AI at all.
             </p>
           </div>
           <div className="inline-actions" style={{ justifyContent: "center" }}>

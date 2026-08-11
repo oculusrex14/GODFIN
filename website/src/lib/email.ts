@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 
-import { serverEnv, siteUrl } from "@/lib/env";
+import { publicContactConfig, serverEnv, siteUrl } from "@/lib/env";
 import type { LicenseTier } from "@/lib/license";
 
 export async function sendLicenseEmail({
@@ -15,10 +15,12 @@ export async function sendLicenseEmail({
   idempotencyKey: string;
 }) {
   const resend = new Resend(serverEnv.resendApiKey());
+  const { supportEmail } = publicContactConfig();
   const { error } = await resend.emails.send(
     {
       from: serverEnv.resendFromEmail(),
       to,
+      ...(supportEmail ? { replyTo: supportEmail } : {}),
       subject: `Your GODFIN ${tier === "max" ? "Max" : "Pro"} lifetime license`,
       text: [
         `Your GODFIN ${tier.toUpperCase()} lifetime license is ready.`,
@@ -56,10 +58,12 @@ export async function sendWaitlistConfirmationEmail({
   idempotencyKey: string;
 }) {
   const resend = new Resend(serverEnv.resendApiKey());
+  const { privacyEmail } = publicContactConfig();
   const { error } = await resend.emails.send(
     {
       from: serverEnv.resendFromEmail(),
       to,
+      ...(privacyEmail ? { replyTo: privacyEmail } : {}),
       subject: "Confirm your GODFIN waitlist place",
       text: [
         "Confirm that you want product and launch updates from GODFIN:",

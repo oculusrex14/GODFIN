@@ -4,7 +4,7 @@ import { DownloadChooser } from "@/components/download-chooser";
 
 export const metadata: Metadata = {
   title: "Download",
-  description: "Download the local GODFIN desktop app for macOS, Windows, or Linux.",
+  description: "Check GODFIN desktop release availability for macOS, Windows, or Linux.",
 };
 
 export default function DownloadPage() {
@@ -17,8 +17,9 @@ export default function DownloadPage() {
           </div>
           <h1>Download GODFIN</h1>
           <p>
-            Install it, set a local PIN, and start with Core—no website account
-            or payment details required.
+            Signed installers are not publicly available during the private
+            preview. Platform buttons activate only when a verified release is
+            configured.
           </p>
         </div>
       </section>
@@ -26,8 +27,9 @@ export default function DownloadPage() {
         <div className="shell">
           <DownloadChooser />
           <div className="callout">
-            Verify release signatures before opening a downloaded build. GODFIN
-            never asks you to upload a statement to this website.
+            When a release link is enabled, verify its published signature and
+            checksum before opening it. GODFIN never asks you to upload a
+            statement to this website.
           </div>
         </div>
       </section>

@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 
+import { publicContactConfig } from "@/lib/env";
+
 export const metadata: Metadata = {
   title: "Terms",
   description: "Terms for GODFIN Core, Pro, and Max lifetime licenses.",
 };
 
 export default function TermsPage() {
+  const { supportEmail } = publicContactConfig();
   return (
     <>
       <section className="page-hero">
@@ -59,9 +62,22 @@ export default function TermsPage() {
             Payments are processed by Stripe. Taxes, invoices, and supported
             methods depend on location and checkout. Except where applicable law
             requires otherwise, digital license refunds may be limited after a
-            key has been activated. Contact support@godfin.dev for a good-faith
-            review of billing mistakes or technical inability to use the
-            product.
+            key has been activated.
+            {supportEmail ? (
+              <>
+                {" "}
+                Contact <a href={`mailto:${supportEmail}`}>{supportEmail}</a> for
+                a good-faith review of billing mistakes or technical inability
+                to use the product.
+              </>
+            ) : (
+              <>
+                {" "}
+                Checkout remains disabled until a verified support address is
+                configured for billing mistakes or technical inability to use
+                the product.
+              </>
+            )}
           </p>
 
           <h2>6. Accounts and keys</h2>
@@ -90,10 +106,20 @@ export default function TermsPage() {
           </p>
 
           <h2>9. Changes and contact</h2>
-          <p>
-            Material changes will be dated on this page. Questions can be sent
-            to legal@godfin.dev.
-          </p>
+          {supportEmail ? (
+            <p>
+              Material changes will be dated on this page. Product and billing
+              questions can be sent to
+              {" "}
+              <a href={`mailto:${supportEmail}`}>{supportEmail}</a>.
+            </p>
+          ) : (
+            <p>
+              Material changes will be dated on this page. This private preview
+              is not accepting payment because a verified public support
+              address has not yet been configured.
+            </p>
+          )}
         </article>
       </section>
     </>
