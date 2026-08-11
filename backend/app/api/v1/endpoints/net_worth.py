@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.endpoints.license import enforce_feature
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.errors import ApplicationError, IntegrationUnavailableError
 from app.core.encryption import SecretDecryptionError, decrypt, encrypt
 from app.core.feature_flags import FeatureDisabledError, require_feature_flag
 from app.core.fx import FxRateUnavailable, get_inr_rates
@@ -116,7 +117,12 @@ def _authorize(db: Session) -> None:
     try:
         require_feature_flag(db, "net_worth")
     except FeatureDisabledError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise ApplicationError(
+            code="FEATURE_UNAVAILABLE",
+            message="Net Worth is not available in this build.",
+            status_code=404,
+            category="availability",
+        ) from exc
     enforce_feature(db, "net_worth")
 
 
@@ -435,9 +441,10 @@ def refresh_quote(
                 field_name="Quote price",
             )
     except (httpx.HTTPError, ValueError, TypeError) as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Twelve Data quote failed: {exc}",
+        raise IntegrationUnavailableError(
+            code="MARKET_QUOTE_UNAVAILABLE",
+            message="A verified market quote is temporarily unavailable.",
+            hint="Check the symbol and market-data key, then try again.",
         ) from exc
 
     if not quote_currency:
@@ -472,11 +479,10 @@ def refresh_quote(
             field_name="Exchange rate",
         )
     except (FxRateUnavailable, ValueError) as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                f"Verified {quote_currency} to {base_currency} conversion failed: {exc}"
-            ),
+        raise IntegrationUnavailableError(
+            code="MARKET_FX_UNAVAILABLE",
+            message="The verified currency conversion is temporarily unavailable.",
+            hint="The quote was not saved. Try again later.",
         ) from exc
 
     now = utcnow_naive()

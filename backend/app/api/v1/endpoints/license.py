@@ -27,7 +27,7 @@ def _raise_license_error(exc: LicenseError):
         status_code=exc.status_code,
         detail={
             "code": exc.code,
-            "message": str(exc),
+            "message": exc.public_message,
             "hint": "Open godfin.vercel.app/account if you need the key resent.",
             "retriable": exc.retriable,
         },

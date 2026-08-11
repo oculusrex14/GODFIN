@@ -42,14 +42,18 @@ def _parse_pdf(
     )
     try:
         pdf = pdfplumber.open(io.BytesIO(contents), password=password)
-    except Exception as exc:
-        result.errors.append(f"Failed to open PDF: {exc}")
+    except Exception:
+        result.errors.append(
+            "The PDF could not be opened. Check the file and its password, then try again."
+        )
         return result
 
     try:
         _parse_hdfc_savings_statement(pdf, result)
-    except Exception as exc:
-        result.errors.append(f"Parse error: {exc}")
+    except Exception:
+        result.errors.append(
+            "The PDF layout could not be read as an HDFC savings statement."
+        )
     finally:
         pdf.close()
     return result
@@ -84,8 +88,10 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
         )
         sheet = workbook.active
         rows = list(sheet.iter_rows(values_only=True))
-    except Exception as exc:
-        result.errors.append(f"Failed to open XLSX: {exc}")
+    except Exception:
+        result.errors.append(
+            "The XLSX file could not be opened. Check that it is a valid bank statement."
+        )
         return result
 
     header_index: Optional[int] = None

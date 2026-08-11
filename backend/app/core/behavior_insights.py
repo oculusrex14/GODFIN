@@ -312,7 +312,7 @@ def compute_behavior_insights(
                 subscription_currencies,
                 today=reference_day,
             )
-        except FxRateUnavailable as exc:
+        except FxRateUnavailable:
             fx_snapshot = saved_subscription_snapshot(
                 active_subscriptions,
                 today=reference_day,
@@ -323,7 +323,8 @@ def compute_behavior_insights(
                     "estimate the subscription share."
                 )
                 subscription_fx = unavailable_fx_metadata(
-                    str(exc), subscription_currencies
+                    "Verified currency rates are temporarily unavailable.",
+                    subscription_currencies,
                 )
         if fx_snapshot is not None:
             subscription_cost = _monthly_subscription_cost(

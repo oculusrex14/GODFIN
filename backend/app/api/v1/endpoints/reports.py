@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.csv_security import spreadsheet_safe_mapping, spreadsheet_safe_row
 from app.core.database import get_db
+from app.core.errors import IntegrationUnavailableError
 from app.core.reporting import (
     DetailedReportUnavailable,
     generate_ai_financial_insights,
@@ -239,7 +240,11 @@ def report_ai_insights(
     try:
         insights = generate_ai_financial_insights(detailed, trend)
     except DetailedReportUnavailable as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise IntegrationUnavailableError(
+            code="AI_REPORT_UNAVAILABLE",
+            message="The connected AI did not return a usable report.",
+            hint="Standard totals and exports remain available. Try the analysis again later.",
+        ) from exc
     metadata = _ai_report_metadata(llm_config)
     return {
         'month': month,
@@ -469,7 +474,11 @@ def report_pdf_detailed(
             ai_metadata=_ai_report_metadata(llm_config),
         )
     except DetailedReportUnavailable as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise IntegrationUnavailableError(
+            code="AI_REPORT_UNAVAILABLE",
+            message="The connected AI could not create the detailed report.",
+            hint="The standard summary report remains available.",
+        ) from exc
 
     return Response(
         content=pdf_bytes,

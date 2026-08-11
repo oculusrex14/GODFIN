@@ -40,6 +40,8 @@ from app.schemas.financial import (
 
 router = APIRouter()
 
+_FX_UNAVAILABLE_MESSAGE = "Verified exchange rates are temporarily unavailable."
+
 
 async def _fetch_exchange_rates(
     currencies: set[str], *, force_refresh: bool = False
@@ -59,11 +61,11 @@ async def _resolve_exchange_rates(
 ) -> tuple[FxRateSnapshot | None, dict[str, Any]]:
     try:
         snapshot = await _fetch_exchange_rates(currencies)
-    except FxRateUnavailable as exc:
+    except FxRateUnavailable:
         stored = saved_subscription_snapshot(subscriptions or [])
         if stored is not None:
             return stored, stored.metadata(currencies)
-        return None, unavailable_fx_metadata(str(exc), currencies)
+        return None, unavailable_fx_metadata(_FX_UNAVAILABLE_MESSAGE, currencies)
     return snapshot, snapshot.metadata(currencies)
 
 
@@ -343,10 +345,10 @@ async def refresh_exchange_rates(
         return {"updated": 0, "fx": snapshot.metadata({"INR"})}
     try:
         snapshot = await _fetch_exchange_rates(currencies, force_refresh=True)
-    except FxRateUnavailable as exc:
+    except FxRateUnavailable:
         return {
             "updated": 0,
-            "fx": unavailable_fx_metadata(str(exc), currencies),
+            "fx": unavailable_fx_metadata(_FX_UNAVAILABLE_MESSAGE, currencies),
         }
     for item in subscriptions:
         apply_snapshot_to_subscription(item, snapshot)

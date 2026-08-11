@@ -45,6 +45,38 @@ class LicenseError(RuntimeError):
         self.code = code
         self.status_code = status_code
         self.retriable = retriable
+        self.public_message = message
+
+
+_AUTHORITATIVE_LICENSE_ERRORS = {
+    "LICENSE_NOT_FOUND": "This license key was not found.",
+    "LICENSE_INVALID": "This license could not be verified.",
+    "LICENSE_REVOKED": "This license is no longer active.",
+    "DEVICE_LIMIT_REACHED": (
+        "This license is already active on three devices. "
+        "Deactivate one in your account and try again."
+    ),
+    "DEVICE_LIMIT": (
+        "This license is already active on three devices. "
+        "Deactivate one in your account and try again."
+    ),
+    "INVALID_REQUEST": "The license request is invalid.",
+}
+
+
+def _authoritative_license_error(payload: dict[str, Any]) -> LicenseError:
+    supplied_code = payload.get("code")
+    code = (
+        supplied_code
+        if isinstance(supplied_code, str)
+        and supplied_code in _AUTHORITATIVE_LICENSE_ERRORS
+        else "LICENSE_INVALID"
+    )
+    return LicenseError(
+        _AUTHORITATIVE_LICENSE_ERRORS[code],
+        code=code,
+        status_code=403,
+    )
 
 
 def _machine_id_path() -> Path:
@@ -277,11 +309,7 @@ def _validate_server_response(payload: Any) -> dict[str, Any]:
             retriable=True,
         )
     if payload.get("valid") is not True:
-        raise LicenseError(
-            str(payload.get("message") or "License verification failed."),
-            code=str(payload.get("code") or "LICENSE_INVALID"),
-            status_code=403,
-        )
+        raise _authoritative_license_error(payload)
     tier = payload.get("tier")
     if tier not in {"pro", "max"}:
         raise LicenseError(
@@ -290,10 +318,19 @@ def _validate_server_response(payload: Any) -> dict[str, Any]:
             status_code=502,
             retriable=True,
         )
+    try:
+        topup_credits = max(0, int(payload.get("topup_credits") or 0))
+    except (TypeError, ValueError) as exc:
+        raise LicenseError(
+            "The license server returned invalid credit information.",
+            code="VERIFY_INVALID_RESPONSE",
+            status_code=502,
+            retriable=True,
+        ) from exc
     return {
         "tier": tier,
         "monthly_credits": included_hosted_ai_credits(),
-        "topup_credits": max(0, int(payload.get("topup_credits") or 0)),
+        "topup_credits": topup_credits,
     }
 
 
@@ -341,8 +378,8 @@ def verify_with_server(license_key: str) -> dict[str, Any]:
 
         if response.status_code >= 500:
             last_error = LicenseError(
-                str(payload.get("message") or "The license server is unavailable."),
-                code=str(payload.get("code") or "VERIFY_UNAVAILABLE"),
+                "The license server is unavailable.",
+                code="VERIFY_UNAVAILABLE",
                 status_code=503,
                 retriable=True,
             )

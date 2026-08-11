@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.audit import FinalizedPeriodError, assert_period_writable
 from app.core.database import get_db
+from app.core.errors import LocalOperationError, StateConflictError
 from app.core.transaction_semantics import apply_category_semantic
 from app.models.transaction import Transaction
 from app.schemas.transaction import (
@@ -32,7 +33,14 @@ def create_transaction(
     try:
         assert_period_writable(db, body.date)
     except FinalizedPeriodError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise StateConflictError(
+            code="FINALIZED_PERIOD_READ_ONLY",
+            message=(
+                "This month is finalized and read-only. "
+                "Reopen the month before adding a transaction."
+            ),
+            hint="Reopen the month before adding a transaction.",
+        ) from exc
 
     txn = Transaction(
         id=str(uuid.uuid4()),
@@ -228,9 +236,13 @@ def update_transaction(
         db.commit()
         db.refresh(txn)
         return txn
-    except Exception as e:
+    except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update transaction: {str(e)}")
+        raise LocalOperationError(
+            code="TRANSACTION_UPDATE_FAILED",
+            message="GODFIN could not save this transaction update.",
+            hint="No partial change was kept. Try again.",
+        ) from exc
 
 
 @router.delete("/{transaction_id}", status_code=204)

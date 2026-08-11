@@ -104,8 +104,13 @@ def build_valuation_context(
             today=today,
             force_refresh=force_refresh,
         )
-    except FxRateUnavailable as exc:
-        return NetWorthValuationContext(base, None, requested, str(exc))
+    except FxRateUnavailable:
+        return NetWorthValuationContext(
+            base,
+            None,
+            requested,
+            "Verified currency rates are temporarily unavailable.",
+        )
     return NetWorthValuationContext(base, snapshot, requested)
 
 

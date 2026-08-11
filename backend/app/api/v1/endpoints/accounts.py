@@ -11,6 +11,7 @@ from app.api.v1.endpoints.license import enforce_feature
 from app.core.account_mapping import load_sender_mappings, save_sender_mappings
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.errors import InvalidOperationError
 from app.core.parsers import supported_parser_profiles
 from app.models.account import Account
 
@@ -151,7 +152,11 @@ def replace_account_sender_mappings(
             [mapping.model_dump() for mapping in body.mappings],
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise InvalidOperationError(
+            code="ACCOUNT_ROUTING_INVALID",
+            message="One or more sender-routing values are invalid.",
+            hint="Check the selected account, sender pattern, and parser profile.",
+        ) from exc
     db.commit()
     return mappings
 
@@ -193,7 +198,11 @@ def create_account(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise InvalidOperationError(
+            code="ACCOUNT_ROUTING_INVALID",
+            message="The account could not be saved because its routing is invalid.",
+            hint="Check the sender pattern and parser profile, then try again.",
+        ) from exc
     db.refresh(account)
     return _account_dict(account)
 
@@ -224,7 +233,11 @@ def update_account(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise InvalidOperationError(
+            code="ACCOUNT_ROUTING_INVALID",
+            message="The account could not be updated because its routing is invalid.",
+            hint="Check the sender pattern and parser profile, then try again.",
+        ) from exc
     db.refresh(account)
     return _account_dict(account)
 

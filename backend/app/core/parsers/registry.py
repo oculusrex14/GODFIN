@@ -39,12 +39,14 @@ def account_requirements(statement_type: str) -> tuple[Optional[str], Optional[s
 def _pdf_text(contents: bytes, password: Optional[str]) -> tuple[str, Optional[str]]:
     try:
         pdf = pdfplumber.open(io.BytesIO(contents), password=password)
-    except Exception as exc:
-        return "", f"Failed to open PDF: {exc}"
+    except Exception:
+        return "", (
+            "The PDF could not be opened. Check the file and its password, then try again."
+        )
     try:
         return "\n".join(page.extract_text() or "" for page in pdf.pages), None
-    except Exception as exc:
-        return "", f"Failed to inspect PDF: {exc}"
+    except Exception:
+        return "", "The PDF layout could not be inspected safely."
     finally:
         pdf.close()
 

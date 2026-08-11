@@ -15,6 +15,7 @@ from app.core.backup import create_backup
 from app.core.config import settings as app_config
 from app.core.data_deletion import delete_transactions_with_dependents
 from app.core.database import get_db
+from app.core.errors import IntegrationUnavailableError
 from app.core.gmail_service import (
     GmailConfigurationError,
     GmailError,
@@ -71,7 +72,13 @@ def get_gmail_auth_url(
     except HTTPException:
         raise
     except GmailConfigurationError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise IntegrationUnavailableError(
+            code="GMAIL_CONFIGURATION_REQUIRED",
+            message="Gmail connection is not configured for this GODFIN build yet.",
+            hint="Add the dedicated desktop Google connection, then try again.",
+            status_code=503,
+            retriable=False,
+        ) from exc
     except Exception as exc:
         logger.exception("Failed to start Gmail authorization")
         raise HTTPException(
@@ -355,9 +362,12 @@ def trigger_initial_sync(
             "result": result.to_dict(),
             "message": f"Initial sync complete. Created {result.created} transactions.",
         }
-    except Exception as e:
-        logger.error(f"Initial sync failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Initial sync failed: {str(e)}")
+    except Exception as exc:
+        raise IntegrationUnavailableError(
+            code="GMAIL_SYNC_FAILED",
+            message="Gmail sync could not be completed.",
+            hint="Check the Gmail connection and try again.",
+        ) from exc
 
 
 @router.post("/ingest/gmail/initial/start")
@@ -488,9 +498,12 @@ def trigger_ingestion_range(
             "date_range": f"{start.isoformat()} to {end.isoformat()}",
             "message": f"Ingestion complete. Processed {result.processed}, created {result.created}.",
         }
-    except Exception as e:
-        logger.error(f"Date range ingestion failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+    except Exception as exc:
+        raise IntegrationUnavailableError(
+            code="GMAIL_INGESTION_FAILED",
+            message="Gmail import could not be completed for that date range.",
+            hint="Check the Gmail connection and try again.",
+        ) from exc
 
 
 # --- Background Date Range Ingestion ---

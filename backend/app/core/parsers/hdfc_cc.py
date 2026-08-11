@@ -35,14 +35,18 @@ def _parse(
 
     try:
         pdf = pdfplumber.open(io.BytesIO(contents), password=password)
-    except Exception as exc:
-        result.errors.append(f"Failed to open PDF: {exc}")
+    except Exception:
+        result.errors.append(
+            "The PDF could not be opened. Check the file and its password, then try again."
+        )
         return result
 
     try:
         _parse_hdfc_cc_statement(pdf, result)
-    except Exception as exc:
-        result.errors.append(f"Parse error: {exc}")
+    except Exception:
+        result.errors.append(
+            "The PDF layout could not be read as an HDFC credit-card statement."
+        )
     finally:
         pdf.close()
     if result.errors:

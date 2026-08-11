@@ -351,10 +351,17 @@ def classify_with_llm(
             'confidence': result.confidence,
         })
 
-    except Exception as e:
+    except Exception as exc:
         breaker.record_failure()
-        result.error = str(e)
-        logger.error(f"LLM classification error: {e}")
+        result.error = "The connected AI could not classify this transaction."
+        logger.exception(
+            "LLM classification failed",
+            extra={
+                "operation_id": "llm_classification",
+                "error_code": "LLM_CLASSIFICATION_FAILED",
+                "cause_type": type(exc).__name__,
+            },
+        )
 
     return result
 
@@ -383,9 +390,16 @@ def call_llm(
         elif not isinstance(_provider, StubLLMProvider):
             breaker.record_failure()
         return response
-    except Exception as e:
+    except Exception as exc:
         breaker.record_failure()
-        logger.error(f"LLM call error: {e}")
+        logger.exception(
+            "LLM call failed",
+            extra={
+                "operation_id": f"llm_{purpose}",
+                "error_code": "LLM_CALL_FAILED",
+                "cause_type": type(exc).__name__,
+            },
+        )
         return None
 
 

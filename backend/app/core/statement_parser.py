@@ -320,8 +320,10 @@ def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
     try:
         wb = xlrd.open_workbook(file_contents=file_bytes)
         sheet = wb.sheet_by_index(0)
-    except Exception as e:
-        result.errors.append(f"Failed to open XLS: {e}")
+    except Exception:
+        result.errors.append(
+            "The XLS file could not be opened. Check that it is a valid bank statement."
+        )
         return result
 
     # Find header row and extract metadata
@@ -464,8 +466,10 @@ def parse_statement_pdf(pdf_bytes: bytes, password: Optional[str] = None) -> Sta
     try:
         pdf_file = io.BytesIO(pdf_bytes)
         pdf = pdfplumber.open(pdf_file, password=password)
-    except Exception as e:
-        result.errors.append(f"Failed to open PDF: {str(e)}")
+    except Exception:
+        result.errors.append(
+            "The PDF could not be opened. Check the file and its password, then try again."
+        )
         return result
 
     try:
@@ -494,8 +498,10 @@ def parse_statement_pdf(pdf_bytes: bytes, password: Optional[str] = None) -> Sta
                 "Unsupported HDFC PDF layout; statement profile could not be established",
             )
 
-    except Exception as e:
-        result.errors.append(f"Parse error: {str(e)}")
+    except Exception:
+        result.errors.append(
+            "The PDF layout could not be read as a supported bank statement."
+        )
     finally:
         pdf.close()
 

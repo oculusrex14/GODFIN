@@ -14,6 +14,7 @@ from app.core.auth import get_current_user
 from app.core.audit import FinalizedPeriodError
 from app.core.classifier import classify_transaction
 from app.core.database import get_db
+from app.core.errors import LocalOperationError, StateConflictError
 from app.core.merchant_memory_service import upsert_merchant_memory
 from app.core.parsers import account_requirements, parse_registered_statement
 from app.core.reconciliation import (
@@ -502,29 +503,24 @@ async def import_statement(
         }
     except FinalizedPeriodError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise StateConflictError(
+            code="FINALIZED_PERIOD_READ_ONLY",
+            message=(
+                "This statement includes a finalized month that is read-only. "
+                "Reopen the month before importing."
+            ),
+            hint="Reopen that month before importing these transactions.",
+        ) from exc
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as exc:
         db.rollback()
-        logger.error(f"Statement import failed: {e}")
-        return {
-            "statement_type": None,
-            "total_parsed": 0,
-            "matched": 0,
-            "skipped_dup": 0,
-            "possible": 0,
-            "new_imported": 0,
-            "imported": 0,
-            "classified": 0,
-            "review_queue": 0,
-            "income_detected": 0,
-            "income_items": [],
-            "statement_closing_balance": None,
-            "computed_balance": None,
-            "balance_discrepancy": None,
-            "errors": [f"Import could not be completed: {str(e)}"],
-        }
+        raise LocalOperationError(
+            code="STATEMENT_IMPORT_FAILED",
+            message="GODFIN could not complete this statement import.",
+            hint="No partial import was kept. Review the file and try again.",
+            status_code=503,
+        ) from exc
 
 
 @router.post("/ingest/upload")

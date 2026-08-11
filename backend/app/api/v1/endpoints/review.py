@@ -17,6 +17,7 @@ from app.core.classification_learning import (
 )
 from app.core.classifier import validate_category, validate_subcategory
 from app.core.database import get_db
+from app.core.errors import LocalOperationError
 from app.core.transaction_semantics import apply_category_semantic, semantic_type_for
 from app.core.llm_privacy import sanitize_untrusted_text
 from app.core.llm_service import call_llm
@@ -254,9 +255,13 @@ def resolve_review(
         }
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to resolve transaction: {str(e)}")
+        raise LocalOperationError(
+            code="REVIEW_UPDATE_FAILED",
+            message="GODFIN could not save this classification.",
+            hint="No partial change was kept. Try again.",
+        ) from exc
 
 
 @router.post("/review/batch-resolve")
@@ -321,9 +326,13 @@ def batch_resolve(
 
         db.commit()
         return {"resolved": resolved, "errors": errors}
-    except Exception as e:
+    except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to batch resolve: {str(e)}")
+        raise LocalOperationError(
+            code="REVIEW_BATCH_FAILED",
+            message="GODFIN could not save these classifications.",
+            hint="No partial batch was kept. Try again.",
+        ) from exc
 
 
 @router.get("/review/stats", response_model=ReviewStats)

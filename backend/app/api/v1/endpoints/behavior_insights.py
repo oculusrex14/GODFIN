@@ -12,6 +12,7 @@ from app.core.behavior_insights import (
     export_behavior_insights_csv,
 )
 from app.core.database import get_db
+from app.core.errors import ApplicationError
 from app.core.feature_flags import (
     FeatureDisabledError,
     feature_enabled,
@@ -38,7 +39,12 @@ def _authorize(db: Session) -> None:
     try:
         require_feature_flag(db, "behavior_insights")
     except FeatureDisabledError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise ApplicationError(
+            code="FEATURE_UNAVAILABLE",
+            message="Behavior Insights is not available in this build.",
+            status_code=404,
+            category="availability",
+        ) from exc
     enforce_feature(db, "behavior_insights")
 
 

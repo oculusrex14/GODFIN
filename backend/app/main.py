@@ -10,10 +10,12 @@ from starlette.exceptions import HTTPException
 from app.api.v1.router import router as api_v1_router
 from app.core.api_errors import (
     STANDARD_ERROR_RESPONSES,
+    application_exception_handler,
     http_exception_handler,
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from app.core.errors import ApplicationError
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.logging_config import setup_logging
@@ -22,6 +24,7 @@ from app.core.request_limits import (
     MAX_REQUEST_BODY_BYTES,
     RequestBodyLimitMiddleware,
 )
+from app.core.request_context import RequestContextMiddleware
 from app.seed import run_seeds
 
 logger = logging.getLogger(__name__)
@@ -143,6 +146,7 @@ app = FastAPI(
 )
 
 app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(ApplicationError, application_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
@@ -151,6 +155,8 @@ app.add_middleware(
     max_bytes=MAX_REQUEST_BODY_BYTES,
 )
 
+app.add_middleware(RequestContextMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(LOCAL_API_POLICY.cors_origins),
@@ -158,7 +164,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
-    expose_headers=["Content-Disposition", "Retry-After"],
+    expose_headers=["Content-Disposition", "Retry-After", "X-GODFIN-Request-ID"],
     max_age=600,
 )
 

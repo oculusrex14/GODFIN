@@ -369,10 +369,20 @@ def start_scheduler(db_path: str, backup_dir: str) -> bool:
             finally:
                 db.close()
 
-        except Exception as e:
-            logger.error(f"Scheduled ingestion failed: {e}")
-            _update_last_run(success=False, error_message=str(e)[:500])
-            if bool(getattr(e, "retryable", False)):
+        except Exception as exc:
+            failure_code = str(
+                getattr(exc, "code", "AUTOMATIC_INGESTION_FAILED")
+            )[:80]
+            logger.exception(
+                "Scheduled ingestion failed",
+                extra={
+                    "operation_id": "scheduled_gmail_ingestion",
+                    "error_code": failure_code,
+                    "cause_type": type(exc).__name__,
+                },
+            )
+            _update_last_run(success=False, error_code=failure_code)
+            if bool(getattr(exc, "retryable", False)):
                 _ingestion_retry_attempts += 1
                 delay = _retry_delay_seconds(_ingestion_retry_attempts)
                 scheduler.add_job(
@@ -591,7 +601,11 @@ def run_on_wake(db_path: str, backup_dir: str) -> None:
         logger.warning(f"Run-on-wake check failed: {e}")
 
 
-def _update_last_run(success: bool = True, new_transactions: int = 0, error_message: str = ""):
+def _update_last_run(
+    success: bool = True,
+    new_transactions: int = 0,
+    error_code: str = "",
+):
     """Update the last_ingestion_run timestamp and status in settings."""
     try:
         from app.core.database import SessionLocal
@@ -622,15 +636,29 @@ def _update_last_run(success: bool = True, new_transactions: int = 0, error_mess
         count_setting.value = str(new_transactions)
         db.commit()
 
-        # Update error message if failed
-        if error_message:
+        # Store a stable public message and a support-safe failure code. Never
+        # persist an exception string because it can contain tokens or paths.
+        if error_code:
             error_setting = db.query(AppSetting).filter_by(key='last_auto_ingestion_error').first()
             if not error_setting:
                 error_setting = AppSetting(key='last_auto_ingestion_error', value='')
                 db.add(error_setting)
-            error_setting.value = error_message[:500]  # Limit to 500 chars
+            error_setting.value = "Automatic Gmail import could not be completed."
+            code_setting = db.query(AppSetting).filter_by(
+                key='last_auto_ingestion_error_code'
+            ).first()
+            if not code_setting:
+                code_setting = AppSetting(
+                    key='last_auto_ingestion_error_code',
+                    value='',
+                )
+                db.add(code_setting)
+            code_setting.value = error_code[:80]
             db.commit()
 
         db.close()
-    except Exception as e:
-        logger.warning(f"Failed to update last_run: {e}")
+    except Exception as exc:
+        logger.warning(
+            "Failed to record automatic ingestion status (%s)",
+            type(exc).__name__,
+        )

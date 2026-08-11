@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.errors import IntegrationUnavailableError, StateConflictError
 from app.core.advisor_service import chat
 from app.core.advisor_digest import build_weekly_digest, digest_to_html
 from app.api.v1.endpoints.license import enforce_feature
@@ -140,10 +141,16 @@ def send_advisor_digest(
             digest_to_html(digest),
         )
     except RuntimeError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        raise StateConflictError(
+            code="GMAIL_SEND_NOT_READY",
+            message="Gmail is not ready to send the weekly digest.",
+            hint="Reconnect Gmail in Settings, then try again.",
+        ) from error
     except Exception as error:
-        raise HTTPException(
-            status_code=502, detail="Gmail could not send the weekly digest."
+        raise IntegrationUnavailableError(
+            code="GMAIL_SEND_FAILED",
+            message="Gmail could not send the weekly digest.",
+            hint="Check your connection and Gmail status, then try again.",
         ) from error
     from datetime import datetime
 

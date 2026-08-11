@@ -15,11 +15,13 @@ from app.core.backup import create_backup, list_backups
 from app.core.config import settings as app_config
 from app.core.data_deletion import reset_dynamic_data
 from app.core.database import get_db
+from app.core.errors import LocalOperationError
 from app.core.encryption import SecretDecryptionError, decrypt, get_encryption_health
 from app.core.license import license_status
 from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 from app.models.classification_rule import ClassificationRule
+from app.models.classification_learning import ClassificationCorrection
 from app.models.llm_config import LLMConfiguration
 
 logger = logging.getLogger(__name__)
@@ -319,8 +321,12 @@ def trigger_backup(
     try:
         filename = create_backup(DB_PATH, backup_dir)
         return {'filename': filename, 'status': 'success'}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise LocalOperationError(
+            code="BACKUP_FAILED",
+            message="GODFIN could not create the backup.",
+            hint="Check the backup location and available disk space, then try again.",
+        ) from exc
 
 
 @router.get("/backups")
@@ -426,8 +432,11 @@ def create_rule(
     if body.rule_type == 'regex':
         try:
             re.compile(body.pattern)
-        except re.error as e:
-            raise HTTPException(status_code=400, detail=f"Invalid regex: {e}")
+        except re.error as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="The pattern is not valid. Check brackets and special characters.",
+            ) from exc
 
     import uuid
     rule = ClassificationRule(
@@ -474,8 +483,13 @@ def update_rule(
         if rule.rule_type == 'regex':
             try:
                 re.compile(body.pattern)
-            except re.error as e:
-                raise HTTPException(status_code=400, detail=f"Invalid regex: {e}")
+            except re.error as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "The pattern is not valid. Check brackets and special characters."
+                    ),
+                ) from exc
         rule.pattern = body.pattern
 
     if body.category is not None:
@@ -557,6 +571,9 @@ def undo_classification_memory(
 ):
     from app.core.classification_learning import undo_correction
 
+    existing = db.query(ClassificationCorrection).filter_by(id=correction_id).first()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Classification correction not found.")
     try:
         correction = undo_correction(db, correction_id)
         db.commit()
@@ -567,9 +584,10 @@ def undo_classification_memory(
         }
     except ValueError as exc:
         db.rollback()
-        message = str(exc)
-        status_code = 409 if "Finalized" in message or "already" in message else 404
-        raise HTTPException(status_code=status_code, detail=message) from exc
+        raise HTTPException(
+            status_code=409,
+            detail="This classification correction cannot be undone in its current state.",
+        ) from exc
 
 
 @router.put("/classification-memory/personal")

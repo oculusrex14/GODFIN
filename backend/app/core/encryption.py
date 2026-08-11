@@ -303,28 +303,28 @@ def decrypt(encrypted: str) -> str:
 def get_encryption_health() -> dict:
     try:
         _get_encryption_key()
-    except EncryptionKeyUnavailable as exc:
+    except EncryptionKeyUnavailable:
         return {
             "status": "missing",
             "source": None,
-            "message": str(exc),
+            "message": "The local encryption key is unavailable.",
         }
-    except EncryptionError as exc:
+    except EncryptionError:
         return {
             "status": "error",
             "source": _KEY_SOURCE,
-            "message": str(exc),
+            "message": "GODFIN could not access the local encryption key safely.",
         }
 
     values = [value for value in _encrypted_values() if not value.startswith("<")]
     try:
         for value in values:
             decrypt(value)
-    except SecretDecryptionError as exc:
+    except SecretDecryptionError:
         return {
             "status": "decrypt_failed",
             "source": _KEY_SOURCE,
-            "message": str(exc),
+            "message": "A stored connection must be reconnected securely.",
         }
     return {
         "status": "ok",

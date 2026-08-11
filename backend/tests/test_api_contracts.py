@@ -44,9 +44,12 @@ def _assert_error_shape(response, *, code: str) -> None:
     payload = response.json()
     assert payload["code"] == code
     assert isinstance(payload["message"], str) and payload["message"]
+    assert isinstance(payload["category"], str) and payload["category"]
     assert "hint" in payload
     assert payload["retriable"] is False
     assert payload["detail"] == payload["message"]
+    assert len(payload["request_id"]) == 32
+    assert response.headers["x-godfin-request-id"] == payload["request_id"]
 
 
 @pytest.mark.parametrize(
@@ -364,9 +367,11 @@ def test_openapi_documents_one_error_envelope_and_success_status_per_operation()
     assert schema["components"]["schemas"]["APIErrorResponse"]["required"] == [
         "code",
         "message",
+        "category",
         "hint",
         "retriable",
         "detail",
+        "request_id",
     ]
     operation_ids = set()
     untyped_success = []

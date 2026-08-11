@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.config import settings as app_settings
 from app.core.database import get_db
+from app.core.errors import InputValidationError, StateConflictError
 from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 
@@ -323,9 +324,17 @@ def local_ai_download(
     try:
         return start_model_pull(body.model, body.confirmed)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise InputValidationError(
+            code="LOCAL_MODEL_INVALID",
+            message="That local model cannot be downloaded by this GODFIN build.",
+            hint="Choose a model shown in the signed compatibility list.",
+        ) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise StateConflictError(
+            code="LOCAL_MODEL_DOWNLOAD_CONFLICT",
+            message="Another local model action is already running.",
+            hint="Wait for it to finish or cancel it, then try again.",
+        ) from exc
 
 
 @router.post("/local-ai/download/cancel")
@@ -361,7 +370,11 @@ def local_ai_benchmark(
     try:
         return benchmark_model(body.model)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise InputValidationError(
+            code="LOCAL_MODEL_INVALID",
+            message="That local model cannot be benchmarked by this GODFIN build.",
+            hint="Choose an installed model shown in the compatibility list.",
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(
             status_code=409,

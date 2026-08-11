@@ -20,6 +20,7 @@ from starlette.responses import JSONResponse
 
 from app.core.api_errors import error_payload
 from app.core.network_access import network_access_enabled
+from app.core.request_context import new_request_id
 
 
 class RuntimeMode(str, Enum):
@@ -179,13 +180,17 @@ class LocalApiTrustMiddleware:
         self.policy = policy
 
     async def _reject(self, scope, receive, send, *, code: str, message: str) -> None:
+        request_id = new_request_id()
         response = JSONResponse(
             status_code=403,
+            headers={"X-GODFIN-Request-ID": request_id},
             content=error_payload(
                 code=code,
                 message=message,
+                category="authorization",
                 hint="Open GODFIN from its trusted desktop app or local address.",
                 retriable=False,
+                request_id=request_id,
             ),
         )
         await response(scope, receive, send)

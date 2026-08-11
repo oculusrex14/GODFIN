@@ -17,6 +17,10 @@ class JSONFormatter(logging.Formatter):
             'module': record.module,
             'message': record.getMessage(),
         }
+        for key in ("request_id", "operation_id", "error_code", "cause_type"):
+            value = getattr(record, key, None)
+            if value:
+                log_entry[key] = value
         if record.exc_info and record.exc_info[0]:
             log_entry['exception'] = self.formatException(record.exc_info)
         return json.dumps(log_entry)

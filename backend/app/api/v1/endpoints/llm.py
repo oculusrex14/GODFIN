@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.errors import IntegrationUnavailableError, InvalidOperationError
 from app.core.encryption import encrypt, decrypt
 from app.core.llm_providers import create_provider, get_available_providers
 from app.core.llm_privacy import (
@@ -308,12 +309,28 @@ def test_llm_connection(
             api_key=request.api_key,
             base_url=request.base_url,
         )
-        success, message = provider.test_connection()
-        return {"success": success, "message": message}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        return {"success": False, "message": f"Connection test failed: {str(e)}"}
+        success, _provider_message = provider.test_connection()
+        if not success:
+            raise IntegrationUnavailableError(
+                code="LLM_CONNECTION_FAILED",
+                message="GODFIN could not connect to that AI provider.",
+                hint="Check the provider, model, address, and key, then try again.",
+            )
+        return {"success": True, "message": "Connection successful"}
+    except ValueError as exc:
+        raise InvalidOperationError(
+            code="LLM_CONFIGURATION_INVALID",
+            message="The AI connection settings are not valid.",
+            hint="Check the provider, model, address, and key.",
+        ) from exc
+    except IntegrationUnavailableError:
+        raise
+    except Exception as exc:
+        raise IntegrationUnavailableError(
+            code="LLM_CONNECTION_FAILED",
+            message="GODFIN could not connect to that AI provider.",
+            hint="Check the provider, model, address, and key, then try again.",
+        ) from exc
 
 
 @router.post("/config/activate/{config_id}")

@@ -1228,8 +1228,11 @@ def generate_ai_financial_insights(detailed: dict, trend: list) -> dict:
     prompt = _build_insights_prompt(detailed, trend, month_label)
     try:
         raw = call_llm(prompt, temperature=0.5, purpose="report")
-    except Exception as e:
-        logger.warning(f"LLM insights call failed: {e}")
+    except Exception as exc:
+        logger.warning(
+            "LLM insights call failed (%s)",
+            type(exc).__name__,
+        )
         raw = None
 
     if raw:

@@ -14,6 +14,7 @@ from app.core.budget import (
     simulate_goal,
 )
 from app.core.database import get_db
+from app.core.errors import InvalidOperationError, StateConflictError
 from app.core.goal_contributions import (
     add_goal_contribution,
     assign_goal_contribution_suggestion,
@@ -193,7 +194,11 @@ def update_goal(
                     note="Balance adjustment from goal edit.",
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise InvalidOperationError(
+                    code="GOAL_BALANCE_INVALID",
+                    message="That savings balance change is not valid for this goal.",
+                    hint="Check the amount and try again.",
+                ) from exc
     if body.deadline_date is not None:
         if body.deadline_date <= date.today():
             raise HTTPException(status_code=400, detail="Deadline must be in the future")
@@ -252,7 +257,11 @@ def create_goal_contribution(
             idempotency_key=body.idempotency_key,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise InvalidOperationError(
+            code="GOAL_CONTRIBUTION_INVALID",
+            message="That savings update is not valid.",
+            hint="Check the amount, type, and date, then try again.",
+        ) from exc
     db.commit()
     db.refresh(entry)
     return {
@@ -281,7 +290,10 @@ def void_contribution(
     try:
         void_goal_contribution(db, entry, reason=body.reason)
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise StateConflictError(
+            code="GOAL_CONTRIBUTION_CONFLICT",
+            message="That savings entry cannot be voided in its current state.",
+        ) from exc
     goal = db.query(Goal).filter_by(id=goal_id).one()
     db.commit()
     return {
@@ -357,7 +369,11 @@ def decide_goal_contribution_suggestion(
             db, suggestion, goal=goal
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise InvalidOperationError(
+            code="GOAL_SUGGESTION_INVALID",
+            message="That detected deposit cannot be assigned as requested.",
+            hint="Refresh the suggestion and choose an active goal or None.",
+        ) from exc
     db.commit()
     return {
         "suggestion": suggestion_to_dict(suggestion),

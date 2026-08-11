@@ -223,7 +223,7 @@ def test_statement_import_rejects_entire_batch_for_finalized_period(
     )
 
 
-def test_import_returns_structured_errors_instead_of_500(
+def test_import_returns_structured_failure_instead_of_false_success(
     auth_client,
     monkeypatch,
 ):
@@ -255,13 +255,13 @@ def test_import_returns_structured_errors_instead_of_500(
             "accepted_fingerprint": "a" * 64,
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 503
     data = response.json()
-    assert data["imported"] == 0
-    assert data["skipped_dup"] == 0
-    assert data["classified"] == 0
-    assert data["review_queue"] == 0
-    assert data["errors"] == ["Import could not be completed: simulated failure"]
+    assert data["code"] == "STATEMENT_IMPORT_FAILED"
+    assert data["category"] == "local_operation"
+    assert data["retriable"] is True
+    assert data["message"] == "GODFIN could not complete this statement import."
+    assert "simulated failure" not in response.text
 
 
 def test_statement_import_endpoint_returns_409_for_finalized_period(

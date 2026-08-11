@@ -8,6 +8,7 @@ from app.api.v1.endpoints.license import enforce_feature
 from app.core.audit import FinalizedPeriodError
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.errors import StateConflictError
 from app.core.product_depth import (
     decide_transfer_match,
     list_transfer_matches,
@@ -66,6 +67,13 @@ def update_transfer_match(
         )
     except FinalizedPeriodError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise StateConflictError(
+            code="FINALIZED_PERIOD_READ_ONLY",
+            message=(
+                "One of these transactions belongs to a finalized month. "
+                "Reopen the affected month before changing this match."
+            ),
+            hint="Reopen the affected month before changing this match.",
+        ) from exc
     db.commit()
     return {"id": match.id, "status": match.status}

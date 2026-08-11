@@ -155,6 +155,78 @@ def test_invalid_license_response_never_uses_fallback(auth_client, monkeypatch):
     assert calls == [primary]
 
 
+def test_license_server_message_and_unknown_code_are_never_reflected(
+    auth_client,
+    monkeypatch,
+):
+    leaked = "/Users/private/license.db?token=server-secret"
+    monkeypatch.setattr(
+        "app.core.license.httpx.post",
+        lambda *_args, **_kwargs: FakeResponse(
+            {
+                "valid": False,
+                "code": "INJECTED_SERVER_CODE",
+                "message": leaked,
+            },
+            403,
+        ),
+    )
+
+    response = auth_client.post(
+        "/api/v1/license/activate",
+        json={"license_key": TEST_KEY},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "LICENSE_INVALID"
+    assert response.json()["message"] == "This license could not be verified."
+    assert leaked not in response.text
+
+
+def test_license_server_unhashable_code_and_bad_credits_fail_safely(
+    auth_client,
+    monkeypatch,
+):
+    responses = iter(
+        [
+            FakeResponse(
+                {
+                    "valid": False,
+                    "code": ["malformed"],
+                    "message": "/private/license/path",
+                },
+                403,
+            ),
+            FakeResponse(
+                {
+                    "valid": True,
+                    "tier": "max",
+                    "topup_credits": {"unexpected": "object"},
+                }
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "app.core.license.httpx.post",
+        lambda *_args, **_kwargs: next(responses),
+    )
+
+    invalid = auth_client.post(
+        "/api/v1/license/activate",
+        json={"license_key": TEST_KEY},
+    )
+    malformed = auth_client.post(
+        "/api/v1/license/activate",
+        json={"license_key": TEST_KEY},
+    )
+
+    assert invalid.status_code == 403
+    assert invalid.json()["code"] == "LICENSE_INVALID"
+    assert "/private/license/path" not in invalid.text
+    assert malformed.status_code == 502
+    assert malformed.json()["code"] == "VERIFY_INVALID_RESPONSE"
+
+
 def test_paid_features_expire_after_offline_grace(db_session):
     verified_at = datetime(2026, 1, 1, tzinfo=UTC)
     _set(db_session, "license_tier", "max")

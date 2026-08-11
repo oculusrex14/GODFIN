@@ -96,12 +96,12 @@ def _process_message_with_savepoint(
     try:
         with db.begin_nested():
             _process_message(db, message, result)
-    except FinalizedPeriodError as exc:
+    except FinalizedPeriodError:
         result.skipped_finalized_period += 1
         result.source_status = "partial"
         result.retryable = True
         result.error_details.append(
-            f"Message {message.get('id', '?')}: {str(exc)}"
+            f"Message {message.get('id', '?')}: finalized month is read-only"
         )
         logger.info(
             "A Gmail transaction was held because its accounting period is finalized"
@@ -124,10 +124,15 @@ def _process_message_with_savepoint(
     except Exception as exc:
         result.errors += 1
         result.error_details.append(
-            f"Message {message.get('id', '?')}: {str(exc)}"
+            f"Message {message.get('id', '?')}: import could not be completed"
         )
         logger.warning(
-            "A Gmail message could not be imported; the rest of the batch will continue"
+            "A Gmail message could not be imported; the rest of the batch will continue",
+            extra={
+                "operation_id": "gmail_message_import",
+                "error_code": "GMAIL_MESSAGE_IMPORT_FAILED",
+                "cause_type": type(exc).__name__,
+            },
         )
 
 
@@ -251,8 +256,11 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
     # Parse the email body
     try:
         parsed = parse_email_body(body, parser_profile)
-    except Exception as e:
-        logger.warning(f"Email parsing failed for message {message_id}: {e}")
+    except Exception as exc:
+        logger.warning(
+            "Email parsing failed for one Gmail message (%s)",
+            type(exc).__name__,
+        )
         result.skipped_no_match += 1
         return
 
@@ -465,11 +473,22 @@ def run_initial_sync_background() -> None:
 
         logger.info(f"Background initial sync complete: {result.created} created, {result.processed} processed")
 
-    except Exception as e:
-        logger.error(f"Background initial sync failed: {e}")
+    except Exception as exc:
+        logger.exception(
+            "Background initial sync failed",
+            extra={
+                "operation_id": "gmail_initial_sync",
+                "error_code": "GMAIL_SYNC_FAILED",
+                "cause_type": type(exc).__name__,
+            },
+        )
         try:
             _update_setting(db, 'sync_status', 'error')
-            _update_setting(db, 'sync_error', str(e))
+            _update_setting(
+                db,
+                'sync_error',
+                'Gmail sync could not be completed. Check the connection and try again.',
+            )
             db.commit()
         except Exception:
             pass
@@ -552,11 +571,22 @@ def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) 
 
         logger.info(f"Background date-range ingestion complete: {result.created} created, {result.processed} processed")
 
-    except Exception as e:
-        logger.error(f"Background date-range ingestion failed: {e}")
+    except Exception as exc:
+        logger.exception(
+            "Background date-range ingestion failed",
+            extra={
+                "operation_id": "gmail_date_range_ingestion",
+                "error_code": "GMAIL_INGESTION_FAILED",
+                "cause_type": type(exc).__name__,
+            },
+        )
         try:
             _update_setting(db, 'ingest_now_status', 'error')
-            _update_setting(db, 'ingest_now_error', str(e))
+            _update_setting(
+                db,
+                'ingest_now_error',
+                'Gmail import could not be completed. Check the connection and try again.',
+            )
             db.commit()
         except Exception:
             pass
