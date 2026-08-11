@@ -3,8 +3,12 @@ name: Roll back signed update metadata
 on:
   workflow_dispatch:
     inputs:
+      current_tag:
+        description: Currently published signed release tag (for example v1.1.0)
+        required: true
+        type: string
       tag:
-        description: Previously reviewed signed release tag (for example v1.0.0)
+        description: Immediate predecessor signed release tag (for example v1.0.0)
         required: true
         type: string
       confirmation:
@@ -30,19 +34,32 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_RELEASE_BUCKET }}
     steps:
       - uses: actions/checkout@v7
-      - name: Download previously reviewed signed assets
-        run: gh release download "${{ inputs.tag }}" --dir artifacts
-      - name: Verify immutable release checksums
+      - name: Download current and predecessor signed assets
+        run: |
+          gh release download "${{ inputs.current_tag }}" --dir current-artifacts
+          gh release download "${{ inputs.tag }}" --dir target-artifacts
+      - name: Verify both immutable release sets
         shell: bash
-        run: (cd artifacts && sha256sum --check SHA256SUMS.txt)
+        run: |
+          (cd current-artifacts && sha256sum --check SHA256SUMS.txt)
+          (cd target-artifacts && sha256sum --check SHA256SUMS.txt)
+      - name: Require the declared immediate predecessor transition
+        run: |
+          node packaging/verify-rollback-transition.mjs \
+            --current current-artifacts/release-compatibility.json \
+            --target target-artifacts/release-compatibility.json
       - name: Prepare rollback metadata
         run: |
           node packaging/prepare-update-feed.mjs \
-            --input artifacts \
+            --input target-artifacts \
             --output update-feed \
-            --version "${{ inputs.tag }}"
+            --version "${{ inputs.tag }}" \
+            --rollout-percentage 100
       - name: Point update channels to the reviewed rollback release
         run: |
+          aws s3 sync target-artifacts "s3://${R2_BUCKET}/${{ inputs.tag }}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --no-progress
           aws s3 sync update-feed "s3://${R2_BUCKET}/" \
             --endpoint-url "$R2_ENDPOINT" \
             --no-progress

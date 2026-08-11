@@ -53,6 +53,21 @@ and Playwright jobs on the release commit.
 - Auto-update metadata and release artifacts are signed and checksummed.
 - The previous stable version can update to the candidate without losing the
   SQLite database, encryption key, license, or Gmail/LLM credentials.
+- Confirm the draft release includes `release-compatibility.json`, its app
+  version matches the tag, its schema revision matches the binary, and its
+  `previous_release_version` is the reviewed immediate predecessor.
+- Start promotion at 5% using `PUBLISH_STAGED_RELEASE`. Do not advance to 25%,
+  50%, or 100% until the owner has reviewed the clean-machine startup,
+  migration, import, backup, and support/error evidence and enters
+  `ADVANCE_AFTER_HEALTH_REVIEW` in the protected release environment.
+- For rollback, provide both the currently published tag and its declared
+  immediate predecessor. The workflow must reject skipped versions, verify both
+  checksum sets, and publish rollback metadata at 100% only after the desktop
+  has restored the verified pre-upgrade SQLite snapshot.
+- Exercise an interrupted rollback: after snapshot restoration but before
+  installer launch, restart the current build and confirm its preserved current
+  database is restored automatically. Then repeat and allow the predecessor to
+  start, confirming its journal status becomes completed.
 
 ## 5. Functional acceptance
 

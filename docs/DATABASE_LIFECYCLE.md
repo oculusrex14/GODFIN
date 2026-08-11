@@ -124,6 +124,32 @@ not a supported GODFIN operation.
 
 ## Release verification
 
+### Desktop update recovery contract
+
+The Electron updater never installs a downloaded binary merely because the
+application quits. An explicit install first stops the local backend and runs
+the frozen backend in maintenance mode. For an upgrade, maintenance mode:
+
+1. creates and validates a private SQLite snapshot under
+   `backups/update-recovery/snapshots/<from>_to_<to>/`;
+2. records its SHA-256 digest, source schema revision, and exact version pair in
+   an atomically written mode-0600 `update-recovery.json`; and
+3. permits Electron to install only after both operations succeed.
+
+A signed downgrade is limited to the exact immediate predecessor recorded by
+that upgrade entry. Before Electron installs the older binary, maintenance mode
+preserves the current database, verifies the earlier snapshot and digest, and
+atomically restores that snapshot. If installation is interrupted and the
+newer binary starts again, startup restores the preserved current database. If
+the intended older binary starts, it records rollback completion before opening
+SQLite. A missing, corrupt, mismatched, or non-immediate snapshot fails closed.
+
+This contract intentionally makes database migration forward-only. Binary
+rollback is a database restore, not an attempt to make an old ORM understand a
+new schema. Activity recorded after the pre-upgrade snapshot remains preserved
+in the rollback safety backup but is not visible while the older version is
+active.
+
 For each release candidate:
 
 ```bash

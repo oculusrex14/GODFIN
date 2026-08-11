@@ -128,11 +128,24 @@ jobs:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Stage uniquely named release assets
         run: node packaging/stage-release-assets.mjs --input artifacts --output release-assets
+      - name: Bind release to database compatibility and its immediate predecessor
+        shell: bash
+        run: |
+          previous_tag="$(git tag --list 'v*.*.*' --sort=-version:refname \
+            | grep -Fxv "$RELEASE_TAG" | head -n 1 || true)"
+          previous_version="${previous_tag#v}"
+          if [[ -z "$previous_tag" ]]; then previous_version="none"; fi
+          node packaging/create-release-compatibility.mjs \
+            --version "${RELEASE_TAG#v}" \
+            --previous-version "$previous_version" \
+            --output release-assets/release-compatibility.json
       - name: Generate Homebrew cask
         shell: bash
         run: |

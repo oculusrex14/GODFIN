@@ -8,16 +8,25 @@ on:
         required: true
         type: string
       confirmation:
-        description: Type PUBLISH_SIGNED_RELEASE
+        description: Type PUBLISH_STAGED_RELEASE for 5%, or ADVANCE_AFTER_HEALTH_REVIEW for 25–100%
         required: true
         type: string
+      rollout_percentage:
+        description: Percentage of installation cohorts offered this reviewed release
+        required: true
+        default: "5"
+        type: choice
+        options:
+          - "5"
+          - "25"
+          - "50"
+          - "100"
 
 permissions:
   contents: read
 
 jobs:
   promote:
-    if: inputs.confirmation == 'PUBLISH_SIGNED_RELEASE'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release-production
@@ -30,6 +39,14 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_RELEASE_BUCKET }}
     steps:
       - uses: actions/checkout@v7
+      - name: Enforce the staged-rollout stop condition
+        shell: bash
+        run: |
+          if [[ "${{ inputs.rollout_percentage }}" == "5" ]]; then
+            test "${{ inputs.confirmation }}" = "PUBLISH_STAGED_RELEASE"
+          else
+            test "${{ inputs.confirmation }}" = "ADVANCE_AFTER_HEALTH_REVIEW"
+          fi
       - name: Download reviewed draft assets
         run: gh release download "${{ inputs.tag }}" --dir artifacts
       - name: Verify release checksums
@@ -45,12 +62,27 @@ jobs:
           test -f artifacts/macos-x64-latest-mac.yml
           test -f artifacts/windows-x64-latest.yml
           test -f artifacts/linux-x64-latest-linux.yml
+          test -f artifacts/release-compatibility.json
+      - name: Require the same staged tag before advancing its rollout
+        if: inputs.rollout_percentage != '5'
+        shell: bash
+        run: |
+          for channel in darwin-arm64 darwin-x64 win32-x64 linux-x64; do
+            aws s3 cp \
+              "s3://${R2_BUCKET}/${channel}/release-compatibility.json" \
+              "current-${channel}-compatibility.json" \
+              --endpoint-url "$R2_ENDPOINT" --no-progress
+            cmp \
+              "current-${channel}-compatibility.json" \
+              artifacts/release-compatibility.json
+          done
       - name: Prepare architecture-specific update metadata
         run: |
           node packaging/prepare-update-feed.mjs \
             --input artifacts \
             --output update-feed \
-            --version "${{ inputs.tag }}"
+            --version "${{ inputs.tag }}" \
+            --rollout-percentage "${{ inputs.rollout_percentage }}"
       - name: Publish immutable version and current update metadata
         shell: bash
         run: |

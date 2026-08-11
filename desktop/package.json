@@ -17,6 +17,7 @@
     "dist:linux": "npm run build:assets && electron-builder --linux --publish never",
     "verify:package": "node scripts/verify-package.mjs",
     "test:privacy": "node --test scripts/package-*.test.mjs",
+    "test:update": "node --test ../packaging/update-feed.test.mjs",
     "audit:prod": "npm audit --omit=dev"
   },
   "dependencies": {

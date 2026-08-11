@@ -157,6 +157,10 @@ jobs:
         working-directory: desktop
       - run: npm run audit:prod
         working-directory: desktop
+      - run: npm run test:privacy
+        working-directory: desktop
+      - run: npm run test:update
+        working-directory: desktop
       - run: |
           node --check main.cjs
           node --check scripts/after-pack.cjs
@@ -164,4 +168,6 @@ jobs:
           node --check scripts/verify-package.mjs
           node --check ../packaging/stage-release-assets.mjs
           node --check ../packaging/prepare-update-feed.mjs
+          node --check ../packaging/create-release-compatibility.mjs
+          node --check ../packaging/verify-rollback-transition.mjs
         working-directory: desktop

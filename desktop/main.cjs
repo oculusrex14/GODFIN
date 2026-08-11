@@ -135,8 +135,33 @@ function backendEnvironment() {
     GODFIN_GMAIL_TOKEN_FILE: path.join(userData, "gmail_token.json"),
     GODFIN_GMAIL_CLIENT_SECRETS_FILE: path.join(userData, "client_secret.json"),
     GODFIN_MODEL_CACHE_DIR: path.join(userData, "models"),
+    GODFIN_UPDATE_RECOVERY_JOURNAL: path.join(userData, "update-recovery.json"),
+    GODFIN_APP_VERSION: app.getVersion(),
     GODFIN_PACKAGED: app.isPackaged ? "1" : "0",
     MPLCONFIGDIR: path.join(userData, "matplotlib"),
+  };
+}
+
+function backendMaintenanceCommand(currentVersion, targetVersion) {
+  const argumentsForTransition = [
+    "--prepare-update-transition",
+    "--current-version",
+    currentVersion,
+    "--target-version",
+    targetVersion,
+  ];
+  if (app.isPackaged) {
+    const launch = backendCommand();
+    return { ...launch, args: argumentsForTransition };
+  }
+  const projectRoot = path.join(__dirname, "..");
+  const python = process.platform === "win32"
+    ? path.join(projectRoot, "backend", "venv", "Scripts", "python.exe")
+    : path.join(projectRoot, "backend", "venv", "bin", "python");
+  return {
+    command: python,
+    args: [path.join(projectRoot, "backend", "desktop_entry.py"), ...argumentsForTransition],
+    cwd: path.join(projectRoot, "backend"),
   };
 }
 
@@ -250,7 +275,10 @@ function configureUpdater() {
     url: `${updateOrigin.replace(/\/+$/, "")}/${updateChannel}`,
   });
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // A downloaded binary is never installed merely because the app quits. The
+  // explicit install path below first creates the verified database recovery
+  // state required for both upgrade failure and signed rollback.
+  autoUpdater.autoInstallOnAppQuit = false;
   // Release metadata can point to a previously signed immutable version only
   // through the owner-confirmed rollback workflow. Code signing remains the
   // authenticity boundary for every downloaded application.
@@ -258,20 +286,26 @@ function configureUpdater() {
   autoUpdater.on("error", (error) => {
     console.error("Auto-update failed", error);
   });
-  autoUpdater.on("update-downloaded", () => {
+  autoUpdater.on("update-downloaded", (event) => {
+    const currentVersion = autoUpdater.currentVersion.version;
+    const targetVersion = event.version;
+    const isDowngrade = autoUpdater.currentVersion.compare(targetVersion) > 0;
     dialog.showMessageBox(mainWindow, {
-      type: "info",
-      title: "GODFIN update ready",
-      message: "A signed GODFIN update is ready to install.",
-      detail: "Restart now to install it, or it will install when you next quit.",
-      buttons: ["Restart and install", "Later"],
+      type: isDowngrade ? "warning" : "info",
+      title: isDowngrade ? "GODFIN rollback ready" : "GODFIN update ready",
+      message: isDowngrade
+        ? `Restore the verified ${targetVersion} snapshot and roll back?`
+        : `GODFIN ${targetVersion} is ready to install.`,
+      detail: isDowngrade
+        ? "GODFIN will preserve a safety backup of the current database, then restore the database snapshot made before the newer version was installed. Activity added after that snapshot will not appear while the older version is active."
+        : "Before restarting, GODFIN will create and verify a private recovery snapshot. Choosing Later leaves the current version unchanged.",
+      buttons: [isDowngrade ? "Restore snapshot and roll back" : "Back up and install", "Later"],
       defaultId: 0,
       cancelId: 1,
     })
       .then(({ response }) => {
         if (response === 0) {
-          quittingForUpdate = true;
-          autoUpdater.quitAndInstall();
+          void installDownloadedUpdate(currentVersion, targetVersion);
         }
       })
       .catch((error) => {
@@ -284,6 +318,99 @@ function configureUpdater() {
       // expected and must never surface as an unhandled promise rejection.
     });
   }, 10_000);
+}
+
+function stopBackendForUpdate(timeoutMs = 10_000) {
+  if (!backendProcess) return Promise.resolve();
+  const child = backendProcess;
+  return new Promise((resolve, reject) => {
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      if (timedOut) {
+        reject(new Error("The local finance service did not stop safely in time."));
+      } else {
+        resolve();
+      }
+    });
+    child.kill("SIGTERM");
+  });
+}
+
+function runUpdateMaintenance(currentVersion, targetVersion, timeoutMs = 120_000) {
+  const launch = backendMaintenanceCommand(currentVersion, targetVersion);
+  return new Promise((resolve, reject) => {
+    const child = spawn(launch.command, launch.args, {
+      cwd: launch.cwd,
+      env: backendEnvironment(),
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    child.stdout.on("data", (chunk) => {
+      stdout = `${stdout}${chunk}`.slice(-16_384);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-16_384);
+    });
+    const timeout = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    child.once("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error("The local update recovery tool could not start."));
+    });
+    child.once("exit", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (code !== 0) {
+        console.error("Update recovery preparation failed", stderr);
+        reject(new Error("GODFIN could not establish a verified update recovery point."));
+        return;
+      }
+      try {
+        const result = JSON.parse(stdout.trim());
+        if (!result || !["upgrade", "downgrade"].includes(result.direction)) {
+          throw new Error("unknown maintenance result");
+        }
+        resolve(result);
+      } catch {
+        reject(new Error("The local update recovery tool returned an invalid result."));
+      }
+    });
+  });
+}
+
+async function installDownloadedUpdate(currentVersion, targetVersion) {
+  quittingForUpdate = true;
+  try {
+    await stopBackendForUpdate();
+    await runUpdateMaintenance(currentVersion, targetVersion);
+    autoUpdater.quitAndInstall();
+  } catch (error) {
+    quittingForUpdate = false;
+    try {
+      startBackend();
+      await waitForBackend();
+    } catch (restartError) {
+      console.error("Backend restart after update failure failed", restartError);
+    }
+    await dialog.showMessageBox(mainWindow, {
+      type: "error",
+      title: "Update not installed",
+      message: error.message,
+      detail: "Your current GODFIN version and database were kept active. Try again after checking available disk space and backup permissions.",
+      buttons: ["OK"],
+    });
+  }
 }
 
 function stopBackend() {
