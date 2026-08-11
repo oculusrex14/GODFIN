@@ -19,6 +19,7 @@ MODEL_NAME = 'all-MiniLM-L6-v2'
 FASTEMBED_MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
 EMBEDDING_DIM = 384
 SIMILARITY_THRESHOLD = 0.80
+MAX_SETUP_MERCHANTS = 5_000
 EMBEDDING_FORMAT_MAGIC = b"GDFEMB01"
 EMBEDDING_HEADER = struct.Struct("<8sI")
 EMBEDDING_DTYPE = np.dtype("<f4")
@@ -26,6 +27,7 @@ EMBEDDING_DTYPE = np.dtype("<f4")
 # Lazy-loaded model singleton
 _model = None
 _setup_lock = threading.Lock()
+_setup_cancel = threading.Event()
 _setup_status = {
     "status": "idle",
     "progress": 0,
@@ -196,11 +198,30 @@ def _set_setup_status(**updates) -> None:
         _setup_status.update(updates)
 
 
+def cancel_embedding_setup() -> bool:
+    """Request cancellation without exposing worker or filesystem details."""
+    with _setup_lock:
+        if _setup_status["status"] not in {"queued", "downloading", "indexing"}:
+            return False
+        _setup_cancel.set()
+        _setup_status.update(
+            status="cancelling",
+            message="Stopping matching setup safely…",
+        )
+        return True
+
+
 def start_embedding_setup() -> bool:
     """Download the model and index merchants in a background thread."""
     with _setup_lock:
-        if _setup_status["status"] in {"queued", "downloading", "indexing"}:
+        if _setup_status["status"] in {
+            "queued",
+            "downloading",
+            "indexing",
+            "cancelling",
+        }:
             return False
+        _setup_cancel.clear()
         _setup_status.update(
             status="queued",
             progress=1,
@@ -219,11 +240,21 @@ def start_embedding_setup() -> bool:
             )
             if _get_model() is None:
                 raise RuntimeError("The embedding model could not be downloaded.")
+            if _setup_cancel.is_set():
+                _set_setup_status(
+                    status="cancelled",
+                    progress=0,
+                    message="Matching setup was cancelled. No partial index was saved.",
+                )
+                return
 
             db = SessionLocal()
             memories = [
                 memory
-                for memory in db.query(MerchantMemory).all()
+                for memory in db.query(MerchantMemory)
+                .order_by(MerchantMemory.id)
+                .limit(MAX_SETUP_MERCHANTS)
+                .all()
                 if _embedding_needs_refresh(memory)
             ]
             total = len(memories)
@@ -236,6 +267,15 @@ def start_embedding_setup() -> bool:
 
             updated = 0
             for index, memory in enumerate(memories, start=1):
+                if _setup_cancel.is_set():
+                    db.rollback()
+                    _set_setup_status(
+                        status="cancelled",
+                        progress=0,
+                        message="Matching setup was cancelled. No partial index was saved.",
+                        updated=0,
+                    )
+                    return
                 if update_merchant_embedding(db, memory):
                     updated += 1
                 progress = 100 if total == 0 else 25 + int((index / total) * 75)
@@ -245,18 +285,18 @@ def start_embedding_setup() -> bool:
             _set_setup_status(
                 status="ready",
                 progress=100,
-                message="Embedding classification is ready.",
+                message="Similar-description matching is ready.",
                 updated=updated,
                 total=total,
             )
-        except Exception as exc:
+        except Exception:
             if db is not None:
                 db.rollback()
             logger.exception("Embedding setup failed")
             _set_setup_status(
                 status="failed",
                 progress=0,
-                message=str(exc),
+                message="Matching setup could not finish. Check your connection and available disk space, then try again.",
             )
         finally:
             if db is not None:

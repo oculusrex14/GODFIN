@@ -461,3 +461,36 @@ def test_local_ai_download_requires_confirmation(auth_client):
         json={"model": "qwen3:4b", "confirmed": False},
     )
     assert response.status_code == 422
+
+
+def test_local_ai_benchmark_allows_only_one_active_run():
+    from app.core import local_ai
+
+    assert local_ai._benchmark_lock.acquire(blocking=False) is True
+    try:
+        with pytest.raises(RuntimeError, match="already running"):
+            local_ai.benchmark_model("qwen3:4b")
+    finally:
+        local_ai._benchmark_lock.release()
+
+
+def test_local_ai_download_worker_does_not_surface_raw_errors(monkeypatch):
+    from app.core import local_ai
+
+    original = local_ai.get_download_status()
+    monkeypatch.setattr(
+        local_ai.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("/Users/private/financial/ollama")
+        ),
+    )
+    try:
+        local_ai._run_model_pull("/private/bin/ollama", "qwen3:4b", {})
+        status = local_ai.get_download_status()
+        assert status["status"] == "failed"
+        assert status["message"].startswith("Local model setup could not finish")
+        assert "/Users/" not in status["message"]
+        assert "/private/" not in status["message"]
+    finally:
+        local_ai._set_download_state(**original)

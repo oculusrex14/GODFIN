@@ -293,6 +293,67 @@ async function launchOnce(executable, userData) {
     throw new Error("The packaged local API trust boundary is not enforced.");
   }
 
+  const trustedHeaders = {
+    "Content-Type": "application/json",
+    "Origin": "godfin://app",
+    "X-GODFIN-Launch": launchSecret,
+  };
+  const authStatus = await fetch("http://127.0.0.1:5100/api/v1/auth/status", {
+    headers: trustedHeaders,
+  });
+  if (!authStatus.ok) {
+    await terminateTree(child, processTree(child.pid));
+    throw new Error("The packaged authentication status check failed.");
+  }
+  if ((await authStatus.json()).is_first_run) {
+    const setPin = await fetch("http://127.0.0.1:5100/api/v1/auth/set-pin", {
+      method: "POST",
+      headers: trustedHeaders,
+      body: JSON.stringify({ pin: "4826" }),
+    });
+    if (!setPin.ok) {
+      await terminateTree(child, processTree(child.pid));
+      throw new Error("The packaged temporary PIN setup failed.");
+    }
+  }
+  const login = await fetch("http://127.0.0.1:5100/api/v1/auth/verify-pin", {
+    method: "POST",
+    headers: trustedHeaders,
+    body: JSON.stringify({ pin: "4826" }),
+  });
+  const token = login.ok ? (await login.json()).token : null;
+  if (!token) {
+    await terminateTree(child, processTree(child.pid));
+    throw new Error("The packaged temporary login failed.");
+  }
+  const authenticatedHeaders = {
+    ...trustedHeaders,
+    "Authorization": `Bearer ${token}`,
+  };
+  const retiredStatuses = await Promise.all([
+    "/api/v1/system/restart",
+    "/api/v1/system/backfill-embeddings",
+    "/api/v1/system/apply-confidence-decay",
+  ].map(async (route) => (await fetch(`http://127.0.0.1:5100${route}`, {
+    method: "POST",
+    headers: authenticatedHeaders,
+  })).status));
+  const protectedStatuses = await Promise.all([
+    ["/api/v1/system/local-ai/download", { model: "qwen3:4b", confirmed: true }],
+    ["/api/v1/system/local-ai/benchmark", { model: "qwen3:4b", confirmed: true }],
+  ].map(async ([route, body]) => (await fetch(`http://127.0.0.1:5100${route}`, {
+    method: "POST",
+    headers: authenticatedHeaders,
+    body: JSON.stringify(body),
+  })).status));
+  if (
+    retiredStatuses.some((status) => status !== 404)
+    || protectedStatuses.some((status) => status !== 403)
+  ) {
+    await terminateTree(child, processTree(child.pid));
+    throw new Error("The packaged maintenance-action boundary is not enforced.");
+  }
+
   await new Promise((resolve) => setTimeout(resolve, 1_500));
   const tree = processTree(child.pid);
   const memoryMb = tree.reduce((total, row) => total + row.rssKb, 0) / 1024;
@@ -302,6 +363,7 @@ async function launchOnce(executable, userData) {
     memoryMb,
     processCount: tree.length,
     trustBoundaryEnforced: true,
+    maintenanceBoundaryEnforced: true,
   };
 }
 
@@ -345,6 +407,7 @@ try {
     process_count: Math.max(first.processCount, second.processCount),
     database_preserved: secondDatabase.size > 0,
     trust_boundary_enforced: first.trustBoundaryEnforced && second.trustBoundaryEnforced,
+    maintenance_boundary_enforced: first.maintenanceBoundaryEnforced && second.maintenanceBoundaryEnforced,
   }, null, 2));
 } finally {
   await rm(userData, { recursive: true, force: true });

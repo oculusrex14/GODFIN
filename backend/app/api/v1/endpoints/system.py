@@ -3,22 +3,17 @@
 from __future__ import annotations
 
 import logging
-import os
-import subprocess
-import sys
-import threading
-import time
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.config import settings as app_settings
 from app.core.database import get_db
+from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 
 logger = logging.getLogger(__name__)
@@ -30,11 +25,6 @@ class SystemStatus(BaseModel):
     version: str
     backend_url: str
     frontend_url: str
-
-
-class RestartResponse(BaseModel):
-    message: str
-    restarting: bool
 
 
 class DiagnosticApplicationStatus(BaseModel):
@@ -63,6 +53,22 @@ class SupportDiagnostics(BaseModel):
 class LocalModelAction(BaseModel):
     model: str = Field(min_length=3, max_length=129)
     confirmed: bool = False
+    current_pin: str | None = Field(
+        default=None,
+        min_length=4,
+        max_length=8,
+        pattern=r"^\d+$",
+    )
+
+
+class MaintenanceApproval(BaseModel):
+    confirmed: bool = False
+    current_pin: str | None = Field(
+        default=None,
+        min_length=4,
+        max_length=8,
+        pattern=r"^\d+$",
+    )
 
 
 class LocalAIChoice(BaseModel):
@@ -153,86 +159,6 @@ def download_support_diagnostics(
     return SupportDiagnostics(**payload)
 
 
-@router.post("/restart", response_model=RestartResponse)
-def restart_backend(
-    _user: bool = Depends(get_current_user),
-):
-    """
-    Restart the backend server.
-    Triggers a clean shutdown and restart via external script.
-    """
-    try:
-        # Get the backend directory (4 levels up from this file)
-        current_file = Path(__file__).resolve()
-        backend_dir = current_file.parents[4]
-        restart_script = backend_dir / "restart.sh"
-        log_file = backend_dir / "logs" / "restart.log"
-
-        if not restart_script.exists():
-            logger.error(f"Restart script not found: {restart_script}")
-            return RestartResponse(
-                message=f"Restart script not found: {restart_script}",
-                restarting=False,
-            )
-
-        # Make sure script is executable
-        restart_script.chmod(0o755)
-
-        def delayed_restart():
-            """Execute restart after response is sent."""
-            time.sleep(1)  # Give time for response to be sent
-            try:
-                # Start the restart script, keeping stdout/stderr connected
-                # so logs appear in the original terminal
-                subprocess.Popen(
-                    [str(restart_script)],
-                    stdout=None,  # Inherit parent's stdout
-                    stderr=None,  # Inherit parent's stderr
-                    stdin=subprocess.DEVNULL,
-                    cwd=str(backend_dir),
-                )
-                logger.info("Restart script launched successfully")
-            except Exception as e:
-                logger.error(f"Failed to launch restart script: {e}")
-
-        # Start restart in background thread
-        thread = threading.Thread(target=delayed_restart, daemon=True)
-        thread.start()
-
-        logger.info("Backend restart initiated")
-        return RestartResponse(
-            message="Backend restart initiated. The server will restart in 3-5 seconds. Please wait before refreshing.",
-            restarting=True,
-        )
-    except Exception as e:
-        logger.error(f"Failed to initiate restart: {e}")
-        return RestartResponse(
-            message=f"Failed to restart: {str(e)}",
-            restarting=False,
-        )
-
-
-@router.post("/backfill-embeddings")
-def trigger_backfill_embeddings(
-    db: Session = Depends(get_db),
-    _user: bool = Depends(get_current_user),
-):
-    """Backfill embeddings for all merchants without embeddings."""
-    from app.api.v1.endpoints.license import enforce_feature
-
-    enforce_feature(db, "ai_classification")
-    from app.core.embedding_service import backfill_embeddings
-
-    updated = backfill_embeddings(db)
-    db.commit()
-
-    return {
-        "success": True,
-        "updated": updated,
-        "message": f"Backfilled embeddings for {updated} merchants",
-    }
-
-
 @router.get("/embeddings/status")
 def embedding_status(
     db: Session = Depends(get_db),
@@ -264,6 +190,8 @@ def embedding_status(
 
 @router.post("/embeddings/enable", status_code=202)
 def enable_embeddings(
+    request: Request,
+    body: MaintenanceApproval = Body(default=MaintenanceApproval()),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -271,6 +199,18 @@ def enable_embeddings(
     from app.core.embedding_service import get_embedding_setup_status, start_embedding_setup
 
     enforce_feature(db, "ai_classification")
+    if not body.confirmed:
+        raise HTTPException(
+            status_code=422,
+            detail="Explicit model-download approval is required",
+        )
+    require_current_pin(
+        db,
+        body.current_pin,
+        client_ip_from_request(request),
+        action="enable_embedding_classification",
+        missing_detail="Enter your current PIN to download and enable this helper",
+    )
     setting = db.query(AppSetting).filter_by(key="enable_embeddings").first()
     if setting is None:
         setting = AppSetting(key="enable_embeddings", value="true")
@@ -284,6 +224,39 @@ def enable_embeddings(
         "enabled": True,
         "started": started,
         **get_embedding_setup_status(),
+    }
+
+
+@router.post("/embeddings/disable")
+def disable_embeddings(
+    request: Request,
+    body: MaintenanceApproval = Body(default=MaintenanceApproval()),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Disable optional matching and cancel an in-flight setup safely."""
+    from app.core.embedding_service import cancel_embedding_setup
+
+    require_current_pin(
+        db,
+        body.current_pin,
+        client_ip_from_request(request),
+        action="disable_embedding_classification",
+        missing_detail="Enter your current PIN to disable this helper",
+    )
+    setting = db.query(AppSetting).filter_by(key="enable_embeddings").first()
+    if setting is None:
+        setting = AppSetting(key="enable_embeddings", value="false")
+        db.add(setting)
+    else:
+        setting.value = "false"
+    db.commit()
+    cancelled = cancel_embedding_setup()
+    return {
+        "enabled": False,
+        "cancel_requested": cancelled,
+        "status": "disabled",
+        "message": "Similar-description matching is disabled.",
     }
 
 
@@ -329,10 +302,24 @@ def local_ai_download_status(
 @router.post("/local-ai/download", status_code=202)
 def local_ai_download(
     body: LocalModelAction,
+    request: Request,
+    db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     from app.core.local_ai import start_model_pull
 
+    if not body.confirmed:
+        raise HTTPException(
+            status_code=422,
+            detail="Explicit model-download approval is required",
+        )
+    require_current_pin(
+        db,
+        body.current_pin,
+        client_ip_from_request(request),
+        action="download_local_ai_model",
+        missing_detail="Enter your current PIN to start this model download",
+    )
     try:
         return start_model_pull(body.model, body.confirmed)
     except ValueError as exc:
@@ -353,6 +340,8 @@ def cancel_local_ai_download(
 @router.post("/local-ai/benchmark")
 def local_ai_benchmark(
     body: LocalModelAction,
+    request: Request,
+    db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     from app.core.local_ai import benchmark_model
@@ -362,32 +351,28 @@ def local_ai_benchmark(
             status_code=422,
             detail="Explicit benchmark approval is required",
         )
+    require_current_pin(
+        db,
+        body.current_pin,
+        client_ip_from_request(request),
+        action="benchmark_local_ai_model",
+        missing_detail="Enter your current PIN to run this benchmark",
+    )
     try:
         return benchmark_model(body.model)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="A local benchmark is already running. Wait for it to finish and try again.",
+        ) from exc
     except Exception as exc:
+        logger.warning("Local benchmark failed: %s", type(exc).__name__)
         raise HTTPException(
             status_code=503,
-            detail=f"Local benchmark failed: {exc}",
+            detail="The local benchmark could not finish. Check that Ollama is running and try again.",
         ) from exc
-
-
-@router.post("/apply-confidence-decay")
-def trigger_confidence_decay(
-    db: Session = Depends(get_db),
-    _user: bool = Depends(get_current_user),
-):
-    """Apply confidence decay to merchants not seen in 6+ months."""
-    from app.core.confidence_decay import apply_confidence_decay
-
-    updated = apply_confidence_decay(db)
-
-    return {
-        "success": True,
-        "updated": updated,
-        "message": f"Applied confidence decay to {updated} merchants",
-    }
 
 
 @router.get("/stale-merchants")

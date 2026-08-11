@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import hmac
 import json
+import logging
 import math
 import os
 import platform
@@ -23,6 +24,9 @@ from typing import Any
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+
+logger = logging.getLogger(__name__)
 
 
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
@@ -92,6 +96,7 @@ BUILTIN_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 _download_lock = threading.Lock()
+_benchmark_lock = threading.Lock()
 _download_process: subprocess.Popen[str] | None = None
 _download_state: dict[str, Any] = {
     "status": "idle",
@@ -465,39 +470,44 @@ def device_profile() -> dict[str, Any]:
 
 
 def benchmark_model(model: str) -> dict[str, Any]:
-    verification = verify_installed_model(model, remove_on_mismatch=True)
-    if not verification["verified"]:
-        raise ValueError(verification["message"])
-    started = time.monotonic()
-    response = httpx.post(
-        f"{OLLAMA_BASE_URL}/api/generate",
-        json={
+    if not _benchmark_lock.acquire(blocking=False):
+        raise RuntimeError("A local benchmark is already running")
+    try:
+        verification = verify_installed_model(model, remove_on_mismatch=True)
+        if not verification["verified"]:
+            raise ValueError(verification["message"])
+        started = time.monotonic()
+        response = httpx.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model": model,
+                "prompt": BENCHMARK_PROMPT,
+                "stream": False,
+                "options": {"num_ctx": 8192, "temperature": 0},
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        elapsed = max(0.001, time.monotonic() - started)
+        eval_count = int(payload.get("eval_count") or 0)
+        eval_duration = int(payload.get("eval_duration") or 0)
+        tokens_per_second = (
+            eval_count / (eval_duration / 1_000_000_000)
+            if eval_count and eval_duration
+            else eval_count / elapsed
+        )
+        return {
+            "success": True,
             "model": model,
-            "prompt": BENCHMARK_PROMPT,
-            "stream": False,
-            "options": {"num_ctx": 8192, "temperature": 0},
-        },
-        timeout=120,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    elapsed = max(0.001, time.monotonic() - started)
-    eval_count = int(payload.get("eval_count") or 0)
-    eval_duration = int(payload.get("eval_duration") or 0)
-    tokens_per_second = (
-        eval_count / (eval_duration / 1_000_000_000)
-        if eval_count and eval_duration
-        else eval_count / elapsed
-    )
-    return {
-        "success": True,
-        "model": model,
-        "tokens_per_second": round(tokens_per_second, 1),
-        "elapsed_seconds": round(elapsed, 2),
-        "response_preview": str(payload.get("response") or "")[:300],
-        "prompt_kind": "fixed_godfin_finance_explanation",
-        "authoritative_totals": False,
-    }
+            "tokens_per_second": round(tokens_per_second, 1),
+            "elapsed_seconds": round(elapsed, 2),
+            "response_preview": str(payload.get("response") or "")[:300],
+            "prompt_kind": "fixed_godfin_finance_explanation",
+            "authoritative_totals": False,
+        }
+    finally:
+        _benchmark_lock.release()
 
 
 def _model_digest(model: str) -> str | None:
@@ -707,14 +717,22 @@ def _run_model_pull(
                     accepted_at=accepted_at,
                 )
         else:
+            logger.warning("Ollama model pull exited with code %s", return_code)
             _set_download_state(
                 status="failed",
-                message=(output_tail.strip() or "Ollama model download failed.")[-400:],
+                message=(
+                    "Ollama could not download the selected model. Check your "
+                    "connection, available disk space, and Ollama status, then try again."
+                ),
             )
-    except Exception as exc:
+    except Exception:
+        logger.exception("Local model setup failed")
         _set_download_state(
             status="failed",
-            message=f"Local model setup failed safely: {str(exc)[:240]}",
+            message=(
+                "Local model setup could not finish. Check that Ollama is running "
+                "and try again."
+            ),
             digest_verified=False,
         )
     finally:

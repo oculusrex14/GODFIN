@@ -861,16 +861,22 @@ export async function downloadSupportDiagnostics() {
   URL.revokeObjectURL(url);
 }
 
-export function restartBackend() {
-  return apiFetch('/system/restart', { method: 'POST' });
-}
-
 export function fetchEmbeddingStatus() {
   return apiFetch('/system/embeddings/status');
 }
 
-export function enableEmbeddings() {
-  return apiFetch('/system/embeddings/enable', { method: 'POST' });
+export function enableEmbeddings(currentPin) {
+  return apiFetch('/system/embeddings/enable', {
+    method: 'POST',
+    body: JSON.stringify({ current_pin: currentPin, confirmed: true }),
+  });
+}
+
+export function disableEmbeddings(currentPin) {
+  return apiFetch('/system/embeddings/disable', {
+    method: 'POST',
+    body: JSON.stringify({ current_pin: currentPin, confirmed: true }),
+  });
 }
 
 export function fetchFeatureFlags() {
@@ -1062,10 +1068,10 @@ export function fetchLocalAIDownload() {
   return apiFetch('/system/local-ai/download');
 }
 
-export function downloadLocalAIModel(model) {
+export function downloadLocalAIModel({ model, currentPin }) {
   return apiFetch('/system/local-ai/download', {
     method: 'POST',
-    body: JSON.stringify({ model, confirmed: true }),
+    body: JSON.stringify({ model, current_pin: currentPin, confirmed: true }),
   });
 }
 
@@ -1073,10 +1079,10 @@ export function cancelLocalAIDownload() {
   return apiFetch('/system/local-ai/download/cancel', { method: 'POST' });
 }
 
-export function benchmarkLocalAI(model) {
+export function benchmarkLocalAI({ model, currentPin }) {
   return apiFetch('/system/local-ai/benchmark', {
     method: 'POST',
-    body: JSON.stringify({ model, confirmed: true }),
+    body: JSON.stringify({ model, current_pin: currentPin, confirmed: true }),
   });
 }
 

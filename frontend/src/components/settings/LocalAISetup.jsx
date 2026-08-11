@@ -22,7 +22,9 @@ import {
   fetchLocalAIDownload,
   fetchLocalAIProfile,
 } from '../../api/client';
+import PinInput from '../PinInput';
 import { openExternalUrl } from '../../config/external';
+import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 
 const CHOICES = [
@@ -60,9 +62,12 @@ function Detail({ icon: Icon, label, value }) {
 
 export default function LocalAISetup({ onChoiceComplete, compact = false }) {
   const queryClient = useQueryClient();
+  const { pinLength } = useAuth();
   const { addToast } = useToast();
-  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalOpen, setApprovalOpen] = useState(null);
   const [approved, setApproved] = useState(false);
+  const [currentPin, setCurrentPin] = useState('');
+  const [actionError, setActionError] = useState('');
   const [benchmark, setBenchmark] = useState(null);
 
   const { data: profile, isLoading } = useQuery({
@@ -88,11 +93,14 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
   const downloadMutation = useMutation({
     mutationFn: downloadLocalAIModel,
     onSuccess: () => {
-      setApprovalOpen(false);
+      setApprovalOpen(null);
       setApproved(false);
+      setCurrentPin('');
+      setActionError('');
       queryClient.invalidateQueries({ queryKey: ['localAIDownload'] });
       addToast('Local model download started. You can leave this screen.', 'info');
     },
+    onError: error => setActionError(error?.message || 'The download could not be started.'),
   });
   const cancelMutation = useMutation({
     mutationFn: cancelLocalAIDownload,
@@ -100,7 +108,14 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
   });
   const benchmarkMutation = useMutation({
     mutationFn: benchmarkLocalAI,
-    onSuccess: result => setBenchmark(result),
+    onSuccess: result => {
+      setBenchmark(result);
+      setApprovalOpen(null);
+      setApproved(false);
+      setCurrentPin('');
+      setActionError('');
+    },
+    onError: error => setActionError(error?.message || 'The benchmark could not be completed.'),
   });
 
   const recommendation = profile?.recommendation;
@@ -113,6 +128,20 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
 
   function selectChoice(choice) {
     choiceMutation.mutate(choice);
+  }
+
+  function openApproval(action) {
+    setApprovalOpen(action);
+    setApproved(false);
+    setCurrentPin('');
+    setActionError('');
+  }
+
+  function closeApproval() {
+    setApprovalOpen(null);
+    setApproved(false);
+    setCurrentPin('');
+    setActionError('');
   }
 
   if (isLoading) {
@@ -257,7 +286,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
             {model && registryVerified && profile?.ollama?.installed && !downloading && !installedModelVerified && (
               <button
                 type="button"
-                onClick={() => setApprovalOpen(true)}
+                onClick={() => openApproval('download')}
                 className="min-h-11 px-4 rounded-xl bg-cyan-400/10 border border-cyan-300/20 text-cyan-100/75 text-sm flex items-center gap-2"
               >
                 <Download size={15} />
@@ -267,7 +296,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
             {downloadStatus?.status === 'complete' && installedModelVerified && (
               <button
                 type="button"
-                onClick={() => benchmarkMutation.mutate(downloadStatus.model)}
+                onClick={() => openApproval('benchmark')}
                 disabled={benchmarkMutation.isPending}
                 className="min-h-11 px-4 rounded-xl bg-white/[0.07] border border-white/[0.12] text-white/65 text-sm flex items-center gap-2"
               >
@@ -305,15 +334,21 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
             aria-labelledby="local-model-approval-title"
             className="w-full max-w-lg rounded-2xl border border-white/[0.14] bg-[#102342] p-5 shadow-2xl"
           >
-            <h3 id="local-model-approval-title" className="text-white/85 text-lg">Approve local model download</h3>
+            <h3 id="local-model-approval-title" className="text-white/85 text-lg">
+              {approvalOpen === 'download' ? 'Approve local model download' : 'Approve local model benchmark'}
+            </h3>
             <p className="mt-2 text-white/40 text-sm leading-relaxed">
-              Ollama will download {recommendation.label} ({recommendation.size_gb} GB). This can use significant bandwidth and disk space.
+              {approvalOpen === 'download'
+                ? `Ollama will download ${recommendation.label} (${recommendation.size_gb} GB). This can use significant bandwidth and disk space.`
+                : 'GODFIN will send one short finance prompt to the selected model on this computer and measure its response speed.'}
             </p>
-            <div className="mt-3 rounded-xl border border-white/[0.1] bg-black/10 p-3 text-white/40 text-xs space-y-1">
-              <p>Signed model list: version {profile.registry.registry_version}</p>
-              <p className="font-mono break-all">Expected digest: {recommendation.expected_digest}</p>
-              <p>GODFIN will remove the model if the downloaded digest does not match.</p>
-            </div>
+            {approvalOpen === 'download' && (
+              <div className="mt-3 rounded-xl border border-white/[0.1] bg-black/10 p-3 text-white/40 text-xs space-y-1">
+                <p>Signed model list: version {profile.registry.registry_version}</p>
+                <p className="font-mono break-all">Expected digest: {recommendation.expected_digest}</p>
+                <p>GODFIN will remove the model if the downloaded digest does not match.</p>
+              </div>
+            )}
             <label className="mt-4 flex items-start gap-3 rounded-xl border border-white/[0.1] p-3 text-white/55 text-sm">
               <input
                 type="checkbox"
@@ -321,26 +356,54 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
                 onChange={event => setApproved(event.target.checked)}
                 className="mt-0.5"
               />
-              I approve this download and understand I can cancel it.
+              {approvalOpen === 'download'
+                ? 'I approve this download and understand I can cancel it.'
+                : 'I approve this short local benchmark.'}
             </label>
+            <div className="mt-4">
+              <p className="mb-2 text-center text-white/45 text-xs">Enter your current PIN to continue.</p>
+              <div className="flex justify-center">
+                <PinInput
+                  minLength={4}
+                  maxLength={pinLength || 8}
+                  displayLength={pinLength}
+                  value={currentPin}
+                  onChange={setCurrentPin}
+                  autoSubmit={false}
+                  disabled={downloadMutation.isPending || benchmarkMutation.isPending}
+                  label="Current PIN"
+                />
+              </div>
+            </div>
+            {actionError && (
+              <p role="alert" className="mt-3 text-center text-rose-200/75 text-xs">{actionError}</p>
+            )}
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  setApprovalOpen(false);
-                  setApproved(false);
-                }}
+                onClick={closeApproval}
                 className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] text-sm"
               >
                 Not now
               </button>
               <button
                 type="button"
-                disabled={!approved || downloadMutation.isPending}
-                onClick={() => downloadMutation.mutate(model)}
+                disabled={!approved || currentPin.length < 4 || downloadMutation.isPending || benchmarkMutation.isPending}
+                onClick={() => {
+                  const selectedModel = approvalOpen === 'benchmark'
+                    ? downloadStatus.model
+                    : model;
+                  const payload = { model: selectedModel, currentPin };
+                  if (approvalOpen === 'download') downloadMutation.mutate(payload);
+                  else benchmarkMutation.mutate(payload);
+                }}
                 className="min-h-11 px-4 rounded-xl bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 disabled:opacity-40 text-sm"
               >
-                Download model
+                {downloadMutation.isPending || benchmarkMutation.isPending
+                  ? 'Working…'
+                  : approvalOpen === 'download'
+                    ? 'Download model'
+                    : 'Run benchmark'}
               </button>
             </div>
           </div>

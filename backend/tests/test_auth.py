@@ -347,6 +347,10 @@ def test_every_sensitive_pin_call_is_action_labelled():
     assert actions == {
         "change_pin",
         "delete_gmail_data",
+        "disable_embedding_classification",
+        "download_local_ai_model",
+        "benchmark_local_ai_model",
+        "enable_embedding_classification",
         "enable_developer_mode",
         "enable_network_access",
         "reset_all_data",

@@ -9,9 +9,9 @@ import {
 } from 'lucide-react';
 import {
   fetchSettings, fetchSettingsHealth, updateNetworkAccess, updateDeveloperMode, fetchDeveloperMode, triggerBackup, fetchBackups,
-  downloadCSV, downloadSupportDiagnostics, fetchSystemStatus, restartBackend,
+  downloadCSV, downloadSupportDiagnostics, fetchSystemStatus,
   createRule, deleteRule, resetData,
-  fetchEmbeddingStatus, enableEmbeddings,
+  fetchEmbeddingStatus, enableEmbeddings, disableEmbeddings,
   fetchOnboardingStatus, updateOnboardingStatus,
 } from '../api/client';
 import { GlassSection } from '../components/GlassSection';
@@ -25,6 +25,7 @@ import LicenseSettings from '../components/settings/LicenseSettings';
 import AccountSettings from '../components/settings/AccountSettings';
 import DataContributionSettings from '../components/settings/DataContributionSettings';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useLocation } from '../router';
 import { activateGuidedTour } from '../components/GuidedTour';
@@ -98,19 +99,20 @@ function HealthItem({ label, health }) {
 
 export default function Settings() {
   const { navigate } = useLocation();
+  const { pinLength } = useAuth();
   const queryClient = useQueryClient();
   const { addToast: showToast } = useToast();
   const [csvMonth, setCsvMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
-  const [showRestart, setShowRestart] = useState(false);
-  const [restartStatus, setRestartStatus] = useState(null);
   const [pendingSensitiveSetting, setPendingSensitiveSetting] = useState(null);
+  const [sensitivePin, setSensitivePin] = useState('');
   const [pinError, setPinError] = useState('');
   const [showAddRule, setShowAddRule] = useState(false);
   const [ruleForm, setRuleForm] = useState({ rule_type: 'contains', pattern: '', category: '', subcategory: '', priority: 100 });
   const [showResetPin, setShowResetPin] = useState(false);
+  const [resetPin, setResetPin] = useState('');
   const [resetPinError, setResetPinError] = useState('');
   const { confirm, ConfirmDialog: ConfirmDialogComponent } = useConfirm();
 
@@ -172,19 +174,29 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ['settingsHealth'] });
       queryClient.invalidateQueries({ queryKey: ['embeddingStatus'] });
       if (data?.restart_required) {
-        setShowRestart(true);
-        showToast('Restart GODFIN to apply the network-access change.', 'info');
+        showToast('Quit and reopen GODFIN to apply the network-access change.', 'info');
       }
     },
   });
 
   const enableEmbeddingsMutation = useMutation({
-    mutationFn: enableEmbeddings,
-    onSuccess: () => {
+    mutationFn: ({ enabled, currentPin }) => (
+      enabled ? enableEmbeddings(currentPin) : disableEmbeddings(currentPin)
+    ),
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       queryClient.invalidateQueries({ queryKey: ['embeddingStatus'] });
-      showToast('Embedding model setup started.', 'info');
+      setPendingSensitiveSetting(null);
+      setSensitivePin('');
+      setPinError('');
+      showToast(
+        data.enabled
+          ? (data.started ? 'Similar-description matching setup started.' : 'Matching setup is already running.')
+          : 'Similar-description matching is disabled.',
+        'info',
+      );
     },
+    onError: error => setPinError(error?.message || 'This change could not be completed.'),
   });
 
   const learningMutation = useMutation({
@@ -206,30 +218,6 @@ export default function Settings() {
     mutationFn: downloadSupportDiagnostics,
     onSuccess: () => showToast('Support report downloaded.'),
     onError: (err) => showToast(err?.message || 'Support report could not be created.', 'error'),
-  });
-
-  const restartMutation = useMutation({
-    mutationFn: restartBackend,
-    onSuccess: (data) => {
-      setRestartStatus(data.message + ' Waiting for backend...');
-      setShowRestart(false);
-      let attempts = 0;
-      const maxAttempts = 30;
-      const pollInterval = setInterval(async () => {
-        attempts++;
-        try {
-          await fetchSystemStatus();
-          clearInterval(pollInterval);
-          setRestartStatus('Backend is back online! Reloading...');
-          setTimeout(() => window.location.reload(), 1000);
-        } catch {
-          if (attempts >= maxAttempts) {
-            clearInterval(pollInterval);
-            setRestartStatus('Backend restart timeout. Please refresh manually.');
-          }
-        }
-      }, 1000);
-    },
   });
 
   const createRuleMutation = useMutation({
@@ -272,20 +260,33 @@ export default function Settings() {
   const handleDevToggle = async (enable) => {
     if (enable && !devEnabled) {
       setPendingSensitiveSetting({ key: 'developer_mode', enabled: true });
+      setSensitivePin('');
       setPinError('');
     } else {
       updateMutation.mutate({ key: 'developer_mode', enabled: false });
     }
   };
 
-  const handlePinVerified = async (pin) => {
+  const handlePinVerified = async () => {
     if (!pendingSensitiveSetting) return;
+    if (sensitivePin.length < 4) {
+      setPinError('Enter your current PIN.');
+      return;
+    }
     try {
+      if (pendingSensitiveSetting.key === 'enable_embeddings') {
+        await enableEmbeddingsMutation.mutateAsync({
+          enabled: pendingSensitiveSetting.enabled,
+          currentPin: sensitivePin,
+        });
+        return;
+      }
       await updateMutation.mutateAsync({
         ...pendingSensitiveSetting,
-        currentPin: pin,
+        currentPin: sensitivePin,
       });
       setPendingSensitiveSetting(null);
+      setSensitivePin('');
       setPinError('');
     } catch (error) {
       setPinError(error?.message || 'Invalid PIN');
@@ -295,6 +296,7 @@ export default function Settings() {
   const handleNetworkToggle = (enable) => {
     if (enable) {
       setPendingSensitiveSetting({ key: 'allow_network_access', enabled: true });
+      setSensitivePin('');
       setPinError('');
       return;
     }
@@ -311,12 +313,17 @@ export default function Settings() {
     });
     if (confirmed) {
       setShowResetPin(true);
+      setResetPin('');
       setResetPinError('');
     }
   };
 
-  const handleResetPinVerified = (pin) => {
-    resetDataMutation.mutate({ pin });
+  const handleResetPinVerified = () => {
+    if (resetPin.length < 4) {
+      setResetPinError('Enter your current PIN.');
+      return;
+    }
+    resetDataMutation.mutate({ pin: resetPin });
   };
 
   return (
@@ -476,15 +483,18 @@ export default function Settings() {
                       confirmLabel: 'Download and enable',
                       cancelLabel: 'Not now',
                     });
-                    if (approved) enableEmbeddingsMutation.mutate();
+                    if (approved) {
+                      setSensitivePin('');
+                      setPinError('');
+                      setPendingSensitiveSetting({ key: 'enable_embeddings', enabled: true });
+                    }
                   } else {
-                    updateMutation.mutate({ key: 'enable_embeddings', value: 'false' });
+                    setSensitivePin('');
+                    setPinError('');
+                    setPendingSensitiveSetting({ key: 'enable_embeddings', enabled: false });
                   }
                 }}
-                disabled={
-                  enableEmbeddingsMutation.isPending ||
-                  ['queued', 'downloading', 'indexing'].includes(embeddingStatus?.status)
-                }
+                disabled={enableEmbeddingsMutation.isPending}
               />
             </div>
             {embeddingStatus?.enabled && (
@@ -777,46 +787,8 @@ export default function Settings() {
                 {diagnosticsMutation.isPending ? 'Preparing…' : 'Download'}
               </GlassButton>
             </div>
-            <div className="pt-4 border-t border-white/[0.06]">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-white/70 text-[0.85rem]">Restart Backend</div>
-                  <div className="text-white/25 text-[0.7rem]">Restart the backend server</div>
-                </div>
-                <GlassButton variant="secondary" icon={<Server size={14} />} onClick={() => setShowRestart(true)}>
-                  Restart
-                </GlassButton>
-              </div>
-              {showRestart && (
-                <div className="mt-4 p-4 bg-amber-400/[0.06] border border-amber-400/[0.12] rounded-[14px]">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle size={16} className="text-amber-400/70 shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <div className="text-amber-400/80 text-[0.85rem]" style={{ fontWeight: 500 }}>Confirm Restart</div>
-                      <div className="text-amber-400/40 text-[0.7rem] mt-1">This will restart the backend server. All active operations will be interrupted.</div>
-                      <div className="flex items-center gap-2 mt-3">
-                        <button onClick={() => setShowRestart(false)} className="px-3 py-1.5 text-[0.7rem] text-white/40 hover:text-white/70 transition-colors">Cancel</button>
-                        <button
-                          onClick={() => restartMutation.mutate()}
-                          disabled={restartMutation.isPending}
-                          className="px-3 py-1.5 bg-amber-500/20 text-amber-300/80 text-[0.7rem] rounded-[8px] hover:bg-amber-500/30 transition-colors border border-amber-400/20"
-                        >
-                          {restartMutation.isPending ? 'Restarting...' : 'Confirm Restart'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {restartStatus && (
-                <div className={`mt-4 p-3 rounded-[12px] text-[0.8rem] ${
-                  restartStatus.startsWith('Restart failed')
-                    ? 'bg-rose-500/[0.08] border border-rose-400/[0.15] text-rose-400/80'
-                    : 'bg-emerald-500/[0.08] border border-emerald-400/[0.15] text-emerald-400/80'
-                }`}>
-                  {restartStatus}
-                </div>
-              )}
+            <div className="pt-4 border-t border-white/[0.06] rounded-xl text-white/30 text-[0.72rem] leading-relaxed">
+              GODFIN does not run restart scripts from the settings screen. If a setting says a restart is required, quit and reopen the desktop app normally.
             </div>
           </div>
         </GlassSection>
@@ -850,7 +822,7 @@ export default function Settings() {
       {/* PIN prompt for security-sensitive settings */}
       <AnimatePresence>
         {pendingSensitiveSetting && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setPendingSensitiveSetting(null)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setPendingSensitiveSetting(null); setSensitivePin(''); }}>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -863,19 +835,32 @@ export default function Settings() {
                 <h3 className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>
                   {pendingSensitiveSetting.key === 'developer_mode'
                     ? 'Enter PIN to enable Developer Mode'
-                    : 'Enter PIN to allow network access'}
+                    : pendingSensitiveSetting.key === 'allow_network_access'
+                      ? 'Enter PIN to allow network access'
+                      : pendingSensitiveSetting.enabled
+                        ? 'Enter PIN to enable matching'
+                        : 'Enter PIN to disable matching'}
                 </h3>
                 <button
                   type="button"
                   aria-label="Close security confirmation"
-                  onClick={() => setPendingSensitiveSetting(null)}
+                  onClick={() => { setPendingSensitiveSetting(null); setSensitivePin(''); }}
                   className="text-white/30 hover:text-white/60"
                 >
                   <X size={18} />
                 </button>
               </div>
               <div className="flex justify-center">
-                <PinInput onComplete={handlePinVerified} />
+                <PinInput
+                  minLength={4}
+                  maxLength={pinLength || 8}
+                  displayLength={pinLength}
+                  value={sensitivePin}
+                  onChange={setSensitivePin}
+                  autoSubmit={false}
+                  disabled={updateMutation.isPending || enableEmbeddingsMutation.isPending}
+                  label="Current PIN"
+                />
               </div>
               {pendingSensitiveSetting.key === 'allow_network_access' && (
                 <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-400/[0.06] p-3 text-center text-[0.7rem] leading-relaxed text-amber-100/60">
@@ -884,6 +869,23 @@ export default function Settings() {
                 </p>
               )}
               {pinError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3">{pinError}</p>}
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setPendingSensitiveSetting(null); setSensitivePin(''); }}
+                  className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePinVerified}
+                  disabled={sensitivePin.length < 4 || updateMutation.isPending || enableEmbeddingsMutation.isPending}
+                  className="min-h-11 px-4 rounded-xl bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 disabled:opacity-40 text-sm"
+                >
+                  {updateMutation.isPending || enableEmbeddingsMutation.isPending ? 'Checking…' : 'Continue'}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -892,7 +894,7 @@ export default function Settings() {
       {/* PIN Prompt Modal for Data Reset */}
       <AnimatePresence>
         {showResetPin && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowResetPin(false)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setShowResetPin(false); setResetPin(''); }}>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -903,12 +905,38 @@ export default function Settings() {
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>Enter PIN to Reset Data</h3>
-                <button onClick={() => setShowResetPin(false)} className="text-white/30 hover:text-white/60"><X size={18} /></button>
+                <button onClick={() => { setShowResetPin(false); setResetPin(''); }} className="text-white/30 hover:text-white/60"><X size={18} /></button>
               </div>
               <div className="flex justify-center">
-                <PinInput onComplete={handleResetPinVerified} />
+                <PinInput
+                  minLength={4}
+                  maxLength={pinLength || 8}
+                  displayLength={pinLength}
+                  value={resetPin}
+                  onChange={setResetPin}
+                  autoSubmit={false}
+                  disabled={resetDataMutation.isPending}
+                  label="Current PIN"
+                />
               </div>
               {resetPinError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3">{resetPinError}</p>}
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowResetPin(false); setResetPin(''); }}
+                  className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetPinVerified}
+                  disabled={resetPin.length < 4 || resetDataMutation.isPending}
+                  className="min-h-11 px-4 rounded-xl bg-rose-400/15 border border-rose-300/20 text-rose-100/80 disabled:opacity-40 text-sm"
+                >
+                  {resetDataMutation.isPending ? 'Checking…' : 'Reset data'}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
