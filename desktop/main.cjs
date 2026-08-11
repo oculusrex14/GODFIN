@@ -3,12 +3,23 @@
 const { app, BrowserWindow, dialog, net, protocol, session, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { existsSync, readFileSync } = require("node:fs");
+const { randomBytes } = require("node:crypto");
 const http = require("node:http");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const BACKEND_PORT = 5100;
 const BACKEND_ORIGIN = `http://127.0.0.1:${BACKEND_PORT}`;
+const BACKEND_REQUEST_FILTER = { urls: [`${BACKEND_ORIGIN}/*`] };
+const LAUNCH_SECRET_HEADER = "X-GODFIN-Launch";
+const verificationSecret = process.env.GODFIN_PACKAGE_VERIFICATION_SECRET;
+const launchSecret = (
+  process.env.GODFIN_PACKAGE_VERIFICATION === "1"
+  && typeof verificationSecret === "string"
+  && /^[A-Za-z0-9_-]{43,128}$/.test(verificationSecret)
+)
+  ? verificationSecret
+  : randomBytes(32).toString("base64url");
 const APP_ORIGIN = "godfin://app";
 const UPDATE_ORIGIN = "https://releases.godfin.dev";
 const WEBSITE_ORIGINS = new Set([
@@ -138,6 +149,7 @@ function backendEnvironment() {
     GODFIN_UPDATE_RECOVERY_JOURNAL: path.join(userData, "update-recovery.json"),
     GODFIN_APP_VERSION: app.getVersion(),
     GODFIN_PACKAGED: app.isPackaged ? "1" : "0",
+    GODFIN_LAUNCH_SECRET: launchSecret,
     MPLCONFIGDIR: path.join(userData, "matplotlib"),
   };
 }
@@ -193,7 +205,9 @@ function waitForBackend(timeoutMs = 30_000) {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
     const check = () => {
-      const request = http.get(`${BACKEND_ORIGIN}/api/v1/health`, (response) => {
+      const request = http.get(`${BACKEND_ORIGIN}/api/v1/health`, {
+        headers: { [LAUNCH_SECRET_HEADER]: launchSecret },
+      }, (response) => {
         response.resume();
         if (response.statusCode === 200) {
           resolve();
@@ -215,6 +229,20 @@ function waitForBackend(timeoutMs = 30_000) {
     };
     check();
   });
+}
+
+function configureBackendRequestTrust() {
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    BACKEND_REQUEST_FILTER,
+    (details, callback) => {
+      callback({
+        requestHeaders: {
+          ...details.requestHeaders,
+          [LAUNCH_SECRET_HEADER]: launchSecret,
+        },
+      });
+    },
+  );
 }
 
 function isTrustedExternal(rawUrl) {
@@ -434,6 +462,7 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
       callback(false);
     });
+    configureBackendRequestTrust();
     registerAppProtocol();
     try {
       startBackend();

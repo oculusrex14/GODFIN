@@ -756,7 +756,7 @@ export default function Settings() {
               </div>
               <ToggleSwitch
                 ariaLabel="Allow network access"
-                enabled={settings?.allow_network_access === 'true'}
+                enabled={['true', 'lan'].includes(settings?.allow_network_access)}
                 onChange={handleNetworkToggle}
                 disabled={updateMutation.isPending}
               />

@@ -6,6 +6,7 @@ import {
   stat,
 } from "node:fs/promises";
 import { constants } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -242,12 +243,15 @@ async function terminateTree(child, tree) {
 
 async function launchOnce(executable, userData) {
   const startedAt = performance.now();
+  const launchSecret = randomBytes(32).toString("base64url");
   const child = spawn(executable, [`--user-data-dir=${userData}`], {
     cwd: path.dirname(executable),
     env: {
       ...process.env,
       GODFIN_DISABLE_KEYCHAIN: "1",
       GODFIN_DISABLE_UPDATES: "1",
+      GODFIN_PACKAGE_VERIFICATION: "1",
+      GODFIN_PACKAGE_VERIFICATION_SECRET: launchSecret,
     },
     stdio: "ignore",
     shell: false,
@@ -259,7 +263,9 @@ async function launchOnce(executable, userData) {
       throw new Error(`The packaged desktop process exited with code ${child.exitCode}.`);
     }
     try {
-      healthResponse = await fetch("http://127.0.0.1:5100/api/v1/health");
+      healthResponse = await fetch("http://127.0.0.1:5100/api/v1/health", {
+        headers: { "X-GODFIN-Launch": launchSecret },
+      });
       if (healthResponse.ok) break;
     } catch {
       // The local backend is still starting.
@@ -275,11 +281,28 @@ async function launchOnce(executable, userData) {
     );
   }
 
+  const missingTrust = await fetch("http://127.0.0.1:5100/api/v1/health");
+  const developmentOrigin = await fetch("http://127.0.0.1:5100/api/v1/health", {
+    headers: {
+      "Origin": "http://localhost:5200",
+      "X-GODFIN-Launch": launchSecret,
+    },
+  });
+  if (missingTrust.status !== 403 || developmentOrigin.status !== 403) {
+    await terminateTree(child, processTree(child.pid));
+    throw new Error("The packaged local API trust boundary is not enforced.");
+  }
+
   await new Promise((resolve) => setTimeout(resolve, 1_500));
   const tree = processTree(child.pid);
   const memoryMb = tree.reduce((total, row) => total + row.rssKb, 0) / 1024;
   await terminateTree(child, tree);
-  return { startupMs, memoryMb, processCount: tree.length };
+  return {
+    startupMs,
+    memoryMb,
+    processCount: tree.length,
+    trustBoundaryEnforced: true,
+  };
 }
 
 if (!await portIsFree()) {
@@ -321,6 +344,7 @@ try {
     max_idle_memory_mb: Number(maxMemoryMb.toFixed(1)),
     process_count: Math.max(first.processCount, second.processCount),
     database_preserved: secondDatabase.size > 0,
+    trust_boundary_enforced: first.trustBoundaryEnforced && second.trustBoundaryEnforced,
   }, null, 2));
 } finally {
   await rm(userData, { recursive: true, force: true });

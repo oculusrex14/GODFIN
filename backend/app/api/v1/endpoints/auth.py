@@ -14,6 +14,7 @@ from app.core.auth import (
     verify_pin_hash,
 )
 from app.core.database import get_db
+from app.core.local_api_trust import RuntimeMode, runtime_mode
 from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 from app.schemas.auth import AuthResponse, AuthStatusResponse, PinChange, PinSet, PinVerify
@@ -85,7 +86,11 @@ def auth_status(db: Session = Depends(get_db)):
     is_first_run = setting.value == "true" if setting else True
     return AuthStatusResponse(
         is_first_run=is_first_run,
-        pin_length=None if is_first_run else _stored_pin_length(db),
+        pin_length=(
+            None
+            if is_first_run or runtime_mode() is RuntimeMode.LAN
+            else _stored_pin_length(db)
+        ),
     )
 
 

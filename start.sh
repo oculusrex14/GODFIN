@@ -31,6 +31,11 @@ sleep 1
 # Resolve the explicit setting before starting either listener. The safe
 # default is localhost; Settings can opt in to LAN access and request restart.
 BIND_HOST=$(PYTHONPATH="$SCRIPT_DIR/backend" "$SCRIPT_DIR/backend/venv/bin/python" -m app.core.network_access)
+if [ "$BIND_HOST" = "0.0.0.0" ]; then
+    export GODFIN_RUNTIME_MODE="lan"
+else
+    export GODFIN_RUNTIME_MODE="local"
+fi
 
 # Backend — use venv's uvicorn directly
 echo "  → Starting backend on port 5100"

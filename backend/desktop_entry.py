@@ -59,6 +59,7 @@ def main() -> None:
         return
 
     from app.core.config import settings
+    from app.core.network_access import bind_host
 
     app_version = os.environ.get("GODFIN_APP_VERSION", settings.VERSION)
     recover_interrupted_transition(**paths, current_version=app_version)
@@ -67,7 +68,7 @@ def main() -> None:
 
     uvicorn.run(
         app,
-        host="127.0.0.1",
+        host=bind_host(),
         port=int(os.environ.get("GODFIN_BACKEND_PORT", "5100")),
         access_log=os.environ.get("GODFIN_ACCESS_LOG") == "1",
         log_level=os.environ.get("GODFIN_LOG_LEVEL", "warning"),

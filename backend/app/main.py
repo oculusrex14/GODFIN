@@ -17,6 +17,7 @@ from app.core.api_errors import (
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.logging_config import setup_logging
+from app.core.local_api_trust import LocalApiPolicy, LocalApiTrustMiddleware
 from app.core.request_limits import (
     MAX_REQUEST_BODY_BYTES,
     RequestBodyLimitMiddleware,
@@ -27,12 +28,7 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = str(settings.database_path)
 
-# Allowed CORS origins (configure based on environment)
-ALLOWED_ORIGINS = os.environ.get(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:5200,http://localhost:5100,"
-    "http://127.0.0.1:5200,godfin://app"
-).split(",")
+LOCAL_API_POLICY = LocalApiPolicy.from_environment()
 
 
 @asynccontextmanager
@@ -157,11 +153,18 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=list(LOCAL_API_POLICY.cors_origins),
+    allow_origin_regex=LOCAL_API_POLICY.cors_origin_regex,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Content-Disposition", "Retry-After"],
+    max_age=600,
 )
+
+# Added last so the trust boundary is the outermost HTTP middleware and rejects
+# unexpected hosts/origins before any route or CORS preflight is processed.
+app.add_middleware(LocalApiTrustMiddleware, policy=LOCAL_API_POLICY)
 
 app.include_router(
     api_v1_router,

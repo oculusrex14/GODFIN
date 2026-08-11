@@ -17,6 +17,21 @@ def test_new_pin_rejects_more_than_six_digits(client):
     assert response.status_code == 422
 
 
+def test_lan_status_does_not_disclose_configured_pin_length(
+    client,
+    monkeypatch,
+):
+    response = client.post("/api/v1/auth/set-pin", json={"pin": "482650"})
+    assert response.status_code == 200
+    monkeypatch.setenv("GODFIN_RUNTIME_MODE", "lan")
+
+    status = client.get("/api/v1/auth/status")
+
+    assert status.status_code == 200
+    assert status.json()["is_first_run"] is False
+    assert status.json()["pin_length"] is None
+
+
 def test_legacy_eight_digit_pin_can_unlock(client, db_session):
     first_run = db_session.query(AppSetting).filter_by(key="is_first_run").one()
     first_run.value = "false"

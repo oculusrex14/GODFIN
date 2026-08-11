@@ -148,6 +148,7 @@ def test_network_access_toggle_requires_restart(auth_client):
     )
     assert resp.status_code == 200
     assert resp.json()['restart_required'] is True
+    assert resp.json()['value'] == 'lan'
 
     health = auth_client.get('/api/v1/settings/health').json()
     assert health['network']['allow_network_access'] is True

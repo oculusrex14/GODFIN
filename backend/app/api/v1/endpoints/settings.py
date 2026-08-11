@@ -220,7 +220,8 @@ def settings_health(
         },
         "network": {
             "allow_network_access": bool(
-                network_setting and network_setting.value == "true"
+                network_setting
+                and network_setting.value.strip().lower() in {"true", "lan"}
             ),
             "message": "A restart is required after changing network access.",
         },
@@ -263,7 +264,7 @@ def update_network_access(
             action="enable_network_access",
             missing_detail="Enter your current PIN to make this security change",
         )
-    value = "true" if body.enabled else "false"
+    value = "lan" if body.enabled else "local"
     _set_existing_setting(db, "allow_network_access", value)
     db.commit()
     return {
