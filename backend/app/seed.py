@@ -65,6 +65,7 @@ def seed_app_settings(db: Session) -> None:
         "license_tier": "free",
         "license_status": "inactive",
         "license_verified_at": "",
+        "license_entitlement": "",
         "license_monthly_credits": "0",
         "license_topup_credits": "0",
         "report_savings_target_percent": "20.0",

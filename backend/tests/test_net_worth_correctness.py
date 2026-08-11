@@ -14,6 +14,7 @@ from app.core.fx import (
 from app.core.time import utcnow_naive
 from app.models.app_setting import AppSetting
 from app.models.net_worth import NetWorthItem, NetWorthQuote
+from tests.license_helpers import install_test_license
 
 
 def _set_setting(db, key: str, value: str) -> None:
@@ -25,9 +26,7 @@ def _set_setting(db, key: str, value: str) -> None:
 
 
 def _activate_max(db, *, base_currency: str = "INR") -> None:
-    _set_setting(db, "license_tier", "max")
-    _set_setting(db, "license_status", "active")
-    _set_setting(db, "license_verified_at", datetime.now().isoformat())
+    install_test_license(db, "max")
     _set_setting(db, "net_worth_base_currency", base_currency)
     db.commit()
 

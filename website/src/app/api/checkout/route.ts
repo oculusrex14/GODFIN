@@ -7,7 +7,10 @@ import {
   PRODUCTS,
   stripePriceIdForEnvironment,
 } from "@/lib/products";
-import { regionalPrice } from "@/lib/regional-pricing";
+import {
+  regionalPrice,
+  requestPricingCountry,
+} from "@/lib/regional-pricing";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe";
 
@@ -41,10 +44,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as {
-      product?: unknown;
-      country?: unknown;
-    };
+    const body = (await request.json()) as { product?: unknown };
     if (isRetiredHostedCreditCode(body.product)) {
       return NextResponse.json(
         {
@@ -58,7 +58,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Unknown product." }, { status: 400 });
     }
     const product = PRODUCTS[body.product];
-    const licensePrice = regionalPrice(body.product, body.country);
+    const pricingCountry = requestPricingCountry(request);
+    const licensePrice = regionalPrice(body.product, pricingCountry);
     const priceId = stripePriceIdForEnvironment(licensePrice.priceEnv);
 
     const session = await stripe().checkout.sessions.create({
@@ -68,6 +69,7 @@ export async function POST(request: Request) {
       customer_creation: "always",
       client_reference_id: user.id,
       billing_address_collection: "required",
+      automatic_tax: { enabled: true },
       payment_intent_data: {
         description: product.description,
       },

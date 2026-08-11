@@ -60,6 +60,17 @@ assert.doesNotMatch(checkout, /mode:\s*"subscription"/);
 assert.match(checkout, /stripePriceIdForEnvironment/);
 assert.match(checkout, /isRetiredHostedCreditCode/);
 assert.match(checkout, /status:\s*410/);
+assert.match(checkout, /requestPricingCountry\(request\)/);
+assert.match(checkout, /automatic_tax:\s*\{\s*enabled:\s*true\s*\}/);
+assert.doesNotMatch(checkout, /body\.country/);
+
+const purchaseButton = await text("src/components/purchase-button.tsx");
+assert.match(purchaseButton, /JSON\.stringify\(\{ product \}\)/);
+assert.doesNotMatch(purchaseButton, /checkoutCountry|localeCountry/);
+
+const regionalPricing = await text("src/lib/regional-pricing.ts");
+assert.match(regionalPricing, /x-vercel-ip-country/);
+assert.match(regionalPricing, /country === "IN" \? "IN" : "US"/);
 
 const publicContentPaths = [
   "src/app/page.tsx",
@@ -112,7 +123,28 @@ const webhook = await text("src/app/api/webhook/route.ts");
 assert.match(webhook, /webhooks\.constructEvent/);
 assert.match(webhook, /checkout\.session\.completed/);
 assert.match(webhook, /checkout\.session\.async_payment_succeeded/);
-assert.match(webhook, /session\.amount_total\s*!==\s*expected\.amount/);
+for (const eventType of [
+  "checkout.session.async_payment_failed",
+  "refund.created",
+  "refund.updated",
+  "refund.failed",
+  "charge.refunded",
+  "charge.dispute.created",
+  "charge.dispute.updated",
+  "charge.dispute.closed",
+]) {
+  assert.equal(
+    webhook.includes(`"${eventType}"`),
+    true,
+    `Webhook is missing ${eventType}.`,
+  );
+}
+assert.match(webhook, /record_payment_event/);
+assert.match(webhook, /createHash\("sha256"\)\.update\(rawBody\)/);
+assert.match(webhook, /session\.amount_subtotal\s*!==\s*expectedSubtotal/);
+assert.match(webhook, /actualPriceId\s*!==\s*expectedPriceId/);
+assert.match(webhook, /billing_country_mismatch/);
+assert.match(webhook, /provisioned\?\.license_status === "active"/);
 
 const migration = await text("supabase/migrations/0002_phase2_entitlements_waitlist.sql");
 assert.match(migration, /p_activation_limit integer/);
@@ -127,12 +159,63 @@ assert.match(ownerLicenseMigration, /kind in \('purchase', 'owner_test'\)/);
 assert.match(ownerLicenseMigration, /where kind = 'owner_test' and status = 'active'/);
 assert.doesNotMatch(ownerLicenseMigration, /insert into public\.purchases/i);
 
+const hardenedMigration = await text(
+  "supabase/migrations/0004_signed_entitlements_payment_reversals_rls.sql",
+);
+for (const requiredSql of [
+  /create table if not exists public\.payment_events/,
+  /create table if not exists public\.license_status_history/,
+  /create or replace function private\.recompute_purchase_license_state/,
+  /create or replace function public\.record_payment_event/,
+  /create or replace function public\.verify_license/,
+  /set search_path = ''/,
+  /grant execute on function public\.record_payment_event[\s\S]*?to service_role/,
+  /v_refund_total > 0 and v_refund_total >= v_purchase\.amount_total/,
+  /v_previous_status/,
+  /state_version = state_version \+ 1/,
+  /p_activation_limit > 3/,
+]) {
+  assert.match(hardenedMigration, requiredSql);
+}
+const privilegedFunctionGrants = [
+  ...hardenedMigration.matchAll(
+    /grant execute on function public\.(provision_purchase|record_payment_event|verify_license)\([\s\S]*?\)\s+to\s+([^;]+);/g,
+  ),
+];
+assert.equal(privilegedFunctionGrants.length, 3);
+for (const grant of privilegedFunctionGrants) {
+  assert.equal(grant[2].trim(), "service_role");
+}
+
+const entitlementSigner = await text("src/lib/entitlement-signing.ts");
+assert.match(entitlementSigner, /algorithm:\s*"Ed25519"/);
+assert.match(entitlementSigner, /installation_hash:\s*installationHash/);
+assert.match(entitlementSigner, /license_state_version:\s*licenseStateVersion/);
+assert.match(entitlementSigner, /MAX_TTL_HOURS = 31 \* 24/);
+const licenseVerify = await text("src/app/api/license/verify/route.ts");
+assert.match(licenseVerify, /signEntitlement/);
+assert.match(licenseVerify, /rawResult\.license_id/);
+assert.match(licenseVerify, /rawResult\.license_state_version/);
+
+const publicKeyManifest = JSON.parse(
+  await text("shared/license-entitlement-public-keys.json", repoRoot),
+);
+assert.equal(publicKeyManifest.schema_version, 1);
+assert.ok(Object.keys(publicKeyManifest.keys).length >= 1);
+for (const key of Object.values(publicKeyManifest.keys)) {
+  assert.equal(key.algorithm, "Ed25519");
+  assert.match(key.public_key_spki_b64, /^[A-Za-z0-9+/]+={0,2}$/);
+  assert.equal("private_key" in key, false);
+}
+
 const envExample = await text(".env.example");
 for (const name of [
   "STRIPE_PRICE_PRO_US",
   "STRIPE_PRICE_MAX_US",
   "PPP_CHECKOUT_ENABLED",
   "LICENSE_SIGNING_SECRET",
+  "LICENSE_ENTITLEMENT_ACTIVE_KEY_VERSION",
+  "LICENSE_ENTITLEMENT_PRIVATE_KEYS_JSON",
   "RESEND_API_KEY",
   ...publicClaimsPolicy.required_launch_gates,
 ]) {

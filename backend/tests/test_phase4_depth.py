@@ -17,6 +17,7 @@ from app.models.app_setting import AppSetting
 from app.models.net_worth import NetWorthItem
 from app.models.subscription import Subscription
 from app.models.transaction import Transaction
+from tests.license_helpers import install_test_license
 
 
 def _set_setting(db, key: str, value: str) -> None:
@@ -28,10 +29,7 @@ def _set_setting(db, key: str, value: str) -> None:
 
 
 def _activate_tier(db, tier: str) -> None:
-    _set_setting(db, "license_tier", tier)
-    _set_setting(db, "license_status", "active")
-    _set_setting(db, "license_verified_at", datetime.now(UTC).isoformat())
-    db.commit()
+    install_test_license(db, tier)
 
 
 def _account(db) -> Account:

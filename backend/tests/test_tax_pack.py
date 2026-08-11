@@ -17,23 +17,13 @@ from app.models.app_setting import AppSetting
 from app.models.audit_session import AuditSession
 from app.models.transaction import Transaction
 from app.seed import SAVINGS_ACCOUNT_ID
+from tests.license_helpers import install_test_license
 
 TAX_PACK_PASSPHRASE = "Correct-Horse-Archive-2026"
 
 
 def _activate_pro(db):
-    values = {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }
-    for key, value in values.items():
-        setting = db.query(AppSetting).filter_by(key=key).first()
-        if setting:
-            setting.value = value
-        else:
-            db.add(AppSetting(key=key, value=value))
-    db.commit()
+    install_test_license(db, "pro")
 
 
 def _transaction(

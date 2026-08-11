@@ -18,16 +18,11 @@ from app.core.llm_service import StubLLMProvider, call_llm, set_llm_provider
 from app.core.llm_providers import OllamaCloudProvider, OllamaLocalProvider, create_provider
 from app.models.app_setting import AppSetting
 from app.models.llm_config import LLMConfiguration
+from tests.license_helpers import install_test_license
 
 
 def _enable_max(db_session):
-    for key, value in {
-        "license_tier": "max",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
-    db_session.commit()
+    install_test_license(db_session, "max")
 
 
 def test_hosted_consent_is_versioned_and_local_provider_needs_none():

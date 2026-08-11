@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "keys": {
+    "2026-08-v1": {
+      "status": "active",
+      "algorithm": "Ed25519",
+      "public_key_spki_b64": "MCowBQYDK2VwAyEAahMC3DemVPZMgW++v4gJ8c7DvL6TwlqJ11p5c/JQ0qQ="
+    }
+  }
+}

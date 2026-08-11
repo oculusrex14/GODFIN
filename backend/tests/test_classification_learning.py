@@ -12,6 +12,7 @@ from app.models.classification_learning import (
 from app.models.app_setting import AppSetting
 from app.models.transaction import Transaction
 from app.seed import SAVINGS_ACCOUNT_ID
+from tests.license_helpers import install_test_license
 
 
 def _transaction(db_session, merchant: str) -> Transaction:
@@ -116,13 +117,7 @@ def test_finalized_transaction_learning_cannot_be_undone(
 
 
 def test_personal_classifier_cannot_enable_early(auth_client, db_session):
-    for key, value in {
-        "license_tier": "max",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
-    db_session.commit()
+    install_test_license(db_session, "max")
 
     response = auth_client.put(
         "/api/v1/settings/classification-memory/personal",

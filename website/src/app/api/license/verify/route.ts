@@ -6,6 +6,7 @@ import {
   releasedFeatures,
   type PaidLicenseTier,
 } from "@/lib/entitlements";
+import { signEntitlement } from "@/lib/entitlement-signing";
 import { hashLicenseKey, hashMachineId } from "@/lib/license";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -70,6 +71,12 @@ export async function POST(request: Request) {
             monthly_credits: ENTITLEMENTS.included_hosted_ai_credits,
             hosted_credits_included: ENTITLEMENTS.included_hosted_ai_credits,
             activation_limit: activationLimit(verifiedTier),
+            entitlement: signEntitlement({
+              licenseId: String(rawResult.license_id || ""),
+              tier: verifiedTier,
+              installationHash: hashMachineId(body.machine_id),
+              licenseStateVersion: Number(rawResult.license_state_version),
+            }),
           }
         : rawResult;
     const status = result?.valid ? 200 : 403;

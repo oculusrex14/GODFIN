@@ -33,6 +33,7 @@ from app.models.goal_contribution import (
 from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
 from app.seed import SAVINGS_ACCOUNT_ID
+from tests.license_helpers import install_test_license
 
 
 def _future_goal_payload(**overrides):
@@ -82,18 +83,7 @@ def _transaction(
 
 
 def _activate_paid(db, tier: str = "pro"):
-    now = datetime.now(UTC).isoformat()
-    for key, value in (
-        ("license_tier", tier),
-        ("license_status", "active"),
-        ("license_verified_at", now),
-    ):
-        setting = db.query(AppSetting).filter_by(key=key).first()
-        if setting:
-            setting.value = value
-        else:
-            db.add(AppSetting(key=key, value=value))
-    db.commit()
+    install_test_license(db, tier)
 
 
 def _shift_months(value: date, months: int) -> date:

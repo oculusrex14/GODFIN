@@ -51,6 +51,8 @@ export function commerceConfigured(): boolean {
     "STRIPE_PRICE_PRO",
     "STRIPE_PRICE_MAX",
     "LICENSE_SIGNING_SECRET",
+    "LICENSE_ENTITLEMENT_ACTIVE_KEY_VERSION",
+    "LICENSE_ENTITLEMENT_PRIVATE_KEYS_JSON",
     "RESEND_API_KEY",
     "RESEND_FROM_EMAIL",
   ];
@@ -85,6 +87,10 @@ export const serverEnv = {
   stripeSecretKey: () => required("STRIPE_SECRET_KEY"),
   stripeWebhookSecret: () => required("STRIPE_WEBHOOK_SECRET"),
   licenseSigningSecret: () => required("LICENSE_SIGNING_SECRET"),
+  licenseEntitlementActiveKeyVersion: () =>
+    required("LICENSE_ENTITLEMENT_ACTIVE_KEY_VERSION"),
+  licenseEntitlementPrivateKeysJson: () =>
+    required("LICENSE_ENTITLEMENT_PRIVATE_KEYS_JSON"),
   resendApiKey: () => required("RESEND_API_KEY"),
   resendFromEmail: () => required("RESEND_FROM_EMAIL"),
 };

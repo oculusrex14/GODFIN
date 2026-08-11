@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.models.app_setting import AppSetting
+from tests.license_helpers import install_test_license
 
 
 def test_embeddings_disabled_by_default(auth_client):
@@ -17,17 +18,7 @@ def test_embeddings_disabled_by_default(auth_client):
 
 
 def test_enable_embeddings_starts_on_demand(auth_client, db_session, monkeypatch):
-    from datetime import UTC, datetime
-
-    from app.models.app_setting import AppSetting
-
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
-    db_session.commit()
+    install_test_license(db_session, "pro")
 
     monkeypatch.setattr(
         "app.core.embedding_service.start_embedding_setup",
@@ -58,15 +49,7 @@ def test_enable_embeddings_starts_on_demand(auth_client, db_session, monkeypatch
 
 
 def _activate_pro(db_session):
-    from datetime import UTC, datetime
-
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
-    db_session.commit()
+    install_test_license(db_session, "pro")
 
 
 def test_embedding_setup_requires_explicit_approval_and_current_pin(

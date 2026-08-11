@@ -17,6 +17,17 @@ export function normalizeLicenseCountry(value: unknown): LicenseCountry {
   return DEFAULT_COUNTRY;
 }
 
+/**
+ * Resolve the checkout region from Vercel's server-populated country header.
+ * Missing or unsupported signals use the higher US anchor whenever PPP is
+ * enabled, so omitting a client hint can never unlock the India price.
+ */
+export function requestPricingCountry(request: Request): LicenseCountry {
+  if (process.env.PPP_CHECKOUT_ENABLED !== "true") return "IN";
+  const country = request.headers.get("x-vercel-ip-country")?.toUpperCase();
+  return country === "IN" ? "IN" : "US";
+}
+
 export function isLicenseProduct(
   product: ProductCode,
 ): product is PaidLicenseTier {

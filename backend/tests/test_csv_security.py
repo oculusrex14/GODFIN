@@ -16,6 +16,7 @@ from app.models.account import Account
 from app.models.app_setting import AppSetting
 from app.models.merchant_memory import MerchantMemory
 from app.models.transaction import Transaction
+from tests.license_helpers import install_test_license
 
 
 @pytest.mark.parametrize(
@@ -67,12 +68,7 @@ def test_csv_safety_preserves_non_formula_types_and_round_trip_text():
 
 
 def _activate_pro(db_session) -> None:
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    install_test_license(db_session, "pro")
 
 
 def test_transaction_csv_exports_neutralize_every_user_controlled_formula_cell(

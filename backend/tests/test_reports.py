@@ -21,6 +21,7 @@ from app.core.reporting import (
 from app.models.transaction import Transaction
 from app.models.llm_config import LLMConfiguration
 from app.seed import SAVINGS_ACCOUNT_ID
+from tests.license_helpers import install_test_license
 
 
 def _add_txn(db, merchant, amount, txn_date, category=None, txn_type='debit'):
@@ -53,6 +54,10 @@ def _activate_test_llm(db):
         )
     )
     db.commit()
+
+
+def _activate_pro(db):
+    install_test_license(db, "pro")
 
 
 def _valid_llm_report():
@@ -406,17 +411,7 @@ def test_report_savings_target_preference_is_validated_and_persisted(auth_client
 
 
 def test_insights_endpoint(auth_client, db_session, monkeypatch):
-    from datetime import UTC, datetime
-
-    from app.models.app_setting import AppSetting
-
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
-    db_session.commit()
+    _activate_pro(db_session)
     _activate_test_llm(db_session)
     _add_txn(
         db_session,
@@ -450,17 +445,7 @@ def test_insights_endpoint(auth_client, db_session, monkeypatch):
 
 
 def test_detailed_reports_require_connected_ai(auth_client, db_session):
-    from datetime import UTC, datetime
-
-    from app.models.app_setting import AppSetting
-
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
-    db_session.commit()
+    _activate_pro(db_session)
 
     insights = auth_client.post(
         '/api/v1/reports/ai/insights',
@@ -479,16 +464,7 @@ def test_hosted_reports_require_saved_provider_disclosure_consent(
     auth_client,
     db_session,
 ):
-    from datetime import UTC, datetime
-
-    from app.models.app_setting import AppSetting
-
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    _activate_pro(db_session)
     db_session.add(
         LLMConfiguration(
             provider="openai",
@@ -512,16 +488,7 @@ def test_detailed_reports_never_mislabel_a_rules_fallback_as_ai(
     db_session,
     monkeypatch,
 ):
-    from datetime import UTC, datetime
-
-    from app.models.app_setting import AppSetting
-
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    _activate_pro(db_session)
     _activate_test_llm(db_session)
     _add_txn(
         db_session,
@@ -569,16 +536,7 @@ def test_summary_pdf_endpoint(auth_client, db_session, monkeypatch):
 
 
 def test_ai_report_requires_explicit_consent(auth_client, db_session, monkeypatch):
-    from datetime import UTC, datetime
-
-    from app.models.app_setting import AppSetting
-
-    for key, value in {
-        'license_tier': 'pro',
-        'license_status': 'active',
-        'license_verified_at': datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    _activate_pro(db_session)
     _activate_test_llm(db_session)
     calls = []
     monkeypatch.setattr(
@@ -601,16 +559,7 @@ def test_ai_report_requires_explicit_consent(auth_client, db_session, monkeypatc
 
 
 def test_detailed_pdf_endpoint(auth_client, db_session, monkeypatch):
-    from datetime import UTC, datetime
-
-    from app.models.app_setting import AppSetting
-
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    _activate_pro(db_session)
     _activate_test_llm(db_session)
     _add_txn(
         db_session,

@@ -19,6 +19,14 @@ datas = [
         "shared",
     ),
     (
+        str(
+            Path(SPECPATH).resolve().parent
+            / "shared"
+            / "license-entitlement-public-keys.json"
+        ),
+        "shared",
+    ),
+    (
         str(Path(SPECPATH).resolve().parent / "shared" / "model-registry.json"),
         "shared",
     ),

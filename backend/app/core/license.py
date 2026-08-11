@@ -5,8 +5,9 @@ import os
 import platform
 import re
 import subprocess
+import sys
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,10 @@ from app.core.entitlements import (
     features_for_tier,
     included_hosted_ai_credits,
 )
+from app.core.license_entitlement import (
+    EntitlementValidationError,
+    verify_entitlement_envelope,
+)
 from app.models.app_setting import AppSetting
 
 LICENSE_KEY_PATTERN = re.compile(
@@ -30,6 +35,10 @@ LICENSE_FEATURES = {
 _SENSITIVE_KEYS = {"license_key"}
 _INSTALLATION_KEYCHAIN_SERVICE = "com.godfin.desktop"
 _INSTALLATION_KEYCHAIN_ACCOUNT = "installation-id"
+_PACKAGED_LICENSE_ENDPOINTS = (
+    "https://godfin.vercel.app/api/license/verify",
+    "https://godfin.dev/api/license/verify",
+)
 
 
 class LicenseError(RuntimeError):
@@ -52,6 +61,11 @@ _AUTHORITATIVE_LICENSE_ERRORS = {
     "LICENSE_NOT_FOUND": "This license key was not found.",
     "LICENSE_INVALID": "This license could not be verified.",
     "LICENSE_REVOKED": "This license is no longer active.",
+    "LICENSE_SUSPENDED": "This license is temporarily suspended.",
+    "ACTIVATION_LIMIT": (
+        "This license is already active on three devices. "
+        "Deactivate one in your account and try again."
+    ),
     "DEVICE_LIMIT_REACHED": (
         "This license is already active on three devices. "
         "Deactivate one in your account and try again."
@@ -236,50 +250,92 @@ def _masked_key(db: Session) -> str | None:
 
 def license_status(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
     now = now or datetime.now(UTC)
-    tier = _get(db, "license_tier", "free")
-    stored_status = _get(db, "license_status", "inactive")
-    verified_at = _parse_datetime(_get(db, "license_verified_at"))
-    grace_deadline = (
-        verified_at + timedelta(days=settings.LICENSE_OFFLINE_GRACE_DAYS)
-        if verified_at
-        else None
-    )
-    active = (
-        tier in {"pro", "max"}
-        and stored_status == "active"
-        and grace_deadline is not None
-        and now <= grace_deadline
-    )
+    raw_envelope = _get(db, "license_entitlement")
+    claims: dict[str, Any] | None = None
+    integrity_code: str | None = None
+    if raw_envelope:
+        try:
+            envelope = json.loads(raw_envelope)
+            claims = verify_entitlement_envelope(
+                envelope,
+                machine_id=get_machine_id(),
+                now=now,
+            )
+        except (json.JSONDecodeError, EntitlementValidationError) as exc:
+            integrity_code = getattr(exc, "code", "LICENSE_ENTITLEMENT_INVALID")
 
-    if active:
-        effective_tier = tier
+    if claims is not None:
+        effective_tier = str(claims["tier"])
         status = "active"
+        verified_at = _parse_datetime(str(claims["issued_at"]))
+        grace_deadline = _parse_datetime(str(claims["expires_at"]))
         message = (
-            f"GODFIN {tier.title()} is active. Verification remains valid "
+            f"GODFIN {effective_tier.title()} is active. Verification remains valid "
             f"offline through {grace_deadline.date().isoformat()}."
         )
-    elif tier in {"pro", "max"} and stored_status == "active":
+        features = list(claims["features"])
+        licensed_tier: str | None = effective_tier
+        active = True
+    elif raw_envelope:
         effective_tier = "free"
-        status = "verification_required"
-        message = "Reconnect to verify this license and restore paid features."
+        status = (
+            "verification_required"
+            if integrity_code == "LICENSE_ENTITLEMENT_EXPIRED"
+            else "invalid"
+        )
+        message = (
+            "Reconnect to verify this license and restore paid features."
+            if status == "verification_required"
+            else "The stored signed license is invalid. Re-enter the license key."
+        )
+        verified_at = None
+        grace_deadline = None
+        features = LICENSE_FEATURES["free"]
+        licensed_tier = None
+        active = False
     else:
         effective_tier = "free"
-        status = stored_status if stored_status not in {"", "active"} else "inactive"
-        message = "GODFIN Core is active. Enter a license key to unlock Pro features."
+        stored_status = _get(db, "license_status")
+        has_stored_key = bool(_get(db, "license_key"))
+        if has_stored_key and stored_status in {
+            "revoked",
+            "suspended",
+            "activation_limit",
+        }:
+            status = stored_status
+            message = {
+                "revoked": "This license is no longer active.",
+                "suspended": "This license is temporarily suspended.",
+                "activation_limit": (
+                    "This license is active on three other devices. "
+                    "Deactivate one in your account and verify again."
+                ),
+            }[status]
+        else:
+            status = "verification_required" if has_stored_key else "inactive"
+            message = (
+                "Reconnect to verify this license and restore paid features."
+                if status == "verification_required"
+                else "GODFIN Core is active. Enter a license key to unlock Pro features."
+            )
+        verified_at = None
+        grace_deadline = None
+        features = LICENSE_FEATURES["free"]
+        licensed_tier = None
+        active = False
 
     return {
         "tier": effective_tier,
-        "licensed_tier": tier if tier in {"pro", "max"} else None,
+        "licensed_tier": licensed_tier,
         "status": status,
         "valid": active,
-        "features": LICENSE_FEATURES[effective_tier],
+        "features": features,
         "verified_at": verified_at.isoformat() if verified_at else None,
         "offline_grace_until": grace_deadline.isoformat() if grace_deadline else None,
+        "entitlement_integrity": integrity_code or ("verified" if active else None),
         "monthly_credits": included_hosted_ai_credits(),
         "hosted_credits_included": included_hosted_ai_credits(),
-        "topup_credits": int(_get(db, "license_topup_credits", "0") or 0)
-        if active
-        else 0,
+        "topup_credits": 0,
         "masked_key": _masked_key(db),
         "message": message,
         "website_url": settings.WEBSITE_URL.rstrip("/"),
@@ -300,7 +356,7 @@ def require_feature(db: Session, feature: str) -> None:
     )
 
 
-def _validate_server_response(payload: Any) -> dict[str, Any]:
+def _validate_server_response(payload: Any, *, machine_id: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise LicenseError(
             "The license server returned an invalid response.",
@@ -310,31 +366,33 @@ def _validate_server_response(payload: Any) -> dict[str, Any]:
         )
     if payload.get("valid") is not True:
         raise _authoritative_license_error(payload)
-    tier = payload.get("tier")
-    if tier not in {"pro", "max"}:
-        raise LicenseError(
-            "The license server returned an unknown tier.",
-            code="VERIFY_INVALID_RESPONSE",
-            status_code=502,
-            retriable=True,
-        )
     try:
-        topup_credits = max(0, int(payload.get("topup_credits") or 0))
-    except (TypeError, ValueError) as exc:
+        claims = verify_entitlement_envelope(
+            payload.get("entitlement"),
+            machine_id=machine_id,
+        )
+    except EntitlementValidationError as exc:
         raise LicenseError(
-            "The license server returned invalid credit information.",
-            code="VERIFY_INVALID_RESPONSE",
+            exc.public_message,
+            code=exc.code,
             status_code=502,
             retriable=True,
         ) from exc
     return {
-        "tier": tier,
+        "tier": claims["tier"],
+        "claims": claims,
+        "entitlement": payload["entitlement"],
         "monthly_credits": included_hosted_ai_credits(),
-        "topup_credits": topup_credits,
+        "topup_credits": 0,
     }
 
 
 def _license_verification_endpoints() -> list[str]:
+    if (
+        bool(getattr(sys, "frozen", False))
+        or os.environ.get("GODFIN_PACKAGED") == "1"
+    ):
+        return list(_PACKAGED_LICENSE_ENDPOINTS)
     endpoints = [
         settings.LICENSE_API_URL.strip(),
         settings.LICENSE_API_FALLBACK_URL.strip(),
@@ -350,9 +408,10 @@ def verify_with_server(license_key: str) -> dict[str, Any]:
             code="LICENSE_KEY_FORMAT",
             status_code=400,
         )
+    machine_id = get_machine_id()
     request_payload = {
         "license_key": key,
-        "machine_id": get_machine_id(),
+        "machine_id": machine_id,
         "device_label": get_device_label(),
         "app_version": settings.VERSION,
     }
@@ -387,7 +446,7 @@ def verify_with_server(license_key: str) -> dict[str, Any]:
 
         # Invalid, revoked, or over-limit licenses are authoritative responses.
         # Never retry them against a second endpoint.
-        return _validate_server_response(payload)
+        return _validate_server_response(payload, machine_id=machine_id)
 
     raise LicenseError(
         "The license server is unavailable. Check your connection and try again.",
@@ -401,9 +460,14 @@ def activate_license(db: Session, license_key: str) -> dict[str, Any]:
     key = normalize_license_key(license_key)
     verified = verify_with_server(key)
     _set(db, "license_key", encrypt(key))
+    _set(
+        db,
+        "license_entitlement",
+        json.dumps(verified["entitlement"], separators=(",", ":"), sort_keys=True),
+    )
     _set(db, "license_tier", verified["tier"])
     _set(db, "license_status", "active")
-    _set(db, "license_verified_at", datetime.now(UTC).isoformat())
+    _set(db, "license_verified_at", str(verified["claims"]["issued_at"]))
     _set(db, "license_monthly_credits", str(verified["monthly_credits"]))
     _set(db, "license_topup_credits", str(verified["topup_credits"]))
     db.commit()
@@ -428,12 +492,31 @@ def reverify_license(db: Session) -> dict[str, Any]:
             code="LICENSE_DECRYPT_FAILED",
             status_code=409,
         ) from exc
-    return activate_license(db, key)
+    try:
+        return activate_license(db, key)
+    except LicenseError as exc:
+        if exc.code in _AUTHORITATIVE_LICENSE_ERRORS:
+            _set(db, "license_entitlement", "")
+            _set(db, "license_tier", "free")
+            _set(
+                db,
+                "license_status",
+                {
+                    "LICENSE_SUSPENDED": "suspended",
+                    "ACTIVATION_LIMIT": "activation_limit",
+                    "DEVICE_LIMIT_REACHED": "activation_limit",
+                    "DEVICE_LIMIT": "activation_limit",
+                }.get(exc.code, "revoked"),
+            )
+            _set(db, "license_verified_at", "")
+            db.commit()
+        raise
 
 
 def deactivate_license(db: Session) -> dict[str, Any]:
     for key, value in {
         "license_key": "",
+        "license_entitlement": "",
         "license_tier": "free",
         "license_status": "inactive",
         "license_verified_at": "",

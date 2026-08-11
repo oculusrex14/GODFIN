@@ -14,6 +14,7 @@ from app.core.request_limits import (
 )
 from app.models.app_setting import AppSetting
 from app.models.goal import Goal
+from tests.license_helpers import install_test_license
 
 
 ENDPOINT_ROOT = Path(__file__).parents[1] / "app" / "api" / "v1" / "endpoints"
@@ -41,17 +42,7 @@ PUBLIC_ROUTES = {
 
 
 def _activate_max(db) -> None:
-    for key, value in {
-        "license_tier": "max",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        setting = db.query(AppSetting).filter_by(key=key).first()
-        if setting:
-            setting.value = value
-        else:
-            db.add(AppSetting(key=key, value=value))
-    db.commit()
+    install_test_license(db, "max")
 
 
 def _assert_error_shape(response, *, code: str) -> None:

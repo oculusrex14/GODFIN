@@ -9,29 +9,24 @@ export function PurchaseButton({
   product,
   children,
   secondary = false,
-  country,
   enabled = true,
 }: {
   product: ProductCode;
   children: React.ReactNode;
   secondary?: boolean;
-  country?: "IN" | "US";
   enabled?: boolean;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
   async function checkout() {
-    const localeCountry =
-      Intl.DateTimeFormat().resolvedOptions().locale.split("-")[1]?.toUpperCase();
-    const checkoutCountry = country || (localeCountry === "US" ? "US" : "IN");
     setPending(true);
     setError("");
     try {
       const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ product, country: checkoutCountry }),
+        body: JSON.stringify({ product }),
       });
       const body = await response.json();
       if (response.status === 401) {

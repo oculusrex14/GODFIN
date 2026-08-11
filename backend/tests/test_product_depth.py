@@ -9,16 +9,11 @@ from app.models.audit_session import AuditSession
 from app.models.recurring_pattern import RecurringPattern
 from app.models.subscription import Subscription
 from app.models.transaction import Transaction
+from tests.license_helpers import install_test_license
 
 
 def _activate_pro(db_session) -> None:
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
-    db_session.commit()
+    install_test_license(db_session, "pro")
 
 
 def _transaction(

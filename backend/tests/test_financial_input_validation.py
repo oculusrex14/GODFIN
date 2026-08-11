@@ -7,6 +7,7 @@ import pytest
 
 from app.models.account import Account
 from app.models.app_setting import AppSetting
+from tests.license_helpers import install_test_license
 
 
 @pytest.fixture(autouse=True)
@@ -46,10 +47,7 @@ def _set_setting(db, key: str, value: str) -> None:
 
 
 def _activate_max(db) -> None:
-    _set_setting(db, "license_tier", "max")
-    _set_setting(db, "license_status", "active")
-    _set_setting(db, "license_verified_at", datetime.now(UTC).isoformat())
-    db.commit()
+    install_test_license(db, "max")
 
 
 @pytest.mark.parametrize(

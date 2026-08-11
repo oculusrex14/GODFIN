@@ -5,11 +5,12 @@
   "scripts": {
     "predev": "node scripts/sync-entitlements.mjs",
     "dev": "next dev --turbopack -p 5300",
-    "prebuild": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs",
+    "prebuild": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs && node scripts/verify-supabase-migrations.mjs",
     "build": "next build",
     "start": "next start -p 5300",
     "lint": "next lint",
-    "verify:contracts": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs"
+    "verify:contracts": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs && node scripts/verify-supabase-migrations.mjs",
+    "verify:migrations": "node scripts/verify-supabase-migrations.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.3",
