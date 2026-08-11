@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
 from app.core.config import settings as app_settings
 from app.core.database import get_db
@@ -19,6 +20,7 @@ from app.models.app_setting import AppSetting
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+AI_CLASSIFICATION_ENTITLEMENT = require_entitlement("ai_classification")
 
 
 class SystemStatus(BaseModel):
@@ -189,17 +191,19 @@ def embedding_status(
     return {"enabled": True, **status}
 
 
-@router.post("/embeddings/enable", status_code=202)
+@router.post(
+    "/embeddings/enable",
+    status_code=202,
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def enable_embeddings(
     request: Request,
     body: MaintenanceApproval = Body(default=MaintenanceApproval()),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    from app.api.v1.endpoints.license import enforce_feature
     from app.core.embedding_service import get_embedding_setup_status, start_embedding_setup
 
-    enforce_feature(db, "ai_classification")
     if not body.confirmed:
         raise HTTPException(
             status_code=422,

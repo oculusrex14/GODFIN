@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import conditional_entitlement, enforce_feature
 from app.core.auth import get_current_user
 from app.core.audit import FinalizedPeriodError
 from app.core.classifier import classify_transaction
@@ -48,8 +49,6 @@ def _resolve_account_id(db: Session, statement_type: str, account_id: str = None
         if not acct:
             raise HTTPException(status_code=400, detail="Invalid account_id")
         if acct.bank.upper() != "HDFC":
-            from app.api.v1.endpoints.license import enforce_feature
-
             enforce_feature(db, "multi_bank")
         return account_id
 
@@ -64,8 +63,6 @@ def _resolve_account_id(db: Session, statement_type: str, account_id: str = None
     if not acct:
         raise HTTPException(status_code=400, detail="No matching account found. Please specify account_id.")
     if acct.bank.upper() != "HDFC":
-        from app.api.v1.endpoints.license import enforce_feature
-
         enforce_feature(db, "multi_bank")
     return acct.id
 
@@ -206,6 +203,7 @@ async def preview_statement(
 
 
 @router.post("/ingest/upload/reconcile")
+@conditional_entitlement("multi_bank")
 async def reconcile_statement_preview(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
@@ -315,6 +313,7 @@ async def reconcile_statement_preview(
 
 
 @router.post("/ingest/upload/import")
+@conditional_entitlement("multi_bank")
 async def import_statement(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),

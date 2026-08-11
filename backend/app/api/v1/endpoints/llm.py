@@ -21,12 +21,13 @@ from app.core.llm_privacy import (
 )
 from app.core.llm_runtime import activate_configuration
 from app.core.llm_service import set_llm_provider
-from app.api.v1.endpoints.license import enforce_feature
+from app.api.v1.entitlements import require_entitlement
 from app.models.llm_config import LLMConfiguration
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+AI_CLASSIFICATION_ENTITLEMENT = require_entitlement("ai_classification")
 
 
 # ============================================================================
@@ -136,14 +137,17 @@ def get_llm_config(
     }
 
 
-@router.post("/config", response_model=LLMConfigResponse)
+@router.post(
+    "/config",
+    response_model=LLMConfigResponse,
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def create_llm_config(
     request: LLMConfigCreate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Create a new LLM configuration."""
-    enforce_feature(db, "ai_classification")
     if request.provider not in get_available_providers():
         raise HTTPException(status_code=422, detail="Unknown AI provider")
     if not is_local_provider(request.provider) and not request.hosted_data_consent:
@@ -201,7 +205,11 @@ def create_llm_config(
     }
 
 
-@router.put("/config/{config_id}", response_model=LLMConfigResponse)
+@router.put(
+    "/config/{config_id}",
+    response_model=LLMConfigResponse,
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def update_llm_config(
     config_id: str,
     request: LLMConfigUpdate,
@@ -209,7 +217,6 @@ def update_llm_config(
     _user: bool = Depends(get_current_user),
 ):
     """Update an existing LLM configuration."""
-    enforce_feature(db, "ai_classification")
     config = db.query(LLMConfiguration).filter_by(id=config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
@@ -294,14 +301,17 @@ def delete_llm_config(
     return {"success": True, "message": "Configuration deleted"}
 
 
-@router.post("/config/test", response_model=TestConnectionResponse)
+@router.post(
+    "/config/test",
+    response_model=TestConnectionResponse,
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def test_llm_connection(
     request: TestConnectionRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Test connection to an LLM provider without saving."""
-    enforce_feature(db, "ai_classification")
     try:
         provider = create_provider(
             provider=request.provider,
@@ -333,14 +343,16 @@ def test_llm_connection(
         ) from exc
 
 
-@router.post("/config/activate/{config_id}")
+@router.post(
+    "/config/activate/{config_id}",
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def activate_llm_config(
     config_id: str,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Activate a specific LLM configuration."""
-    enforce_feature(db, "ai_classification")
     config = db.query(LLMConfiguration).filter_by(id=config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")

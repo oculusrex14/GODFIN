@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from app.api.v1.endpoints.license import enforce_feature
+from app.api.v1.entitlements import conditional_entitlement, enforce_feature
 from app.core.account_mapping import load_sender_mappings, save_sender_mappings
 from app.core.auth import get_current_user
 from app.core.database import get_db
@@ -162,6 +162,7 @@ def replace_account_sender_mappings(
 
 
 @router.post("", status_code=201)
+@conditional_entitlement("multi_bank")
 def create_account(
     body: AccountCreate,
     db: Session = Depends(get_db),
@@ -208,6 +209,7 @@ def create_account(
 
 
 @router.patch("/{account_id}")
+@conditional_entitlement("multi_bank")
 def update_account(
     account_id: str,
     body: AccountUpdate,

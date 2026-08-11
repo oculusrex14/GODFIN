@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.v1.endpoints.license import enforce_feature
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
 from app.core.behavior_insights import (
     BUDGET_KEY,
@@ -12,11 +12,8 @@ from app.core.behavior_insights import (
     export_behavior_insights_csv,
 )
 from app.core.database import get_db
-from app.core.errors import ApplicationError
 from app.core.feature_flags import (
-    FeatureDisabledError,
     feature_enabled,
-    require_feature_flag,
 )
 from app.core.license import license_status
 from app.models.app_setting import AppSetting
@@ -24,6 +21,11 @@ from app.models.behavior_insight import BehaviorInsightPreference
 from app.schemas.financial import PositiveMoney
 
 router = APIRouter()
+BEHAVIOR_INSIGHTS_ENTITLEMENT = require_entitlement(
+    "behavior_insights",
+    "behavior_insights",
+    "Behavior Insights is not available in this build.",
+)
 
 
 class InsightPreferenceUpdate(BaseModel):
@@ -35,35 +37,20 @@ class BehaviorConfigUpdate(BaseModel):
     monthly_budget: PositiveMoney | None = None
 
 
-def _authorize(db: Session) -> None:
-    try:
-        require_feature_flag(db, "behavior_insights")
-    except FeatureDisabledError as exc:
-        raise ApplicationError(
-            code="FEATURE_UNAVAILABLE",
-            message="Behavior Insights is not available in this build.",
-            status_code=404,
-            category="availability",
-        ) from exc
-    enforce_feature(db, "behavior_insights")
-
-
-@router.get("")
+@router.get("", dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)])
 def insights(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     return compute_behavior_insights(db)
 
 
-@router.put("/config")
+@router.put("/config", dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)])
 def update_config(
     body: BehaviorConfigUpdate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     setting = db.query(AppSetting).filter_by(key=BUDGET_KEY).first()
     value = "" if body.monthly_budget is None else str(body.monthly_budget)
     if setting:
@@ -74,14 +61,16 @@ def update_config(
     return compute_behavior_insights(db)
 
 
-@router.put("/{metric_key}")
+@router.put(
+    "/{metric_key}",
+    dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)],
+)
 def update_preference(
     metric_key: str,
     body: InsightPreferenceUpdate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     valid_keys = {
         metric["key"] for metric in compute_behavior_insights(db)["metrics"]
     }
@@ -101,12 +90,11 @@ def update_preference(
     return compute_behavior_insights(db)
 
 
-@router.post("/reset")
+@router.post("/reset", dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)])
 def reset_preferences(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     db.query(BehaviorInsightPreference).delete(synchronize_session=False)
     budget = db.query(AppSetting).filter_by(key=BUDGET_KEY).first()
     if budget:
@@ -115,12 +103,11 @@ def reset_preferences(
     return compute_behavior_insights(db)
 
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)])
 def export_insights(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     return Response(
         content=export_behavior_insights_csv(db),
         media_type="text/csv",

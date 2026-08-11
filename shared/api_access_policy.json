@@ -1,0 +1,571 @@
+{
+  "default": "deny_unclassified",
+  "routes": {
+    "DELETE /api/v1/accounts/{account_id}": {
+      "access": "authenticated_free"
+    },
+    "DELETE /api/v1/goals/{goal_id}": {
+      "access": "authenticated_free"
+    },
+    "DELETE /api/v1/income-sources/{source_id}": {
+      "access": "authenticated_free"
+    },
+    "DELETE /api/v1/income/{source_id}": {
+      "access": "authenticated_free"
+    },
+    "DELETE /api/v1/license": {
+      "access": "authenticated_free"
+    },
+    "DELETE /api/v1/llm/config/{config_id}": {
+      "access": "authenticated_free"
+    },
+    "DELETE /api/v1/net-worth/{item_id}": {
+      "access": "paid",
+      "feature": "net_worth"
+    },
+    "DELETE /api/v1/settings/developer/rules/{rule_id}": {
+      "access": "authenticated_free"
+    },
+    "DELETE /api/v1/subscriptions/{sub_id}": {
+      "access": "authenticated_free"
+    },
+    "DELETE /api/v1/transactions/{transaction_id}": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/accounts": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/accounts/parser-profiles": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/accounts/sender-mappings": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/advisor/digest": {
+      "access": "paid",
+      "feature": "advanced_reports"
+    },
+    "GET /api/v1/advisor/digest/settings": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/audit/month-status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/audit/sessions": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/audit/sessions/{session_id}": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/auth/gmail/callback": {
+      "access": "public"
+    },
+    "GET /api/v1/auth/gmail/status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/auth/gmail/url": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/auth/status": {
+      "access": "public"
+    },
+    "GET /api/v1/behavior-insights": {
+      "access": "paid",
+      "feature": "behavior_insights"
+    },
+    "GET /api/v1/behavior-insights/export": {
+      "access": "paid",
+      "feature": "behavior_insights"
+    },
+    "GET /api/v1/behavior-insights/sponsor/card": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/cash-flow/calendar": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/dashboard/category-breakdown": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/dashboard/months": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/dashboard/spending-trend": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/dashboard/stats": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/elasticity": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/goal-contribution-suggestions": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/goals": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/goals/{goal_id}/contributions": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/health": {
+      "access": "public"
+    },
+    "GET /api/v1/income": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/income-sources": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/income/stats": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/income/{source_id}": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/ingest/gmail/range/status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/ingest/gmail/sync-status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/ingest/scheduler/status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/ingest/settings": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/ingest/status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/license": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/llm/config": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/llm/providers": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/net-worth": {
+      "access": "paid",
+      "feature": "net_worth"
+    },
+    "GET /api/v1/net-worth/market-data/config/status": {
+      "access": "paid",
+      "feature": "net_worth"
+    },
+    "GET /api/v1/net-worth/{item_id}": {
+      "access": "paid",
+      "feature": "net_worth"
+    },
+    "GET /api/v1/onboarding": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/profile": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/recurring": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/reports/csv": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/reports/detailed": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/reports/fy": {
+      "access": "paid",
+      "feature": "advanced_reports"
+    },
+    "GET /api/v1/reports/pdf/summary": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/reports/summary": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/review": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/review/categories": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/review/stats": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/reward-pilot/preview": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/reward-pilot/status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/settings": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/settings/backups": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/settings/classification-memory": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/settings/classification-memory/export": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/settings/developer": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/settings/health": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/subscriptions": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/subscriptions/exchange-rates": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/subscriptions/reminders": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/subscriptions/stats": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/subscriptions/suggestions": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/subscriptions/{sub_id}": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/diagnostics": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/duplicate-groups": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/embeddings/status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/feature-flags": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/local-ai/download": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/local-ai/profile": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/merchant-merge-suggestions": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/merchants/{merchant_id}/similar": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/stale-merchants": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/system/suggested-rules": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/taxonomy": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/transactions": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/transactions/{transaction_id}": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/transfers": {
+      "access": "paid",
+      "feature": "multi_bank"
+    },
+    "PATCH /api/v1/accounts/{account_id}": {
+      "access": "conditional_paid",
+      "feature": "multi_bank"
+    },
+    "POST /api/v1/accounts": {
+      "access": "conditional_paid",
+      "feature": "multi_bank"
+    },
+    "POST /api/v1/advisor/chat": {
+      "access": "paid",
+      "feature": "ai_classification"
+    },
+    "POST /api/v1/advisor/digest/send": {
+      "access": "paid",
+      "feature": "advanced_reports"
+    },
+    "POST /api/v1/audit/start": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/audit/{session_id}/discard": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/audit/{session_id}/finalize": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/audit/{session_id}/reopen": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/auth/change-pin": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/auth/gmail/disconnect": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/auth/logout": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/auth/set-pin": {
+      "access": "public"
+    },
+    "POST /api/v1/auth/verify-pin": {
+      "access": "public"
+    },
+    "POST /api/v1/behavior-insights/reset": {
+      "access": "paid",
+      "feature": "behavior_insights"
+    },
+    "POST /api/v1/goal-contribution-suggestions/{suggestion_id}/decision": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/goals": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/goals/{goal_id}/contributions": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/goals/{goal_id}/contributions/{contribution_id}/void": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/goals/{goal_id}/simulate": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/income": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/income-sources": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/gmail": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/gmail/initial": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/gmail/initial/start": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/gmail/range": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/gmail/range/start": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/settings": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/upload": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/upload/import": {
+      "access": "conditional_paid",
+      "feature": "multi_bank"
+    },
+    "POST /api/v1/ingest/upload/preview": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/upload/reconcile": {
+      "access": "conditional_paid",
+      "feature": "multi_bank"
+    },
+    "POST /api/v1/license/activate": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/license/verify": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/llm/config": {
+      "access": "paid",
+      "feature": "ai_classification"
+    },
+    "POST /api/v1/llm/config/activate/{config_id}": {
+      "access": "paid",
+      "feature": "ai_classification"
+    },
+    "POST /api/v1/llm/config/test": {
+      "access": "paid",
+      "feature": "ai_classification"
+    },
+    "POST /api/v1/net-worth": {
+      "access": "paid",
+      "feature": "net_worth"
+    },
+    "POST /api/v1/net-worth/{item_id}/refresh": {
+      "access": "paid",
+      "feature": "net_worth"
+    },
+    "POST /api/v1/recurring/detect": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/reports/ai/insights": {
+      "access": "paid",
+      "feature": "advanced_reports"
+    },
+    "POST /api/v1/reports/fy/pack": {
+      "access": "paid",
+      "feature": "advanced_reports"
+    },
+    "POST /api/v1/reports/pdf/detailed": {
+      "access": "paid",
+      "feature": "advanced_reports"
+    },
+    "POST /api/v1/review/batch-resolve": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/review/{transaction_id}/chat": {
+      "access": "paid",
+      "feature": "ai_classification"
+    },
+    "POST /api/v1/review/{transaction_id}/resolve": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/reward-pilot/submit": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/settings/backup": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/settings/classification-memory/reset": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/settings/classification-memory/{correction_id}/undo": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/settings/developer/rules": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/settings/reset-data": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/subscriptions": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/subscriptions/exchange-rates/refresh": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/subscriptions/suggestions/scan": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/subscriptions/suggestions/{suggestion_id}/decision": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/system/auto-generate-rules": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/system/embeddings/disable": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/system/embeddings/enable": {
+      "access": "paid",
+      "feature": "ai_classification"
+    },
+    "POST /api/v1/system/local-ai/benchmark": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/system/local-ai/download": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/system/local-ai/download/cancel": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/system/merge-merchants": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/transactions": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/transfers/scan": {
+      "access": "paid",
+      "feature": "multi_bank"
+    },
+    "POST /api/v1/transfers/{match_id}/decision": {
+      "access": "paid",
+      "feature": "multi_bank"
+    },
+    "PUT /api/v1/accounts/sender-mappings": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/advisor/digest/settings": {
+      "access": "paid",
+      "feature": "advanced_reports"
+    },
+    "PUT /api/v1/behavior-insights/config": {
+      "access": "paid",
+      "feature": "behavior_insights"
+    },
+    "PUT /api/v1/behavior-insights/{metric_key}": {
+      "access": "paid",
+      "feature": "behavior_insights"
+    },
+    "PUT /api/v1/goals/{goal_id}": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/income-sources/{source_id}": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/income/{source_id}": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/llm/config/{config_id}": {
+      "access": "paid",
+      "feature": "ai_classification"
+    },
+    "PUT /api/v1/net-worth/market-data/config": {
+      "access": "paid",
+      "feature": "net_worth"
+    },
+    "PUT /api/v1/net-worth/{item_id}": {
+      "access": "paid",
+      "feature": "net_worth"
+    },
+    "PUT /api/v1/onboarding": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/reports/preferences/savings-target": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/reward-pilot/consent": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/settings/classification-memory/personal": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/settings/developer/rules/{rule_id}": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/settings/preferences/developer-mode": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/settings/preferences/network-access": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/settings/preferences/timezone": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/settings/{key}": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/subscriptions/{sub_id}": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/system/local-ai/choice": {
+      "access": "authenticated_free"
+    },
+    "PUT /api/v1/transactions/{transaction_id}": {
+      "access": "authenticated_free"
+    }
+  },
+  "schema_version": 1
+}

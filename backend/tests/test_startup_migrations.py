@@ -2,13 +2,14 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 from app.core import startup_migrations
 from app.core.database import Base
 from app.core.startup_migrations import (
     CURRENT_SCHEMA_REVISION,
+    MIGRATION_REGISTRY,
     SchemaMigrationError,
     apply_additive_schema_updates,
     backup_before_schema_update,
@@ -17,6 +18,62 @@ from app.core.startup_migrations import (
     validate_schema_postconditions,
 )
 from app.models.app_setting import AppSetting
+
+
+def test_migration_registry_is_contiguous_and_ends_at_current_revision():
+    revisions = [migration.revision for migration in MIGRATION_REGISTRY]
+
+    assert revisions == list(range(revisions[0], CURRENT_SCHEMA_REVISION + 1))
+    assert revisions[0] == 11
+    assert len({migration.name for migration in MIGRATION_REGISTRY}) == len(revisions)
+
+
+def test_supported_fresh_lifecycle_schema_covers_current_model_metadata(tmp_path):
+    """Detect model columns that the supported startup lifecycle cannot create."""
+
+    db_path = tmp_path / "schema-equivalence.db"
+    apply_additive_schema_updates(str(db_path))
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        Base.metadata.create_all(bind=engine)
+        apply_additive_schema_updates(str(db_path))
+        Session = sessionmaker(bind=engine)
+        with Session() as db:
+            record_schema_revision(db)
+        validate_schema_postconditions(str(db_path))
+
+        reflected = inspect(engine)
+        actual_tables = set(reflected.get_table_names())
+        model_tables = set(Base.metadata.tables)
+        assert model_tables <= actual_tables
+
+        for table_name, table in Base.metadata.tables.items():
+            actual_columns = {
+                column["name"]: column
+                for column in reflected.get_columns(table_name)
+            }
+            assert {column.name for column in table.columns} <= set(
+                actual_columns
+            ), table_name
+            actual_primary_key = set(
+                reflected.get_pk_constraint(table_name).get(
+                    "constrained_columns",
+                    [],
+                )
+            )
+            expected_primary_key = {
+                column.name for column in table.primary_key.columns
+            }
+            assert actual_primary_key == expected_primary_key, table_name
+
+            for column in table.columns:
+                if not column.nullable and not column.primary_key:
+                    assert actual_columns[column.name]["nullable"] is False, (
+                        table_name,
+                        column.name,
+                    )
+    finally:
+        engine.dispose()
 
 
 def test_fresh_database_post_create_pass_installs_all_registry_invariants(

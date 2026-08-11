@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "runtime_contract": {
+    "python": "3.12",
+    "node": "22",
+    "backend_command": "python -m pytest backend/tests -q",
+    "frontend_commands": [
+      "npm ci",
+      "npm run lint",
+      "npm run build"
+    ]
+  },
+  "risk_domains": {
+    "authorization_and_entitlements": {
+      "tests": [
+        "backend/tests/test_api_access_policy.py",
+        "backend/tests/test_auth.py",
+        "backend/tests/test_entitlements.py",
+        "backend/tests/test_license.py",
+        "backend/tests/test_local_api_trust.py",
+        "backend/tests/test_system.py"
+      ],
+      "invariants": [
+        "Every API route has a reviewed public, authenticated-free, paid, or conditional-paid classification.",
+        "Paid routes retain a declarative entitlement dependency and an authenticated session dependency.",
+        "PIN, session, local-origin, step-up, and feature failures fail closed."
+      ]
+    },
+    "destructive_and_recovery_operations": {
+      "tests": [
+        "backend/tests/test_backup.py",
+        "backend/tests/test_backup_recovery.py",
+        "backend/tests/test_data_reset_safety.py",
+        "backend/tests/test_update_recovery.py"
+      ],
+      "invariants": [
+        "Reset and restore require verified recovery material and preserve rollback evidence.",
+        "Backup names cannot collide and retention never removes the active recovery point."
+      ]
+    },
+    "financial_money_and_reports": {
+      "tests": [
+        "backend/tests/test_behavior_insights_correctness.py",
+        "backend/tests/test_budget.py",
+        "backend/tests/test_exact_money.py",
+        "backend/tests/test_financial_input_validation.py",
+        "backend/tests/test_net_worth_correctness.py",
+        "backend/tests/test_reports.py",
+        "backend/tests/test_tax_pack.py",
+        "backend/tests/test_transaction_semantics.py"
+      ],
+      "invariants": [
+        "Money inputs are finite, range-bounded, and normalized with explicit decimal rounding.",
+        "Transfers, refunds, reversals, income, spending, goals, FX, reports, and tax packs share verified semantics.",
+        "Sparse or incomplete evidence is disclosed instead of converted into authoritative advice."
+      ]
+    },
+    "idempotency_concurrency_and_jobs": {
+      "tests": [
+        "backend/tests/test_database_constraints.py",
+        "backend/tests/test_goal_contributions.py",
+        "backend/tests/test_ingestion.py",
+        "backend/tests/test_recurring_scalability.py",
+        "backend/tests/test_scheduler_health.py"
+      ],
+      "invariants": [
+        "Duplicate source identities and retries cannot create duplicate financial effects.",
+        "Concurrent writes are guarded by database identities, rollback, or explicit conflict handling."
+      ]
+    },
+    "integration_failure_boundaries": {
+      "tests": [
+        "backend/tests/test_email_parser.py",
+        "backend/tests/test_error_boundaries.py",
+        "backend/tests/test_fx_service.py",
+        "backend/tests/test_gmail_service.py",
+        "backend/tests/test_llm_privacy.py",
+        "backend/tests/test_local_ai.py"
+      ],
+      "invariants": [
+        "Gmail, LLM, FX, licensing, parser, and local-model failures expose stable safe errors with request correlation.",
+        "Provider text, secrets, paths, and raw financial narration do not cross public error or hosted-AI boundaries."
+      ]
+    },
+    "parser_and_import_controls": {
+      "tests": [
+        "backend/tests/test_parser_plugins.py",
+        "backend/tests/test_statement.py",
+        "backend/tests/test_statement_amount_semantics.py",
+        "backend/tests/test_statement_parser_safety.py"
+      ],
+      "invariants": [
+        "Unsupported or ambiguous statements are rejected.",
+        "Direction, row identity, source provenance, control totals, preview fingerprints, and finalized-period checks survive import."
+      ]
+    },
+    "schema_startup_and_migrations": {
+      "tests": [
+        "backend/tests/test_bootstrap.py",
+        "backend/tests/test_real_lifespan.py",
+        "backend/tests/test_startup_migrations.py"
+      ],
+      "invariants": [
+        "The real lifespan initializes encryption, migration, seeds, auth state, optional AI, scheduler, readiness, and shutdown in order.",
+        "The ordered migration registry is contiguous, restart-safe, backed up, validated, and schema-compatible with model metadata."
+      ]
+    },
+    "user_interface_and_accessibility": {
+      "tests": [
+        "playwright-tests/tests/accessibility-smoke.test.js",
+        "playwright-tests/tests/production-smoke.test.js",
+        "playwright-tests/tests/remediation-ui.test.js",
+        "playwright-tests/tests/website-product.test.js"
+      ],
+      "invariants": [
+        "Critical desktop and website journeys support keyboard input, narrow viewports, and reduced motion.",
+        "Release browser and packaged-platform matrices are tracked separately and cannot be inferred from unit-test count."
+      ]
+    }
+  },
+  "selective_mutation_targets": [
+    {
+      "domain": "authorization",
+      "protected_by": "backend/tests/test_api_access_policy.py",
+      "mutations_expected_to_fail": [
+        "remove a paid dependency",
+        "remove session authentication",
+        "change a paid feature ID",
+        "add an unreviewed route"
+      ]
+    },
+    {
+      "domain": "financial formulas",
+      "protected_by": "backend/tests/test_budget.py",
+      "mutations_expected_to_fail": [
+        "change annuity contribution timing",
+        "remove zero-return branch",
+        "change cent rounding",
+        "treat incomplete periods as complete"
+      ]
+    }
+  ]
+}

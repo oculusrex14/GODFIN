@@ -593,8 +593,11 @@ def test_behavior_budget_rejects_unsafe_amount(auth_client, db_session, monthly_
     ],
 )
 def test_semantic_enums_and_collection_bounds_reject_invalid_payloads(
-    auth_client, path, payload
+    auth_client, db_session, path, payload
 ):
+    # Reach paid request validation rather than stopping at the entitlement
+    # dependency for the AI-review case.
+    _activate_max(db_session)
     response = auth_client.post(path, json=payload)
 
     assert response.status_code == 422, response.text

@@ -135,7 +135,7 @@ def test_llm_connection_fault_is_not_returned_as_http_success(
 ):
     leaked = "provider key sk-private at /Users/private/llm.json"
     monkeypatch.setattr(
-        "app.api.v1.endpoints.llm.enforce_feature",
+        "app.api.v1.entitlements.enforce_feature",
         lambda *_args, **_kwargs: None,
     )
 
@@ -160,7 +160,7 @@ def test_llm_provider_failure_message_is_never_reflected(
 ):
     leaked = "authentication failed for sk-private in /Users/private/config"
     monkeypatch.setattr(
-        "app.api.v1.endpoints.llm.enforce_feature",
+        "app.api.v1.entitlements.enforce_feature",
         lambda *_args, **_kwargs: None,
     )
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -38,6 +38,20 @@ PUBLIC_ROUTES = {
     ("gmail.py", "gmail_oauth_callback"),
     ("health.py", "health_check"),
 }
+
+
+def _activate_max(db) -> None:
+    for key, value in {
+        "license_tier": "max",
+        "license_status": "active",
+        "license_verified_at": datetime.now(UTC).isoformat(),
+    }.items():
+        setting = db.query(AppSetting).filter_by(key=key).first()
+        if setting:
+            setting.value = value
+        else:
+            db.add(AppSetting(key=key, value=value))
+    db.commit()
 
 
 def _assert_error_shape(response, *, code: str) -> None:
@@ -103,10 +117,14 @@ def _assert_error_shape(response, *, code: str) -> None:
 )
 def test_bounded_request_contracts_reject_oversized_or_unknown_values(
     auth_client,
+    db_session,
     method,
     path,
     payload,
 ):
+    # Paid dependencies intentionally run before request-body validation, so
+    # activate the test entitlement before exercising the validation contract.
+    _activate_max(db_session)
     response = auth_client.request(method, path, json=payload)
     assert response.status_code == 422
     _assert_error_shape(response, code="VALIDATION_ERROR")

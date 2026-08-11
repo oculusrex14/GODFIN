@@ -37,8 +37,12 @@ LOCAL_API_POLICY = LocalApiPolicy.from_environment()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if os.environ.get("GODFIN_TESTING") == "1":
+        app.state.lifecycle_status = "test"
         yield
         return
+
+    app.state.lifecycle_status = "starting"
+    app.state.scheduler_status = "starting"
 
     # Initialize structured logging
     setup_logging()
@@ -114,8 +118,12 @@ async def lifespan(app: FastAPI):
 
         scheduler_recovery = schedule_scheduler_recovery
         if not start_scheduler(DB_PATH, backup_dir):
+            app.state.scheduler_status = "degraded"
             logger.warning("Backup scheduler is degraded and will retry")
+        else:
+            app.state.scheduler_status = "ready"
     except Exception as exc:
+        app.state.scheduler_status = "degraded"
         logger.error("Backup scheduler startup failed (%s)", type(exc).__name__)
         if scheduler_recovery is not None:
             try:
@@ -126,15 +134,19 @@ async def lifespan(app: FastAPI):
                     type(recovery_exc).__name__,
                 )
 
+    app.state.lifecycle_status = "ready"
     yield
 
     # Shutdown scheduler
+    app.state.lifecycle_status = "stopping"
     try:
         from app.core.scheduler import stop_scheduler
         stop_scheduler()
     except Exception:
         pass
 
+    app.state.lifecycle_status = "stopped"
+    app.state.scheduler_status = "stopped"
     logger.info("GODFIN shutting down")
 
 

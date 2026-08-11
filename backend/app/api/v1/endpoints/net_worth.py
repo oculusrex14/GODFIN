@@ -7,12 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
-from app.api.v1.endpoints.license import enforce_feature
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
 from app.core.database import get_db
-from app.core.errors import ApplicationError, IntegrationUnavailableError
+from app.core.errors import IntegrationUnavailableError
 from app.core.encryption import SecretDecryptionError, decrypt, encrypt
-from app.core.feature_flags import FeatureDisabledError, require_feature_flag
 from app.core.fx import FxRateUnavailable, get_inr_rates
 from app.core.money import (
     FX_RATE_SCALE,
@@ -49,6 +48,11 @@ from app.schemas.financial import (
 )
 
 router = APIRouter()
+NET_WORTH_ENTITLEMENT = require_entitlement(
+    "net_worth",
+    "net_worth",
+    "Net Worth is not available in this build.",
+)
 TWELVE_DATA_API = "https://api.twelvedata.com"
 MARKET_CLASSES = {"stock", "etf", "mutual_fund", "crypto", "bond", "metal"}
 ILLQUID_CLASSES = {"property", "land", "gem", "private_asset", "other"}
@@ -111,19 +115,6 @@ class MarketDataConfig(BaseModel):
 
     api_key: str | None = Field(default=None, max_length=200)
     base_currency: SupportedSubscriptionCurrency = "INR"
-
-
-def _authorize(db: Session) -> None:
-    try:
-        require_feature_flag(db, "net_worth")
-    except FeatureDisabledError as exc:
-        raise ApplicationError(
-            code="FEATURE_UNAVAILABLE",
-            message="Net Worth is not available in this build.",
-            status_code=404,
-            category="availability",
-        ) from exc
-    enforce_feature(db, "net_worth")
 
 
 def _validate_item_payload(
@@ -205,22 +196,24 @@ def _prepare_item_conversion(
     return context
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(NET_WORTH_ENTITLEMENT)])
 def summary(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     return net_worth_summary(db)
 
 
-@router.post("", status_code=201)
+@router.post(
+    "",
+    status_code=201,
+    dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+)
 def create_item(
     body: NetWorthItemCreate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     _validate_item_payload(
         valuation_mode=body.valuation_mode,
         asset_class=body.asset_class,
@@ -246,13 +239,12 @@ def create_item(
     return serialize_item(item, db=db, context=context)
 
 
-@router.get("/{item_id}")
+@router.get("/{item_id}", dependencies=[Depends(NET_WORTH_ENTITLEMENT)])
 def get_item(
     item_id: str,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     item = db.query(NetWorthItem).filter_by(id=item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")
@@ -263,14 +255,13 @@ def get_item(
     return serialize_item(item, db=db, context=context, include_history=True)
 
 
-@router.put("/{item_id}")
+@router.put("/{item_id}", dependencies=[Depends(NET_WORTH_ENTITLEMENT)])
 def update_item(
     item_id: str,
     body: NetWorthItemUpdate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     item = db.query(NetWorthItem).filter_by(id=item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")
@@ -305,13 +296,16 @@ def update_item(
     return serialize_item(item, db=db, context=context, include_history=True)
 
 
-@router.delete("/{item_id}", status_code=204)
+@router.delete(
+    "/{item_id}",
+    status_code=204,
+    dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+)
 def delete_item(
     item_id: str,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     item = db.query(NetWorthItem).filter_by(id=item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")
@@ -319,12 +313,14 @@ def delete_item(
     db.commit()
 
 
-@router.get("/market-data/config/status")
+@router.get(
+    "/market-data/config/status",
+    dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+)
 def market_data_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     encrypted_key = _setting(db, MARKET_DATA_KEY)
     return {
         "provider": "Twelve Data",
@@ -340,13 +336,15 @@ def market_data_status(
     }
 
 
-@router.put("/market-data/config")
+@router.put(
+    "/market-data/config",
+    dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+)
 def configure_market_data(
     body: MarketDataConfig,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     previous_base = get_base_currency(db)
     new_base = body.base_currency.upper()
     _set_setting(db, BASE_CURRENCY_KEY, new_base)
@@ -383,13 +381,15 @@ def configure_market_data(
     }
 
 
-@router.post("/{item_id}/refresh")
+@router.post(
+    "/{item_id}/refresh",
+    dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+)
 def refresh_quote(
     item_id: str,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    _authorize(db)
     item = db.query(NetWorthItem).filter_by(id=item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")

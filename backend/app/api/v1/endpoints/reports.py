@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
 from app.core.csv_security import spreadsheet_safe_mapping, spreadsheet_safe_row
 from app.core.database import get_db
@@ -36,6 +37,7 @@ from app.models.llm_config import LLMConfiguration
 from app.schemas.financial import YearMonth
 
 router = APIRouter()
+ADVANCED_REPORTS_ENTITLEMENT = require_entitlement("advanced_reports")
 AI_REPORT_CONSENT_VERSION = "2026-08-02"
 
 
@@ -204,16 +206,16 @@ def _ai_report_metadata(llm_config: LLMConfiguration) -> dict:
     }
 
 
-@router.post("/ai/insights")
+@router.post(
+    "/ai/insights",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+)
 def report_ai_insights(
     body: AIReportRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Structured, LLM-authored financial insights for the month."""
-    from app.api.v1.endpoints.license import enforce_feature
-
-    enforce_feature(db, "advanced_reports")
     if body.consent is not True:
         raise HTTPException(
             status_code=400,
@@ -331,7 +333,7 @@ def report_csv(
     )
 
 
-@router.get("/fy")
+@router.get("/fy", dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)])
 def report_financial_year(
     start_year: int = Query(ge=2000, le=2100),
     format: str = Query(default="csv", pattern=r"^(csv|json)$"),
@@ -339,9 +341,6 @@ def report_financial_year(
     _user: bool = Depends(get_current_user),
 ):
     """Export an Indian financial year (April–March) for a CA."""
-    from app.api.v1.endpoints.license import enforce_feature
-
-    enforce_feature(db, "advanced_reports")
     start = date(start_year, 4, 1)
     end = date(start_year + 1, 4, 1)
     transactions = (
@@ -407,16 +406,16 @@ def report_financial_year(
     )
 
 
-@router.post("/fy/pack")
+@router.post(
+    "/fy/pack",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+)
 def report_financial_year_pack(
     body: TaxPackRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Build an AES-256 encrypted, review-oriented Indian FY tax pack."""
-    from app.api.v1.endpoints.license import enforce_feature
-
-    enforce_feature(db, "advanced_reports")
     content = build_financial_year_tax_pack(
         db,
         body.start_year,
@@ -437,15 +436,15 @@ def report_financial_year_pack(
     )
 
 
-@router.post("/pdf/detailed")
+@router.post(
+    "/pdf/detailed",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+)
 def report_pdf_detailed(
     body: AIReportRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    from app.api.v1.endpoints.license import enforce_feature
-
-    enforce_feature(db, "advanced_reports")
     if body.consent is not True:
         raise HTTPException(
             status_code=400,

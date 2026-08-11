@@ -8,17 +8,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.errors import IntegrationUnavailableError, StateConflictError
 from app.core.advisor_service import chat
 from app.core.advisor_digest import build_weekly_digest, digest_to_html
-from app.api.v1.endpoints.license import enforce_feature
 from app.core.gmail_service import gmail_service
 from app.models.app_setting import AppSetting
 from app.schemas.financial import ChatRole
 
 router = APIRouter()
+AI_CLASSIFICATION_ENTITLEMENT = require_entitlement("ai_classification")
+ADVANCED_REPORTS_ENTITLEMENT = require_entitlement("advanced_reports")
 
 
 class ChatMessage(BaseModel):
@@ -40,14 +42,17 @@ class DigestSettingsUpdate(BaseModel):
     recipient: str | None = Field(default=None, max_length=254)
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post(
+    "/chat",
+    response_model=ChatResponse,
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def advisor_chat(
     body: ChatRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Send a message to the financial advisor AI."""
-    enforce_feature(db, "ai_classification")
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
@@ -77,12 +82,11 @@ def _setting_value(db: Session, key: str, default: str = "") -> str:
     return setting.value if setting is not None else default
 
 
-@router.get("/digest")
+@router.get("/digest", dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)])
 def advisor_weekly_digest(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    enforce_feature(db, "advanced_reports")
     return build_weekly_digest(db)
 
 
@@ -103,13 +107,15 @@ def get_digest_settings(
     }
 
 
-@router.put("/digest/settings")
+@router.put(
+    "/digest/settings",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+)
 def update_digest_settings(
     body: DigestSettingsUpdate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    enforce_feature(db, "advanced_reports")
     recipient = (body.recipient or "").strip()
     if body.enabled and "@" not in recipient:
         raise HTTPException(
@@ -124,12 +130,14 @@ def update_digest_settings(
     return get_digest_settings(db, _user=True)
 
 
-@router.post("/digest/send")
+@router.post(
+    "/digest/send",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+)
 def send_advisor_digest(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    enforce_feature(db, "advanced_reports")
     recipient = _setting_value(db, "advisor_weekly_digest_recipient", "")
     if not recipient:
         raise HTTPException(status_code=400, detail="Configure a digest recipient first.")

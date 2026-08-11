@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
 from app.core.classification_learning import (
     classification_reason,
@@ -31,6 +32,7 @@ from app.schemas.financial import ChatRole, FiniteUnitInterval
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+AI_CLASSIFICATION_ENTITLEMENT = require_entitlement("ai_classification")
 
 
 # --- Review Chat models ---
@@ -371,7 +373,11 @@ def review_stats(
     )
 
 
-@router.post("/review/{transaction_id}/chat", response_model=ReviewChatResponse)
+@router.post(
+    "/review/{transaction_id}/chat",
+    response_model=ReviewChatResponse,
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def review_chat(
     transaction_id: str,
     body: ReviewChatRequest,
@@ -379,9 +385,6 @@ def review_chat(
     _user: bool = Depends(get_current_user),
 ):
     """Chat with AI to classify a specific transaction."""
-    from app.api.v1.endpoints.license import enforce_feature
-
-    enforce_feature(db, "ai_classification")
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
