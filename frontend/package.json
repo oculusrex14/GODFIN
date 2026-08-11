@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:auth": "node --test tests/auth-token-memory.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

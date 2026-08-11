@@ -96,21 +96,16 @@ test('login → upload → classify → generate report', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Export Reports' })).toBeVisible();
 
-  const pdfResult = await page.evaluate(async () => {
-    const token = localStorage.getItem('godfin_auth_token');
-    const response = await fetch('/api/v1/reports/pdf/summary?month=2026-07', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    return {
-      ok: response.ok,
-      status: response.status,
-      prefix: String.fromCharCode(...bytes.slice(0, 4)),
-      length: bytes.length,
-    };
-  });
-  expect(pdfResult).toMatchObject({ ok: true, status: 200, prefix: '%PDF' });
-  expect(pdfResult.length).toBeGreaterThan(1_000);
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Summary PDF' }).click();
+  const pdfDownload = await downloadPromise;
+  const pdfStream = await pdfDownload.createReadStream();
+  const pdfChunks = [];
+  for await (const chunk of pdfStream) pdfChunks.push(chunk);
+  const pdfBytes = Buffer.concat(pdfChunks);
+  expect(pdfDownload.suggestedFilename()).toMatch(/^godfin_summary_.*\.pdf$/);
+  expect(pdfBytes.subarray(0, 4).toString('ascii')).toBe('%PDF');
+  expect(pdfBytes.length).toBeGreaterThan(1_000);
 
   await page.getByRole('link', { name: 'Cash Flow' }).click();
   await expect(page.getByRole('heading', { name: 'Cash-flow Calendar' })).toBeVisible();

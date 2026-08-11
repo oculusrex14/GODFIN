@@ -2,7 +2,20 @@ const API_BASE = window.location.protocol === 'godfin:'
   ? 'http://127.0.0.1:5100/api/v1'
   : '/api/v1';
 
-const TOKEN_KEY = 'godfin_auth_token';
+const LEGACY_TOKEN_KEYS = ['godfin_auth_token', 'token', 'auth_token'];
+
+function purgeLegacyStoredTokens() {
+  for (const storageName of ['localStorage', 'sessionStorage']) {
+    try {
+      const storage = window[storageName];
+      for (const key of LEGACY_TOKEN_KEYS) storage?.removeItem(key);
+    } catch {
+      // Storage can be unavailable in hardened/private renderer contexts.
+    }
+  }
+}
+
+purgeLegacyStoredTokens();
 
 export class ApiError extends Error {
   constructor({
@@ -23,23 +36,12 @@ export class ApiError extends Error {
   }
 }
 
-function getStoredToken() {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-function setStoredToken(token) {
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(TOKEN_KEY);
-  }
-}
-
-let _token = getStoredToken();
+// Deliberately memory-only: reloads, window recreation, and app relaunches lock
+// the renderer even while an abandoned server-side session awaits expiry.
+let _token = null;
 
 export function setAuthToken(token) {
   _token = token;
-  setStoredToken(token);
 }
 
 export function getAuthToken() {
@@ -136,7 +138,14 @@ export function changePin(currentPin, newPin) {
 }
 
 export function logoutSession() {
-  return apiFetch('/auth/logout', { method: 'POST' });
+  const token = _token;
+  _token = null;
+  if (!token) return Promise.resolve(null);
+  return apiFetch('/auth/logout', {
+    method: 'POST',
+    auth: false,
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
 
 // LLM

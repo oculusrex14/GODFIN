@@ -371,6 +371,39 @@ test('unknown migrated PIN length expands on keyboard and paste input', async ({
   await expect(slots).toHaveAttribute('data-pin-slots', '8');
 });
 
+test('auth token stays out of renderer storage and reload locks the app', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('godfin_auth_token', 'legacy-local-token');
+    sessionStorage.setItem('auth_token', 'legacy-session-token');
+  });
+  await mockAuthenticatedApp(page);
+  await page.goto('/pin');
+  await page.getByLabel('Enter your PIN').fill('4826');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+
+  const storedTokens = await page.evaluate(() => ({
+    local: [
+      localStorage.getItem('godfin_auth_token'),
+      localStorage.getItem('token'),
+      localStorage.getItem('auth_token'),
+    ],
+    session: [
+      sessionStorage.getItem('godfin_auth_token'),
+      sessionStorage.getItem('token'),
+      sessionStorage.getItem('auth_token'),
+    ],
+  }));
+  expect(storedTokens).toEqual({
+    local: [null, null, null],
+    session: [null, null, null],
+  });
+
+  await page.reload();
+  await expect(page).toHaveURL(/\/pin$/);
+  await expect(page.getByRole('heading', { name: 'Enter Your PIN' })).toBeVisible();
+});
+
 test('calculation help stays in the viewport and settings remember expansion', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 });
   await mockAuthenticatedApp(page);

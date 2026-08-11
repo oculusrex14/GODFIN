@@ -54,15 +54,14 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
+    setIsAuthenticated(false);
     try {
-      // Call backend logout endpoint to invalidate token server-side
+      // The API client clears its memory-only token before awaiting the server.
       await logoutSession();
     } catch (e) {
-      // Continue with logout even if backend call fails
+      // The renderer remains locked even if the local backend is unavailable.
       console.warn('Logout API call failed:', e);
     }
-    setAuthToken(null);
-    setIsAuthenticated(false);
   }, []);
 
   return (

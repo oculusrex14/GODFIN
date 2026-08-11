@@ -126,7 +126,7 @@
 
 ### PIN Authentication
 - **PIN Inputs:** `input[type="password"]` (4 separate fields)
-- **Auth Token:** `godfin_auth_token` in localStorage
+- **Auth Token:** Memory-only in the renderer; reload/window recreation requires the PIN
 - **Helper:** Use `enterPIN(page)` from helpers/auth.js
 
 ### Navigation

@@ -5,6 +5,7 @@ const { chromium } = require('@playwright/test');
 const repoRoot = path.resolve(__dirname, '../..');
 const statementPath = process.env.GODFIN_E2E_STATEMENT;
 if (!statementPath) throw new Error('GODFIN_E2E_STATEMENT is required');
+const baseURL = process.env.GODFIN_E2E_BASE_URL || 'http://127.0.0.1:5200';
 
 const websiteScreenshots = path.join(repoRoot, 'website/public/screenshots');
 const privateArtifacts = path.join(repoRoot, 'docs/launch-artifacts');
@@ -18,7 +19,7 @@ let activeContext;
 const browser = await chromium.launch({ headless: true });
 activeBrowser = browser;
 const context = await browser.newContext({
-  baseURL: process.env.GODFIN_E2E_BASE_URL || 'http://127.0.0.1:5200',
+  baseURL,
   viewport: { width: 1244, height: 716 },
   recordVideo: {
     dir: privateArtifacts,
@@ -29,6 +30,7 @@ const context = await browser.newContext({
 activeContext = context;
 const page = await context.newPage();
 const video = page.video();
+let authToken = null;
 
 async function pause(milliseconds = 700) {
   await page.waitForTimeout(milliseconds);
@@ -44,27 +46,31 @@ async function screenshot(name, website = false) {
 }
 
 async function api(pathname, options = {}) {
-  return page.evaluate(async ({ pathname: endpoint, options: requestOptions }) => {
-    const token = localStorage.getItem('godfin_auth_token');
-    const response = await fetch(`/api/v1${endpoint}`, {
-      ...requestOptions,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        ...(requestOptions.headers || {}),
-      },
-    });
-    const body = response.status === 204 ? null : await response.json();
-    if (!response.ok) {
-      throw new Error(`${endpoint} failed (${response.status}): ${JSON.stringify(body)}`);
-    }
-    return body;
-  }, { pathname, options });
+  if (!authToken) throw new Error('Capture API called before authentication');
+  const response = await context.request.fetch(`${baseURL}/api/v1${pathname}`, {
+    method: options.method || 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${authToken}`,
+      ...(options.headers || {}),
+    },
+    data: options.body ? JSON.parse(options.body) : undefined,
+  });
+  const body = response.status() === 204 ? null : await response.json();
+  if (!response.ok()) {
+    throw new Error(`${pathname} failed (${response.status()}): ${JSON.stringify(body)}`);
+  }
+  return body;
 }
 
 await page.goto('/pin');
 await page.getByLabel('Choose a 4 to 6 digit PIN').fill('2468');
+const authResponsePromise = page.waitForResponse((response) => (
+  response.url().endsWith('/api/v1/auth/set-pin')
+  && response.request().method() === 'POST'
+));
 await page.getByRole('button', { name: 'Set PIN' }).click();
+authToken = (await (await authResponsePromise).json()).token;
 await page.getByRole('button', { name: 'Finish setup later' }).click();
 
 await page.getByRole('link', { name: 'Upload' }).click();
