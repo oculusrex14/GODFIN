@@ -1,5 +1,9 @@
 # GODFIN desktop packaging
 
+Repository architecture, supported versions, and shared verification commands
+are defined in [`../docs/ENGINEERING_GUIDE.md`](../docs/ENGINEERING_GUIDE.md).
+This file covers only the native desktop packaging surface.
+
 Electron is a hardened shell around two bundled, local artifacts:
 
 - `frontend/dist` is served through the privileged `godfin://app` protocol.

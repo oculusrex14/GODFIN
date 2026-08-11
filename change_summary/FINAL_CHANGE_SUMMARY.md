@@ -1,3 +1,7 @@
+> **ARCHIVED HISTORICAL DOCUMENT — DO NOT USE FOR CURRENT IMPLEMENTATION.**
+> This is a point-in-time change record, not evidence of current behavior.
+> Use `docs/production-remediation/REMEDIATION_FINDINGS_REGISTER.csv`.
+
 # Final Change Summary - Phase 2
 
 **Generated:** 2026-03-07

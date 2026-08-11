@@ -1,16 +1,32 @@
-# React + Vite
+# GODFIN desktop renderer
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This React 19 + Vite application is the renderer for the local Electron app. It
+talks only to the local FastAPI service and never owns credentials, filesystem
+access, Node.js integration, or a remote financial-data connection.
 
-Currently, two official plugins are available:
+Read [`../docs/ENGINEERING_GUIDE.md`](../docs/ENGINEERING_GUIDE.md) before
+changing runtime boundaries or commands.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Development
 
-## React Compiler
+From the repository root:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm ci --prefix frontend
+npm --prefix frontend run dev -- --host 127.0.0.1 --port 5200
+```
 
-## Expanding the ESLint configuration
+Normally use `./start.sh` so the backend is ready before Vite starts. The safe
+development default is `127.0.0.1`; private-LAN mode is an explicit app setting.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Verification
+
+```bash
+npm --prefix frontend run test:auth
+npm --prefix frontend run lint
+npm --prefix frontend run build
+```
+
+The active bearer token is memory-only. A renderer reload or app relaunch must
+return to the PIN screen. Do not add token persistence, remote scripts,
+permissive navigation, or direct provider calls.

@@ -1,3 +1,7 @@
+> **ARCHIVED HISTORICAL DOCUMENT — DO NOT USE FOR CURRENT IMPLEMENTATION.**
+> This OPUS4.6-era visual change log is retained as design provenance only.
+> Current UI behavior is defined by source, tests, and active product guidance.
+
 # Liquid Glass Theme - Changelog
 
 **Implementation Date:** 2026-03-03

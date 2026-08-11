@@ -1,3 +1,8 @@
+> **ARCHIVED HISTORICAL DOCUMENT — DO NOT USE FOR CURRENT IMPLEMENTATION.**
+> This versioned snapshot is retained for provenance. `PLAN.md` remains the
+> product authority; `docs/ENGINEERING_GUIDE.md` and generated stack facts
+> describe the current repository.
+
 # GODFIN — Final Build Specification v1.0
 ## Single Source of Truth for Claude Code Execution
 

@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+The authoritative technical guide is `docs/ENGINEERING_GUIDE.md`. `PLAN.md`
+remains the product-requirement authority. Historical build plans and change
+summaries are not implementation instructions.
+
 ## Project Overview
 
 GODFIN is a local-first, AI-augmented personal finance tracker for HDFC Bank users. It ingests transaction alerts from Gmail, classifies transactions using a 5-layer deterministic engine, and provides budgeting, reporting, and audit capabilities.
@@ -18,14 +22,14 @@ cd backend
 source venv/bin/activate  # On macOS/Linux
 # or on Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the reviewed lockfile
+venv/bin/python -m pip install --require-hashes -r requirements-lock.txt
 
 # Run backend server (port 5100)
-uvicorn app.main:app --reload --host 127.0.0.1 --port 5100
+venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 5100
 
 # Run tests
-pytest
+venv/bin/python -m pytest -q
 ```
 
 ### Frontend (Vite + React 19 + Tailwind CSS v4)
@@ -34,11 +38,11 @@ pytest
 # Navigate to frontend directory
 cd frontend
 
-# Install dependencies
-npm install
+# Install the lockfile
+npm ci
 
 # Run dev server (port 5200)
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 5200
 
 # Build for production
 npm run build
@@ -97,7 +101,7 @@ src/
    - Layer 4: Embedding similarity (sentence-transformers)
    - Layer 5: LLM fallback (OpenAI/Anthropic/Google with PII sanitization)
 
-2. **Audit State Machine**: Periods use `draft`, `finalized`, `locked`, and `discarded`. Finalized or locked months are immutable without explicit reopening.
+2. **Audit State Machine**: Draft months are editable. Finalized months are immutable until the user explicitly reopens them through the audit workflow.
 
 3. **Database**: SQLite with WAL mode enabled, busy_timeout=5000ms, and foreign_keys=ON. Fresh tables use SQLAlchemy `create_all`; upgrades use only the ordered registry in `app/core/startup_migrations.py`. Seeds never alter schema. See `docs/DATABASE_LIFECYCLE.md`.
 
@@ -107,8 +111,9 @@ src/
 
 ## Important Files
 
-- `GODFIN_Final_Build_Specification_v1 .md` — Single source of truth for project requirements
-- `Claude_Build_Plan.md` — 10-phase build strategy with skill usage guidelines
+- `PLAN.md` — Product requirements and non-negotiables
+- `docs/ENGINEERING_GUIDE.md` — Current technical source of truth
+- `docs/generated/STACK_FACTS.md` — Manifest-generated versions and ports
 - `backend/app/core/startup_migrations.py` — Authoritative ordered local database migrations
 - `backend/app/core/taxonomy.py` — Category/subcategory definitions (do not modify without spec alignment)
 - `backend/app/models/` — All data models; understand relationships before modifying
@@ -118,7 +123,7 @@ src/
 - The supported backend runtime is Python 3.12
 - Backend runs on port 5100 (configurable via `PORT` env var)
 - Frontend uses Tailwind CSS v4 with Vite plugin (no tailwind.config.js needed)
-- The app uses a PIN-based auth system with persistent token storage
+- The app uses PIN-based authentication; the active renderer bearer token is memory-only
 - LLM provider configuration is stored in the `llm_configs` table
 
 <!-- gitnexus:start -->
