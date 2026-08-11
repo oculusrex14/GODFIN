@@ -93,6 +93,13 @@ async def lifespan(app: FastAPI):
         # Load persistent auth token from database
         from app.core.auth import load_token_from_db
         load_token_from_db(db)
+
+        # Reconcile a model pull that completed or was interrupted while the
+        # backend was unavailable. This also terminates a verified orphaned
+        # Ollama CLI process before a user can retry the job.
+        from app.core.local_ai import restore_download_status
+
+        restore_download_status(db)
     finally:
         db.close()
 
@@ -139,6 +146,12 @@ async def lifespan(app: FastAPI):
 
     # Shutdown scheduler
     app.state.lifecycle_status = "stopping"
+    try:
+        from app.core.local_ai import shutdown_model_pull
+
+        shutdown_model_pull()
+    except Exception:
+        logger.warning("Local-model download shutdown did not finish cleanly")
     try:
         from app.core.scheduler import stop_scheduler
         stop_scheduler()

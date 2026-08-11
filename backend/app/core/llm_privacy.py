@@ -104,6 +104,30 @@ def sanitize_untrusted_text(value: Any, *, max_length: int = 160) -> str:
     return " ".join(text.split())[:max_length]
 
 
+def delimit_untrusted_text(
+    value: Any,
+    *,
+    label: str,
+    max_length: int = 160,
+) -> str:
+    """Serialize untrusted text as inert, bounded JSON inside fixed data markers."""
+    normalized_label = str(label or "").strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,31}", normalized_label):
+        raise ValueError("Untrusted-text label is invalid")
+    sanitized = sanitize_untrusted_text(value, max_length=max_length)
+    encoded = json.dumps(sanitized, ensure_ascii=True)
+    encoded = (
+        encoded.replace("<", r"\u003c")
+        .replace(">", r"\u003e")
+        .replace("&", r"\u0026")
+    )
+    return (
+        f"<BEGIN_UNTRUSTED_{normalized_label}_JSON>\n"
+        f"{encoded}\n"
+        f"<END_UNTRUSTED_{normalized_label}_JSON>"
+    )
+
+
 def _amount_band(match: re.Match[str]) -> str:
     raw = match.group(0)
     number_match = re.search(r"\d[\d,]*(?:\.\d+)?", raw)

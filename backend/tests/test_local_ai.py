@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -11,11 +12,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app.core import local_ai
 from app.core.local_ai import (
+    DOWNLOAD_STATE_KEY,
     BUILTIN_MODEL_REGISTRY,
     MINIMUM_REGISTRY_VERSION,
     _load_signed_registry,
     _validated_registry,
     load_model_registry,
+    local_model_readiness,
     recommend_model,
     restore_download_status,
     start_model_pull,
@@ -151,6 +154,48 @@ def test_model_recommendation_respects_disk_headroom():
     assert recommendation["model"] is None
 
 
+def test_model_recommendation_requires_measured_os_and_disk_headroom():
+    recommendation = recommend_model(
+        32,
+        27.9,
+        100,
+        "apple_metal",
+        BUILTIN_MODEL_REGISTRY,
+    )
+    assert recommendation["model"] == "qwen3:8b"
+    assert recommendation["required_available_ram_gb"] == 16.0
+    assert recommendation["required_disk_free_gb"] > recommendation["size_gb"]
+
+
+def test_macos_memory_reader_uses_current_vm_counters(monkeypatch):
+    responses = {
+        ("sysctl", "-n", "hw.memsize"): str(16 * 1024**3),
+        ("sysctl", "-n", "hw.pagesize"): "4096",
+        ("vm_stat",): (
+            "Mach Virtual Memory Statistics: (page size of 4096 bytes)\n"
+            "Pages free: 100000.\n"
+            "Pages inactive: 200000.\n"
+            "Pages speculative: 50000.\n"
+            "Pages purgeable: 25000.\n"
+        ),
+    }
+    monkeypatch.setattr(
+        local_ai.subprocess,
+        "check_output",
+        lambda command, **_kwargs: responses[tuple(command)],
+    )
+    total, available = local_ai._darwin_memory_bytes()
+    assert total == 16 * 1024**3
+    assert available == 375000 * 4096
+
+
+def test_runtime_context_is_bounded_by_headroom_and_installed_maximum():
+    metadata = BUILTIN_MODEL_REGISTRY["qwen3:4b"]
+    assert local_ai._runtime_context_tokens(metadata, 15, 32768) == 8192
+    assert local_ai._runtime_context_tokens(metadata, 11, 32768) == 4096
+    assert local_ai._runtime_context_tokens(metadata, 9, 1024) == 1024
+
+
 def test_signed_registry_can_prefer_new_smaller_qwen36():
     registry = {
         **BUILTIN_MODEL_REGISTRY,
@@ -176,6 +221,68 @@ def test_model_download_requires_explicit_approval():
 def test_model_download_rejects_unverified_variant():
     with pytest.raises(ValueError, match="validated registry"):
         start_model_pull("community:uncensored", confirmed=True)
+
+
+def test_model_download_reserves_single_flight_before_durable_write(monkeypatch):
+    model = "qwen3:4b"
+    status = {
+        "signature_verified": True,
+        "registry_version": MINIMUM_REGISTRY_VERSION,
+        "source": "bundled_signed",
+        "issued_at": "2026-08-01T00:00:00+00:00",
+        "expires_at": "2099-01-01T00:00:00+00:00",
+    }
+    write_started = threading.Event()
+    allow_write = threading.Event()
+    errors = []
+    original = local_ai.get_download_status()
+
+    def persist(record, *, strict=False):
+        if strict:
+            write_started.set()
+            assert allow_write.wait(timeout=5)
+
+    monkeypatch.setattr(
+        local_ai,
+        "load_model_registry",
+        lambda: (BUILTIN_MODEL_REGISTRY, status),
+    )
+    monkeypatch.setattr(local_ai.shutil, "which", lambda _name: "/usr/local/bin/ollama")
+    monkeypatch.setattr(local_ai, "restore_download_status", lambda _db: {"status": "idle"})
+    monkeypatch.setattr(
+        local_ai,
+        "_system_memory_bytes",
+        lambda: (16 * 1024**3, 11 * 1024**3, "test_measured"),
+    )
+    monkeypatch.setattr(
+        local_ai.shutil,
+        "disk_usage",
+        lambda _path: type("Usage", (), {"free": 100 * 1024**3})(),
+    )
+    monkeypatch.setattr(local_ai, "_ollama_version", lambda _path: "ollama test")
+    monkeypatch.setattr(local_ai, "_persist_download_state", persist)
+    monkeypatch.setattr(local_ai, "_run_model_pull", lambda *_args: None)
+
+    def first_request():
+        try:
+            start_model_pull(model, confirmed=True)
+        except Exception as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    local_ai._set_download_state(persist=False, status="idle", model=None)
+    try:
+        first = threading.Thread(target=first_request)
+        first.start()
+        assert write_started.wait(timeout=5)
+        with pytest.raises(local_ai.LocalAIActionConflict):
+            start_model_pull(model, confirmed=True)
+        allow_write.set()
+        first.join(timeout=5)
+        assert not first.is_alive()
+        assert errors == []
+    finally:
+        allow_write.set()
+        local_ai._set_download_state(persist=False, **original)
 
 
 def test_installed_model_digest_match_is_accepted(monkeypatch):
@@ -438,6 +545,183 @@ def test_restart_surfaces_a_missing_or_unreadable_model(db_session, monkeypatch)
         local_ai._set_download_state(**original)
     assert restored["status"] == "failed"
     assert "could not be read" in restored["message"]
+
+
+def test_restart_reconciles_a_durable_interrupted_pull(db_session, monkeypatch):
+    model = "qwen3:4b"
+    db_session.add(
+        AppSetting(
+            key=DOWNLOAD_STATE_KEY,
+            value=json.dumps(
+                {
+                    "status": "downloading",
+                    "model": model,
+                    "progress": 41,
+                    "pid": 12345,
+                    "job_id": "00000000-0000-4000-8000-000000000001",
+                }
+            ),
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        local_ai,
+        "verify_installed_model",
+        lambda *_args, **_kwargs: {
+            "verified": False,
+            "model": model,
+            "digest": None,
+            "registry": {"signature_verified": True},
+        },
+    )
+    terminated = []
+    monkeypatch.setattr(
+        local_ai,
+        "_terminate_persisted_process",
+        lambda record: terminated.append(record["pid"]) or True,
+    )
+    monkeypatch.setattr(local_ai, "_persist_download_state", lambda *_args, **_kwargs: None)
+    original = local_ai.get_download_status()
+    local_ai._set_download_state(persist=False, status="idle", model=None)
+    try:
+        restored = restore_download_status(db_session)
+    finally:
+        local_ai._set_download_state(persist=False, **original)
+    assert restored["status"] == "interrupted"
+    assert restored["progress"] == 41
+    assert restored["retryable"] is True
+    assert restored["orphan_process_terminated"] is True
+    assert terminated == [12345]
+
+
+def test_recent_exact_benchmark_is_required_for_activation(monkeypatch):
+    model = "qwen3:4b"
+    expected = BUILTIN_MODEL_REGISTRY[model]["expected_digest"]
+    monkeypatch.setattr(
+        local_ai,
+        "verify_installed_model",
+        lambda *_args, **_kwargs: {
+            "verified": True,
+            "model": model,
+            "digest": expected,
+        },
+    )
+    monkeypatch.setattr(
+        local_ai,
+        "_load_benchmark_record",
+        lambda *_args, **_kwargs: {
+            "success": True,
+            "digest": expected,
+            "tokens_per_second": 7.5,
+            "context_tokens": 4096,
+            "completed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    readiness = local_model_readiness(
+        model,
+        total_ram_gb=16,
+        available_ram_gb=11,
+        disk_free_gb=100,
+    )
+    assert readiness["ready"] is True
+    assert readiness["benchmark"]["tokens_per_second"] == 7.5
+
+
+def test_changed_digest_invalidates_a_previous_benchmark(monkeypatch):
+    model = "qwen3:4b"
+    expected = BUILTIN_MODEL_REGISTRY[model]["expected_digest"]
+    monkeypatch.setattr(
+        local_ai,
+        "verify_installed_model",
+        lambda *_args, **_kwargs: {
+            "verified": True,
+            "model": model,
+            "digest": expected,
+        },
+    )
+    monkeypatch.setattr(
+        local_ai,
+        "_load_benchmark_record",
+        lambda *_args, **_kwargs: {
+            "success": True,
+            "digest": "sha256:" + "0" * 64,
+            "tokens_per_second": 8,
+            "completed_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    readiness = local_model_readiness(
+        model,
+        total_ram_gb=16,
+        available_ram_gb=11,
+        disk_free_gb=100,
+    )
+    assert readiness == {
+        "ready": False,
+        "reason": "benchmark_digest_stale",
+        "required_available_ram_gb": 9.0,
+        "required_disk_free_gb": 5.0,
+        "os_headroom_gb": 2.0,
+    }
+
+
+def test_benchmark_uses_bounded_context_and_persists_activation_evidence(monkeypatch):
+    model = "qwen3:4b"
+    expected = BUILTIN_MODEL_REGISTRY[model]["expected_digest"]
+    requests = []
+    stored = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "response": "Savings rate compares verified income and spending.",
+                "eval_count": 20,
+                "eval_duration": 2_000_000_000,
+            }
+
+    monkeypatch.setattr(
+        local_ai,
+        "verify_installed_model",
+        lambda *_args, **_kwargs: {
+            "verified": True,
+            "model": model,
+            "digest": expected,
+        },
+    )
+    monkeypatch.setattr(
+        local_ai,
+        "_system_memory_bytes",
+        lambda: (16 * 1024**3, 11 * 1024**3, "test_measured"),
+    )
+    monkeypatch.setattr(
+        local_ai.shutil,
+        "disk_usage",
+        lambda _path: type("Usage", (), {"free": 100 * 1024**3})(),
+    )
+    monkeypatch.setattr(
+        local_ai,
+        "_ollama_model_metadata",
+        lambda _model: {"maximum_context_tokens": 4096},
+    )
+    monkeypatch.setattr(
+        local_ai.httpx,
+        "post",
+        lambda *args, **kwargs: requests.append((args, kwargs)) or Response(),
+    )
+    monkeypatch.setattr(
+        local_ai,
+        "_write_json_setting",
+        lambda key, record: stored.append((key, record)),
+    )
+    result = local_ai.benchmark_model(model)
+    assert result["success"] is True
+    assert result["activation_ready"] is True
+    assert result["context_tokens"] == 4096
+    assert requests[0][1]["json"]["options"]["num_ctx"] == 4096
+    assert stored[0][0] == "local_ai_benchmark:qwen3:4b"
+    assert stored[0][1]["digest"] == expected
 
 
 def test_local_ai_choice_is_persisted(auth_client):

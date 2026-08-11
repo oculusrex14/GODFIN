@@ -70,6 +70,25 @@ def test_ollama_local_accepts_only_loopback_http():
     assert provider.is_local is True
 
 
+def test_local_configuration_requires_a_verified_recent_benchmark(monkeypatch):
+    config = LLMConfiguration(
+        provider="ollama_local",
+        auth_method="none",
+        model="qwen3:4b",
+    )
+
+    def reject_unbenchmarked(_model, db=None):
+        del db
+        raise RuntimeError("benchmark required")
+
+    monkeypatch.setattr(
+        "app.core.local_ai.assert_local_model_ready",
+        reject_unbenchmarked,
+    )
+    with pytest.raises(RuntimeError, match="benchmark required"):
+        activate_configuration(config)
+
+
 def test_hosted_configuration_cannot_activate_without_consent():
     config = LLMConfiguration(
         provider="openai",

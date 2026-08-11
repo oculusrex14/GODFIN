@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.session import object_session
 
 from app.core.encryption import decrypt
 from app.core.llm_providers import create_provider
@@ -33,6 +34,10 @@ def activate_configuration(config: LLMConfiguration):
         raise ValueError(
             "Review and accept the hosted AI data disclosure before activation"
         )
+    if is_local_provider(config.provider):
+        from app.core.local_ai import assert_local_model_ready
+
+        assert_local_model_ready(config.model, db=object_session(config))
     provider = provider_from_config(config)
     set_llm_provider(provider)
     return provider
@@ -45,10 +50,10 @@ def initialize_active_llm(db: Session) -> Optional[LLMConfiguration]:
         return None
     try:
         activate_configuration(config)
-    except ValueError:
+    except (ValueError, RuntimeError):
         set_llm_provider(StubLLMProvider())
         logger.warning(
-            "Hosted LLM configuration requires renewed data consent before use"
+            "Stored LLM configuration is not currently safe to activate"
         )
         return config
     logger.info("LLM provider initialized: %s with model %s", config.provider, config.model)

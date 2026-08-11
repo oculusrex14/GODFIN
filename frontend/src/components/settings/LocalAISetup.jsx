@@ -80,7 +80,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
     queryKey: ['localAIDownload'],
     queryFn: fetchLocalAIDownload,
     refetchInterval: query => (
-      ['downloading', 'cancelling'].includes(query.state.data?.status) ? 1000 : false
+      ['queued', 'downloading', 'cancelling'].includes(query.state.data?.status) ? 1000 : false
     ),
   });
 
@@ -125,7 +125,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
   const registryVerified = profile?.registry?.signature_verified === true;
   const installedModelVerified = downloadStatus?.signature_verified === true
     && downloadStatus?.digest_verified === true;
-  const downloading = ['downloading', 'cancelling'].includes(downloadStatus?.status);
+  const downloading = ['queued', 'downloading', 'cancelling'].includes(downloadStatus?.status);
 
   function selectChoice(choice) {
     choiceMutation.mutate(choice);
@@ -205,7 +205,11 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
             <div>
               <p className="text-white/30 text-xs uppercase tracking-wide">Device check</p>
               <h4 className="mt-1 text-white/75">
-                {model ? `${recommendation.label} is the comfortable default` : 'No local model recommended'}
+                {model
+                  ? recommendation.status === 'benchmarked'
+                    ? `${recommendation.label} is verified for this device`
+                    : `${recommendation.label} is the current candidate`
+                  : 'No local model recommended'}
               </h4>
               <p className="mt-1 max-w-2xl text-white/35 text-xs leading-relaxed">
                 {recommendation?.reason}
@@ -224,17 +228,26 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
-            <Detail icon={Laptop} label="Memory" value={`${profile.total_ram_gb} GB total · ${profile.available_ram_gb} GB estimated free`} />
+            <Detail icon={Laptop} label="Memory" value={`${profile.total_ram_gb} GB total · ${profile.available_ram_gb} GB currently free`} />
             <Detail icon={HardDrive} label="Disk" value={`${profile.disk_free_gb} GB free`} />
             <Detail icon={Zap} label="Acceleration" value={profile.acceleration.replaceAll('_', ' ')} />
-            <Detail icon={Bot} label="Context limit" value={`${profile.context_tokens.toLocaleString()} tokens`} />
+            <Detail icon={Bot} label="GODFIN working context" value={`${profile.context_tokens.toLocaleString()} tokens`} />
           </div>
 
           {model && (
             <div className="rounded-xl border border-white/[0.1] bg-black/10 p-3 text-xs text-white/40 space-y-1">
-              <p><span className="text-white/65">Download:</span> about {recommendation.size_gb} GB</p>
+              <p><span className="text-white/65">Signed-list download estimate:</span> about {recommendation.size_gb} GB</p>
+              {profile.installed_model_metadata?.installed_size_gb && (
+                <p><span className="text-white/65">Installed model size:</span> {profile.installed_model_metadata.installed_size_gb} GB reported by Ollama</p>
+              )}
               <p><span className="text-white/65">Estimated model memory:</span> {recommendation.memory_gb} GB</p>
+              <p><span className="text-white/65">Required current free memory:</span> {recommendation.required_available_ram_gb} GB</p>
+              <p><span className="text-white/65">Required free disk:</span> {recommendation.required_disk_free_gb} GB</p>
               <p><span className="text-white/65">Expected speed:</span> {recommendation.expected_speed}</p>
+              <p><span className="text-white/65">Context policy:</span> {profile.context_policy}</p>
+              {profile.installed_model_metadata?.maximum_context_tokens && (
+                <p><span className="text-white/65">Installed model maximum:</span> {profile.installed_model_metadata.maximum_context_tokens.toLocaleString()} tokens</p>
+              )}
               <p><span className="text-white/65">Privacy:</span> {profile.privacy}</p>
               <p><span className="text-white/65">Signed model list:</span> version {profile.registry.registry_version}</p>
               <p className="font-mono break-all"><span className="font-sans text-white/65">Expected digest:</span> {recommendation.expected_digest}</p>
@@ -266,7 +279,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
             </div>
           )}
 
-          {downloadStatus?.status === 'failed' && (
+          {['failed', 'interrupted', 'cancelled'].includes(downloadStatus?.status) && (
             <div className="rounded-xl border border-rose-300/20 bg-rose-400/[0.06] p-3 text-rose-100/70 text-xs">
               {downloadStatus.message}
             </div>
@@ -309,7 +322,11 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
 
           {benchmark && (
             <p className="text-white/45 text-xs" aria-live="polite">
-              Benchmark: {benchmark.tokens_per_second} tokens/second. The result is explanatory only; authoritative totals remain deterministic.
+              Benchmark: {benchmark.tokens_per_second} tokens/second using a {(benchmark.context_tokens || profile.context_tokens).toLocaleString()}-token working context.
+              {' '}{benchmark.activation_ready
+                ? 'This model is ready to activate.'
+                : 'This model is not fast enough to activate safely.'}
+              {' '}The result is explanatory only; authoritative totals remain deterministic.
             </p>
           )}
         </div>

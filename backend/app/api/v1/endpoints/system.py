@@ -272,7 +272,7 @@ def local_ai_profile(
 ):
     from app.core.local_ai import device_profile
 
-    profile = device_profile()
+    profile = device_profile(db=db)
     choice = db.query(AppSetting).filter_by(key="local_ai_choice").first()
     profile["choice"] = choice.value if choice else None
     return profile
@@ -311,7 +311,11 @@ def local_ai_download(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    from app.core.local_ai import start_model_pull
+    from app.core.local_ai import (
+        LocalAIActionConflict,
+        LocalAIResourceError,
+        start_model_pull,
+    )
 
     if not body.confirmed:
         raise HTTPException(
@@ -333,11 +337,23 @@ def local_ai_download(
             message="That local model cannot be downloaded by this GODFIN build.",
             hint="Choose a model shown in the signed compatibility list.",
         ) from exc
-    except RuntimeError as exc:
+    except LocalAIResourceError as exc:
+        raise InputValidationError(
+            code="LOCAL_MODEL_CAPACITY_LOW",
+            message="This device does not currently have enough free memory or disk space.",
+            hint="Close other apps or free disk space, then check the device recommendation again.",
+        ) from exc
+    except LocalAIActionConflict as exc:
         raise StateConflictError(
             code="LOCAL_MODEL_DOWNLOAD_CONFLICT",
             message="Another local model action is already running.",
             hint="Wait for it to finish or cancel it, then try again.",
+        ) from exc
+    except RuntimeError as exc:
+        raise StateConflictError(
+            code="LOCAL_MODEL_UNAVAILABLE",
+            message="The local model download could not be started safely.",
+            hint="Check that Ollama is installed and running, then try again.",
         ) from exc
 
 
@@ -357,7 +373,7 @@ def local_ai_benchmark(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    from app.core.local_ai import benchmark_model
+    from app.core.local_ai import LocalAIResourceError, benchmark_model
 
     if not body.confirmed:
         raise HTTPException(
@@ -378,6 +394,11 @@ def local_ai_benchmark(
             code="LOCAL_MODEL_INVALID",
             message="That local model cannot be benchmarked by this GODFIN build.",
             hint="Choose an installed model shown in the compatibility list.",
+        ) from exc
+    except LocalAIResourceError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Current free memory or disk space is below the safe benchmark headroom.",
         ) from exc
     except RuntimeError as exc:
         raise HTTPException(
