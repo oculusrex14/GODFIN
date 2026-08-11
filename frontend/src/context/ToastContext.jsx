@@ -66,12 +66,16 @@ function Toast({ toast, onClose }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -20, scale: 0.95 }}
       className={`flex items-center gap-3 px-4 py-3 rounded-lg border backdrop-blur-md shadow-lg ${bgColors[toast.type]}`}
+      role={toast.type === 'error' ? 'alert' : 'status'}
+      aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+      aria-atomic="true"
     >
       {icons[toast.type]}
       <p className="text-sm text-white max-w-xs">{toast.message}</p>
       <button
         onClick={onClose}
         className="text-slate-400 hover:text-white transition-colors"
+        aria-label="Dismiss notification"
       >
         <X className="h-4 w-4" />
       </button>

@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { AlertCircle, Check, ChevronDown, Loader2, MessageCircle, X, Send, Bot, User, ArrowDownLeft } from 'lucide-react';
 import { fetchReviewQueue, resolveReviewItem, fetchCategories, sendReviewChat } from '../api/client';
 import { GlassButton } from '../components/GlassButton';
+import DialogSurface from '../components/DialogSurface';
 
 function formatINR(amount) {
   return new Intl.NumberFormat('en-IN', {
@@ -72,11 +73,14 @@ function ChatModal({ item, onClose, onClassify }) {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      role="presentation"
     >
-      <motion.div
+      <DialogSurface
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
+        labelledBy="review-chat-title"
+        onClose={onClose}
         className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-[20px] bg-[#0f1a2e]/95 backdrop-blur-[32px] border border-white/[0.15] shadow-[0_24px_80px_rgba(0,0,0,0.4)]"
       >
         {/* Header */}
@@ -86,21 +90,21 @@ function ChatModal({ item, onClose, onClassify }) {
               <MessageCircle size={16} className="text-cyan-400/70" />
             </div>
             <div className="min-w-0">
-              <p className="text-white/80 text-[0.85rem] truncate" style={{ fontWeight: 500 }}>
+              <h2 id="review-chat-title" className="text-white/80 text-[0.85rem] truncate" style={{ fontWeight: 500 }}>
                 {item.merchant_normalized || item.merchant_raw}
-              </p>
+              </h2>
               <p className="text-white/30 text-[0.7rem]">
                 {format(new Date(item.date), 'dd MMM yyyy')} · {item.type === 'credit' ? '+' : '-'}{formatINR(item.amount)}
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-[8px] hover:bg-white/[0.06] transition-colors">
+          <button onClick={onClose} className="p-1.5 rounded-[8px] hover:bg-white/[0.06] transition-colors" aria-label="Close AI classification dialog">
             <X size={16} className="text-white/40" />
           </button>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3" role="log" aria-live="polite" aria-relevant="additions text">
           {messages.map((msg, i) => (
             <motion.div
               key={i}
@@ -184,6 +188,7 @@ function ChatModal({ item, onClose, onClassify }) {
         <div className="px-5 py-3 border-t border-white/[0.08]">
           <div className="relative">
             <input
+              aria-label="Describe this transaction for AI classification"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
@@ -194,12 +199,13 @@ function ChatModal({ item, onClose, onClassify }) {
               onClick={handleSend}
               disabled={!input.trim() || chatMutation.isPending}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-[8px] bg-cyan-500/20 text-cyan-400/80 hover:bg-cyan-500/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              aria-label="Send classification message"
             >
               <Send size={14} />
             </button>
           </div>
         </div>
-      </motion.div>
+      </DialogSurface>
     </motion.div>
   );
 }
@@ -310,22 +316,16 @@ export default function ReviewQueue() {
                 className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)]"
               >
                 <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-                <div
+                <div className="flex items-stretch p-2 hover:bg-white/[0.03] transition-colors">
+                  <button
+                    type="button"
                   onClick={() => {
                     const newId = expandedId === item.id ? null : item.id;
                     setExpandedId(newId);
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const newId = expandedId === item.id ? null : item.id;
-                      setExpandedId(newId);
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
                   aria-expanded={expandedId === item.id}
                   aria-label={`Review transaction: ${item.merchant_normalized || item.merchant_raw}, ${formatINR(item.amount)}`}
-                  className="flex items-center justify-between p-4 cursor-pointer hover:bg-white/[0.03] transition-colors focus:outline-none focus:bg-white/[0.05]"
+                  className="flex min-w-0 flex-1 items-center justify-between rounded-xl p-2 text-left focus:bg-white/[0.05]"
                 >
                   <div className="flex items-center gap-4">
                     <div className={`w-10 h-10 rounded-[14px] ${item.type === 'credit' ? 'bg-emerald-400/[0.1] border border-emerald-400/[0.12]' : 'bg-amber-400/[0.1] border border-amber-400/[0.12]'} flex items-center justify-center`}>
@@ -350,18 +350,21 @@ export default function ReviewQueue() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setChatItem(item); }}
-                      title="Ask AI to classify"
-                      className="p-2 rounded-[10px] bg-cyan-500/[0.08] border border-cyan-400/[0.12] text-cyan-400/60 hover:bg-cyan-500/[0.15] hover:text-cyan-400/80 transition-all"
-                    >
-                      <MessageCircle size={16} />
-                    </button>
                     <span className={`text-[1rem] tabular-nums ${item.type === 'credit' ? 'text-emerald-400/80' : 'text-white/70'}`} style={{ fontWeight: 500 }}>
                       {item.type === 'credit' ? '+' : '-'}{formatINR(item.amount)}
                     </span>
                     <ChevronDown className={`h-4 w-4 text-white/30 transition-transform ${expandedId === item.id ? 'rotate-180' : ''}`} aria-hidden="true" />
                   </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChatItem(item)}
+                    title="Ask AI to classify"
+                    aria-label={`Ask AI to classify ${item.merchant_normalized || item.merchant_raw}`}
+                    className="m-2 self-center p-2 rounded-[10px] bg-cyan-500/[0.08] border border-cyan-400/[0.12] text-cyan-400/60 hover:bg-cyan-500/[0.15] hover:text-cyan-400/80 transition-all"
+                  >
+                    <MessageCircle size={16} />
+                  </button>
                 </div>
 
                 <AnimatePresence>

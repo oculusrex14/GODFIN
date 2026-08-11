@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink } from '../router';
+import { useEffect, useRef, useState } from 'react';
+import { NavLink, useLocation } from '../router';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -29,6 +29,7 @@ import ChangePinModal from './ChangePinModal';
 import { GlassBackground } from './GlassBackground';
 import GodfinBrand from './GodfinBrand';
 import GuidedTour from './GuidedTour';
+import DialogSurface from './DialogSurface';
 import { fetchReviewStats, fetchSyncStatus } from '../api/client';
 
 const NAV_GROUPS = [
@@ -192,9 +193,40 @@ function SidebarContent({ onItemClick }) {
 
 export default function AppLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { pathname } = useLocation();
+  const mainRef = useRef(null);
+
+  useEffect(() => {
+    let observer;
+    let frame;
+    const focusRouteHeading = () => {
+      const heading = mainRef.current?.querySelector('h1');
+      if (!heading) return false;
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: false });
+      return true;
+    };
+    frame = window.requestAnimationFrame(() => {
+      if (focusRouteHeading()) return;
+      observer = new MutationObserver(() => {
+        if (focusRouteHeading()) observer?.disconnect();
+      });
+      if (mainRef.current) observer.observe(mainRef.current, { childList: true, subtree: true });
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [pathname]);
 
   return (
     <div className="min-h-screen w-full" style={{ fontFamily: "'Inter', sans-serif" }}>
+      <a
+        href="#main-content"
+        className="fixed left-4 top-2 z-[200] -translate-y-20 rounded-lg bg-cyan-100 px-4 py-2 text-sm font-semibold text-slate-950 shadow-lg transition-transform focus:translate-y-0"
+      >
+        Skip to main content
+      </a>
       <SyncBanner />
       <GlassBackground />
 
@@ -226,12 +258,17 @@ export default function AppLayout({ children }) {
                 exit={{ opacity: 0 }}
                 className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
                 onClick={() => setMobileOpen(false)}
+                data-godfin-dialog-backdrop="true"
+                aria-hidden="true"
               />
-              <motion.aside
+              <DialogSurface
+                as={motion.aside}
                 initial={{ x: -280 }}
                 animate={{ x: 0 }}
                 exit={{ x: -280 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                ariaLabel="Navigation menu"
+                onClose={() => setMobileOpen(false)}
                 className="fixed top-0 left-0 bottom-0 z-50 w-[260px] flex flex-col bg-[#0d2040]/95 backdrop-blur-[32px] border-r border-white/[0.08] lg:hidden"
               >
                 <button
@@ -242,13 +279,13 @@ export default function AppLayout({ children }) {
                   <X size={18} />
                 </button>
                 <SidebarContent onItemClick={() => setMobileOpen(false)} />
-              </motion.aside>
+              </DialogSurface>
             </>
           )}
         </AnimatePresence>
 
         {/* Main Content */}
-        <main className="flex-1 min-w-0 pt-16 lg:pt-0">
+        <main id="main-content" ref={mainRef} tabIndex={-1} className="flex-1 min-w-0 pt-16 lg:pt-0">
           <div className="p-4 pb-24 sm:p-6 sm:pb-6 lg:p-8 max-w-[1100px]">
             {children}
           </div>

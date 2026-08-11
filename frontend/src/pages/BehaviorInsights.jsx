@@ -150,6 +150,7 @@ export default function BehaviorInsights() {
 
           <div className="flex flex-col sm:flex-row gap-2">
             <input
+              aria-label="Monthly spending limit"
               type="number"
               min="1"
               step="any"
@@ -230,6 +231,7 @@ export default function BehaviorInsights() {
                 )}
                 <div className="mt-4 flex gap-2">
                   <input
+                    aria-label={`Correction or context note for ${metric.label}`}
                     value={notes[metric.key] ?? metric.correction_note ?? ''}
                     onChange={event => setNotes({ ...notes, [metric.key]: event.target.value })}
                     placeholder="Add a correction or context note"

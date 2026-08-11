@@ -19,6 +19,7 @@ import {
   updateIngestSettings,
 } from '../../api/client';
 import { openExternalUrl } from '../../config/external';
+import DialogSurface from '../DialogSurface';
 
 function GmailSettings() {
   const queryClient = useQueryClient();
@@ -338,6 +339,8 @@ function GmailSettings() {
                 ? 'bg-blue-500/10 border border-blue-500/30 text-blue-400'
                 : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
             }`}
+            role={toast.type === 'error' ? 'alert' : 'status'}
+            aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
           >
             {toast.msg}
           </motion.div>
@@ -640,6 +643,10 @@ function GmailSettings() {
               </div>
 
               <button
+                type="button"
+                role="switch"
+                aria-checked={autoIngestEnabled}
+                aria-label="Automatically import new Gmail transaction alerts"
                 onClick={() => {
                   const newEnabled = !autoIngestEnabled;
                   setAutoIngestEnabled(newEnabled);
@@ -736,6 +743,7 @@ function GmailSettings() {
                   Frequency
                 </div>
                 <select
+                  aria-label="Automatic Gmail import frequency"
                   value={ingestFrequency}
                   onChange={(e) => {
                     const freq = parseInt(e.target.value);
@@ -764,13 +772,19 @@ function GmailSettings() {
 
       {/* OAuth Modal — portal to body to escape parent stacking context */}
       {showOAuthModal && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
-          <motion.div
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" role="presentation">
+          <DialogSurface
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
+            labelledBy="gmail-connect-title"
+            describedBy="gmail-connect-description"
+            onClose={() => {
+              setShowOAuthModal(false);
+              setOauthUrl('');
+            }}
             className="bg-slate-800 rounded-xl border border-slate-700 max-w-md w-full p-6"
           >
-            <h3 className="text-lg font-medium text-white mb-4">Connect Gmail</h3>
+            <h3 id="gmail-connect-title" className="text-lg font-medium text-white mb-4">Connect Gmail</h3>
 
             {!oauthUrl ? (
               <div className="flex items-center justify-center py-8">
@@ -779,7 +793,7 @@ function GmailSettings() {
               </div>
             ) : (
             <div className="space-y-4">
-              <p className="text-slate-400 text-sm">
+              <p id="gmail-connect-description" className="text-slate-400 text-sm">
                 Google opens in your browser. Approve read-only access, then return
                 to GODFIN; this window updates automatically.
               </p>
@@ -816,20 +830,27 @@ function GmailSettings() {
             >
               Cancel
             </button>
-          </motion.div>
+          </DialogSurface>
         </div>,
         document.body
       )}
 
       {/* Date Range Modal */}
       {showDateRangeModal && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
-          <motion.div
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" role="presentation">
+          <DialogSurface
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
+            labelledBy="gmail-ingest-title"
+            describedBy="gmail-ingest-description"
+            escapeCloses={ingestProgress?.status !== 'running'}
+            onClose={ingestProgress?.status === 'running' ? undefined : () => setShowDateRangeModal(false)}
             className="bg-slate-800 rounded-xl border border-slate-700 max-w-md w-full p-6"
           >
-            <h3 className="text-lg font-medium text-white mb-4">Ingest Transactions</h3>
+            <h3 id="gmail-ingest-title" className="text-lg font-medium text-white mb-4">Ingest Transactions</h3>
+            <p id="gmail-ingest-description" className="sr-only">
+              Choose a date range and monitor Gmail transaction import progress.
+            </p>
 
             {ingestProgress?.status === 'running' ? (
               /* Running state — show progress */
@@ -890,8 +911,9 @@ function GmailSettings() {
 
                 <div className="space-y-4">
                   <div>
-                    <label className="text-slate-400 text-xs block mb-1">Start Date</label>
+                    <label htmlFor="gmail-ingest-start" className="text-slate-400 text-xs block mb-1">Start Date</label>
                     <input
+                      id="gmail-ingest-start"
                       type="date"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
@@ -900,8 +922,9 @@ function GmailSettings() {
                   </div>
 
                   <div>
-                    <label className="text-slate-400 text-xs block mb-1">End Date</label>
+                    <label htmlFor="gmail-ingest-end" className="text-slate-400 text-xs block mb-1">End Date</label>
                     <input
+                      id="gmail-ingest-end"
                       type="date"
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
@@ -931,25 +954,28 @@ function GmailSettings() {
                 </div>
               </>
             )}
-          </motion.div>
+          </DialogSurface>
         </div>,
         document.body
       )}
 
       {/* Disconnect Confirmation Modal */}
       {showDisconnectModal && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
-          <motion.div
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" role="presentation">
+          <DialogSurface
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
+            labelledBy="gmail-disconnect-title"
+            describedBy="gmail-disconnect-description"
+            onClose={() => setShowDisconnectModal(false)}
             className="bg-slate-800 rounded-xl border border-slate-700 max-w-md w-full p-6"
           >
             <div className="flex items-center gap-3 mb-4">
               <AlertCircle className="h-6 w-6 text-red-400" />
-              <h3 className="text-lg font-medium text-white">Disconnect Gmail?</h3>
+              <h3 id="gmail-disconnect-title" className="text-lg font-medium text-white">Disconnect Gmail?</h3>
             </div>
 
-            <p className="text-slate-400 text-sm mb-4">
+            <p id="gmail-disconnect-description" className="text-slate-400 text-sm mb-4">
               This will revoke Gmail access and stop automatic transaction syncing.
             </p>
 
@@ -1029,7 +1055,7 @@ function GmailSettings() {
                 )}
               </button>
             </div>
-          </motion.div>
+          </DialogSurface>
         </div>,
         document.body
       )}

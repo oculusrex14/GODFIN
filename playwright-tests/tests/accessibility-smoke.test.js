@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const AxeBuilder = require('@axe-core/playwright').default;
 
 test.use({
   viewport: { width: 390, height: 844 },
@@ -75,6 +76,16 @@ async function mockIsolatedAccessibilityApp(page) {
   });
 }
 
+async function expectNoSeriousAxeViolations(page, include) {
+  let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']);
+  if (include) builder = builder.include(include);
+  const result = await builder.analyze();
+  const violations = result.violations.filter((item) => (
+    item.impact === 'critical' || item.impact === 'serious'
+  ));
+  expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+}
+
 test('PIN and beginner tutorial support keyboard, touch, and accessible names', async ({ page }) => {
   await mockIsolatedAccessibilityApp(page);
   await page.goto('/pin');
@@ -105,7 +116,40 @@ test('PIN and beginner tutorial support keyboard, touch, and accessible names', 
 
   await page.getByRole('button', { name: 'Open navigation menu' }).click();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  const settingsHeading = page.getByRole('heading', { name: 'Settings', exact: true });
+  await expect(settingsHeading).toBeVisible();
+  await expect(settingsHeading).toBeFocused();
+  await expectNoSeriousAxeViolations(page, '#main-content');
+
+  const skipLink = page.getByRole('link', { name: 'Skip to main content' });
+  await skipLink.focus();
+  await expect(skipLink).toBeFocused();
+  await skipLink.press('Enter');
+  await expect(page.locator('#main-content')).toBeFocused();
+
+  const dataSection = page.getByRole('button', { name: 'Data Management' });
+  await dataSection.click();
+  const resetTrigger = page.getByRole('button', { name: 'Reset Data' });
+  await resetTrigger.click();
+  const dialog = page.getByRole('dialog', { name: 'Reset All Data?' });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  expect(await page.locator('[inert]').count()).toBeGreaterThan(0);
+
+  const dialogButtons = dialog.getByRole('button');
+  const firstDialogButton = dialogButtons.first();
+  const lastDialogButton = dialogButtons.last();
+  await lastDialogButton.focus();
+  await page.keyboard.press('Tab');
+  await expect(firstDialogButton).toBeFocused();
+  await firstDialogButton.focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(lastDialogButton).toBeFocused();
+  await expectNoSeriousAxeViolations(page, '[data-godfin-dialog="true"]');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(resetTrigger).toBeFocused();
+
   const learningSection = page.getByRole('button', { name: 'Setup & Learning' });
   await expect(learningSection).toHaveAttribute('aria-expanded', 'false');
   await learningSection.click();
@@ -122,4 +166,25 @@ test('PIN and beginner tutorial support keyboard, touch, and accessible names', 
   await expect(page.getByLabel('Lesson 1 of 10')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+});
+
+test('app keeps essential content available at 400% text scaling and reduced motion', async ({ page }) => {
+  await mockIsolatedAccessibilityApp(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/pin');
+  await page.locator('input[type="password"]').fill('2468');
+  await page.getByRole('button', { name: /Set PIN|Unlock/ }).click();
+  const onboardingHeading = page.getByRole('heading', { name: 'Make GODFIN yours' });
+  if (await onboardingHeading.isVisible()) {
+    await page.getByRole('button', { name: 'Finish setup later' }).click();
+  }
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '400%';
+  });
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open navigation menu' })).toBeVisible();
+  const transitionDuration = await page.getByRole('button', { name: 'Open navigation menu' }).evaluate(
+    (element) => getComputedStyle(element).transitionDuration,
+  );
+  expect(['0s', '0.00001s']).toContain(transitionDuration);
 });

@@ -29,6 +29,7 @@ import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useLocation } from '../router';
 import { activateGuidedTour } from '../components/GuidedTour';
+import DialogSurface from '../components/DialogSurface';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -51,6 +52,8 @@ function ToggleSwitch({ enabled, onChange, disabled, ariaLabel }) {
     <button
       type="button"
       aria-label={ariaLabel}
+      role="switch"
+      aria-checked={enabled}
       disabled={disabled}
       onClick={() => onChange(!enabled)}
       className={`
@@ -536,6 +539,7 @@ export default function Settings() {
               <div className="flex items-center gap-2">
                 <input
                   type="month"
+                  aria-label="Month to export as CSV"
                   value={csvMonth}
                   onChange={(e) => setCsvMonth(e.target.value)}
                   className="bg-white/[0.06] border border-white/[0.12] rounded-[10px] px-3 py-1.5 text-white/60 text-[0.8rem] focus:outline-none focus:border-cyan-400/30"
@@ -649,6 +653,7 @@ export default function Settings() {
                 >
                   <div className="grid grid-cols-2 gap-2">
                     <select
+                      aria-label="Classification rule match type"
                       value={ruleForm.rule_type}
                       onChange={(e) => setRuleForm(p => ({ ...p, rule_type: e.target.value }))}
                       className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-white/70 outline-none"
@@ -658,6 +663,7 @@ export default function Settings() {
                       <option value="regex">Regex</option>
                     </select>
                     <input
+                      aria-label="Classification rule pattern"
                       value={ruleForm.pattern}
                       onChange={(e) => setRuleForm(p => ({ ...p, pattern: e.target.value }))}
                       placeholder="Pattern"
@@ -665,6 +671,7 @@ export default function Settings() {
                       className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-white/70 placeholder:text-white/20 outline-none"
                     />
                     <input
+                      aria-label="Classification rule category"
                       value={ruleForm.category}
                       onChange={(e) => setRuleForm(p => ({ ...p, category: e.target.value }))}
                       placeholder="Category"
@@ -672,6 +679,7 @@ export default function Settings() {
                       className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-white/70 placeholder:text-white/20 outline-none"
                     />
                     <input
+                      aria-label="Classification rule subcategory"
                       value={ruleForm.subcategory}
                       onChange={(e) => setRuleForm(p => ({ ...p, subcategory: e.target.value }))}
                       placeholder="Subcategory (optional)"
@@ -681,6 +689,7 @@ export default function Settings() {
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
+                      aria-label="Classification rule priority"
                       value={ruleForm.priority}
                       onChange={(e) => setRuleForm(p => ({ ...p, priority: e.target.value }))}
                       placeholder="Priority"
@@ -708,6 +717,7 @@ export default function Settings() {
                       <button
                         onClick={() => deleteRuleMutation.mutate(rule.id)}
                         className="text-white/0 group-hover:text-rose-400/50 hover:!text-rose-400/80 transition-colors shrink-0"
+                        aria-label={`Delete classification rule ${rule.pattern}`}
                       >
                         <Trash2 size={12} />
                       </button>
@@ -822,17 +832,19 @@ export default function Settings() {
       {/* PIN prompt for security-sensitive settings */}
       <AnimatePresence>
         {pendingSensitiveSetting && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setPendingSensitiveSetting(null); setSensitivePin(''); }}>
-            <motion.div
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setPendingSensitiveSetting(null); setSensitivePin(''); }} role="presentation">
+            <DialogSurface
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              labelledBy="sensitive-setting-title"
+              onClose={() => { setPendingSensitiveSetting(null); setSensitivePin(''); }}
               onClick={(e) => e.stopPropagation()}
               className="relative overflow-hidden rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-sm mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>
+                <h3 id="sensitive-setting-title" className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>
                   {pendingSensitiveSetting.key === 'developer_mode'
                     ? 'Enter PIN to enable Developer Mode'
                     : pendingSensitiveSetting.key === 'allow_network_access'
@@ -868,7 +880,7 @@ export default function Settings() {
                   network may be able to reach your local GODFIN service after restart.
                 </p>
               )}
-              {pinError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3">{pinError}</p>}
+              {pinError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3" role="alert">{pinError}</p>}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
@@ -886,7 +898,7 @@ export default function Settings() {
                   {updateMutation.isPending || enableEmbeddingsMutation.isPending ? 'Checking…' : 'Continue'}
                 </button>
               </div>
-            </motion.div>
+            </DialogSurface>
           </div>
         )}
       </AnimatePresence>
@@ -894,18 +906,20 @@ export default function Settings() {
       {/* PIN Prompt Modal for Data Reset */}
       <AnimatePresence>
         {showResetPin && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setShowResetPin(false); setResetPin(''); }}>
-            <motion.div
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setShowResetPin(false); setResetPin(''); }} role="presentation">
+            <DialogSurface
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              labelledBy="reset-data-pin-title"
+              onClose={() => { setShowResetPin(false); setResetPin(''); }}
               onClick={(e) => e.stopPropagation()}
               className="relative overflow-hidden rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-sm mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>Enter PIN to Reset Data</h3>
-                <button onClick={() => { setShowResetPin(false); setResetPin(''); }} className="text-white/30 hover:text-white/60"><X size={18} /></button>
+                <h3 id="reset-data-pin-title" className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>Enter PIN to Reset Data</h3>
+                <button onClick={() => { setShowResetPin(false); setResetPin(''); }} className="text-white/30 hover:text-white/60" aria-label="Close reset data dialog"><X size={18} /></button>
               </div>
               <div className="flex justify-center">
                 <PinInput
@@ -919,7 +933,7 @@ export default function Settings() {
                   label="Current PIN"
                 />
               </div>
-              {resetPinError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3">{resetPinError}</p>}
+              {resetPinError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3" role="alert">{resetPinError}</p>}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
@@ -937,7 +951,7 @@ export default function Settings() {
                   {resetDataMutation.isPending ? 'Checking…' : 'Reset data'}
                 </button>
               </div>
-            </motion.div>
+            </DialogSurface>
           </div>
         )}
       </AnimatePresence>

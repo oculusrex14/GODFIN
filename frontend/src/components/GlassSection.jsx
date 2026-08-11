@@ -35,16 +35,17 @@ export function GlassSection({
             expanded ? 'border-b border-white/[0.08]' : ''
           }`}
         >
-          <Icon size={16} className="text-white/40" />
+          <Icon size={16} className="text-white/40" aria-hidden="true" />
           <span className="flex-1 text-white/60 text-[0.8rem] font-medium">{title}</span>
           <ChevronDown
             size={16}
+            aria-hidden="true"
             className={`text-white/30 transition-transform ${expanded ? 'rotate-180' : ''}`}
           />
         </button>
       ) : (
         <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-white/[0.08]">
-          <Icon size={16} className="text-white/40" />
+          <Icon size={16} className="text-white/40" aria-hidden="true" />
           <h2 className="text-white/60 text-[0.8rem]" style={{ fontWeight: 500 }}>{title}</h2>
         </div>
       )}

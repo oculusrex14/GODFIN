@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ShieldCheck } from 'lucide-react';
 import { changePin } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import DialogSurface from './DialogSurface';
 
 export default function ChangePinModal({ open, onClose }) {
   const [currentPin, setCurrentPin] = useState('');
@@ -66,17 +67,21 @@ export default function ChangePinModal({ open, onClose }) {
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/60 z-50"
             onClick={handleClose}
+            data-godfin-dialog-backdrop="true"
+            aria-hidden="true"
           />
-          <motion.div
+          <DialogSurface
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            labelledBy="change-pin-title"
+            onClose={handleClose}
             className="fixed inset-x-4 bottom-4 top-auto sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-full sm:max-w-sm bg-slate-800 border border-slate-700 rounded-2xl z-50 overflow-hidden"
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-              <h2 className="text-base font-semibold text-white">Change PIN</h2>
-              <button onClick={handleClose} className="text-slate-400 hover:text-white">
+              <h2 id="change-pin-title" className="text-base font-semibold text-white">Change PIN</h2>
+              <button onClick={handleClose} className="text-slate-400 hover:text-white" aria-label="Close change PIN dialog">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -89,8 +94,9 @@ export default function ChangePinModal({ open, onClose }) {
             ) : (
               <form onSubmit={handleSubmit} className="p-5 space-y-4">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Current PIN</label>
+                  <label htmlFor="change-pin-current" className="block text-xs text-slate-400 mb-1">Current PIN</label>
                   <input
+                    id="change-pin-current"
                     type="password"
                     inputMode="numeric"
                     maxLength={8}
@@ -101,8 +107,9 @@ export default function ChangePinModal({ open, onClose }) {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">New PIN</label>
+                  <label htmlFor="change-pin-new" className="block text-xs text-slate-400 mb-1">New PIN</label>
                   <input
+                    id="change-pin-new"
                     type="password"
                     inputMode="numeric"
                     maxLength={6}
@@ -113,8 +120,9 @@ export default function ChangePinModal({ open, onClose }) {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Confirm New PIN</label>
+                  <label htmlFor="change-pin-confirm" className="block text-xs text-slate-400 mb-1">Confirm New PIN</label>
                   <input
+                    id="change-pin-confirm"
                     type="password"
                     inputMode="numeric"
                     maxLength={6}
@@ -125,7 +133,7 @@ export default function ChangePinModal({ open, onClose }) {
                   />
                 </div>
 
-                {error && <p className="text-rose-400 text-sm">{error}</p>}
+                {error && <p className="text-rose-400 text-sm" role="alert">{error}</p>}
 
                 <button
                   type="submit"
@@ -136,7 +144,7 @@ export default function ChangePinModal({ open, onClose }) {
                 </button>
               </form>
             )}
-          </motion.div>
+          </DialogSurface>
         </>
       )}
     </AnimatePresence>

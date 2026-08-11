@@ -17,6 +17,7 @@ import {
   updatePersonalClassifier,
 } from '../../api/client';
 import { useToast } from '../../context/ToastContext';
+import DialogSurface from '../DialogSurface';
 import PinInput from '../PinInput';
 
 export default function ClassificationMemorySettings() {
@@ -175,10 +176,15 @@ export default function ClassificationMemorySettings() {
       )}
 
       {resetOpen && (
-        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/65 p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="reset-memory-title" className="w-full max-w-md rounded-2xl border border-white/[0.14] bg-[#102342] p-5">
+        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/65 p-4" data-godfin-dialog-backdrop="true">
+          <DialogSurface
+            labelledBy="reset-memory-title"
+            describedBy="reset-memory-description"
+            onClose={() => setResetOpen(false)}
+            className="w-full max-w-md rounded-2xl border border-white/[0.14] bg-[#102342] p-5"
+          >
             <h3 id="reset-memory-title" className="text-white/85 text-lg">Reset classification memory?</h3>
-            <p className="mt-2 text-white/40 text-sm leading-relaxed">
+            <p id="reset-memory-description" className="mt-2 text-white/40 text-sm leading-relaxed">
               Exact merchant memory, generalized patterns, and correction history will be removed after a local backup. Existing transaction labels stay unchanged.
             </p>
             <div className="mt-4">
@@ -190,7 +196,7 @@ export default function ClassificationMemorySettings() {
                 label="Enter your PIN to reset learned memory"
               />
             </div>
-            {resetMutation.error && <p className="mt-2 text-rose-200/65 text-xs">{resetMutation.error.message}</p>}
+            {resetMutation.error && <p className="mt-2 text-rose-200/65 text-xs" role="alert">{resetMutation.error.message}</p>}
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={() => setResetOpen(false)} className="min-h-11 px-4 rounded-xl text-white/45 text-sm">Cancel</button>
               <button
@@ -202,7 +208,7 @@ export default function ClassificationMemorySettings() {
                 Reset memory
               </button>
             </div>
-          </div>
+          </DialogSurface>
         </div>
       )}
     </div>

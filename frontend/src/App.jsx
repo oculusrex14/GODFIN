@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { MotionConfig } from 'framer-motion';
 import { Navigate, RouterProvider, useLocation } from './router';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
@@ -44,18 +45,20 @@ function PinRoute() {
 
 export default function App() {
   return (
-    <RouterProvider>
-      <AuthProvider>
-        <ThemeProvider>
-          <ToastProvider>
-            <GlobalErrorToasts />
-            <AuditProvider>
-              <AppRoutes />
-            </AuditProvider>
-          </ToastProvider>
-        </ThemeProvider>
-      </AuthProvider>
-    </RouterProvider>
+    <MotionConfig reducedMotion="user">
+      <RouterProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <ToastProvider>
+              <GlobalErrorToasts />
+              <AuditProvider>
+                <AppRoutes />
+              </AuditProvider>
+            </ToastProvider>
+          </ThemeProvider>
+        </AuthProvider>
+      </RouterProvider>
+    </MotionConfig>
   );
 }
 

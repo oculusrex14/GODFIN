@@ -23,6 +23,13 @@
 | 9 | `09_edge_cases.test.js` | 20 | edge_case_testing/edge_case_audit.md |
 | 10 | `10_regression.test.js` | 30 | MASTER_BUG_LIST.md - CRITICAL/HIGH bugs |
 
+### Current remediation suites
+
+- `accessibility-smoke.test.js` — PIN/touch coverage, route-heading focus, skip link, shared modal focus trap and return, inert background, serious/critical axe checks, reduced motion, and 400% text scaling.
+- `remediation-ui.test.js` — production-remediation feature and safety flows.
+- `production-smoke.test.js` — packaged app production smoke flow.
+- `website-product.test.js` — website product and entitlement claims.
+
 ---
 
 ## Test Categories

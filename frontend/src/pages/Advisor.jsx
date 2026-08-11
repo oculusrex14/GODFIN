@@ -259,6 +259,7 @@ export default function Advisor() {
       {/* Input */}
       <div className="relative">
         <input
+          aria-label="Ask the financial advisor"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
@@ -269,6 +270,7 @@ export default function Advisor() {
           onClick={handleSend}
           disabled={!input.trim() || chatMutation.isPending || !chatAvailable}
           className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-[10px] bg-emerald-500/20 text-emerald-400/80 hover:bg-emerald-500/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          aria-label="Send advisor message"
         >
           <Send size={16} />
         </button>

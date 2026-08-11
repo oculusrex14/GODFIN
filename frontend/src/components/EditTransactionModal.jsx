@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { updateTransaction } from '../api/client';
 import { useTaxonomy } from '../hooks/useTaxonomy';
+import DialogSurface from './DialogSurface';
 
 export default function EditTransactionModal({ open, onClose, transaction }) {
   const [form, setForm] = useState(() => ({
@@ -57,17 +58,21 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/60 z-50"
             onClick={onClose}
+            data-godfin-dialog-backdrop="true"
+            aria-hidden="true"
           />
-          <motion.div
+          <DialogSurface
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            labelledBy="edit-transaction-title"
+            onClose={onClose}
             className="fixed inset-x-4 bottom-4 top-auto sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-full sm:max-w-md bg-slate-800 border border-slate-700 rounded-2xl z-50 overflow-hidden"
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-              <h2 className="text-base font-semibold text-white">Edit Transaction</h2>
-              <button onClick={onClose} className="text-slate-400 hover:text-white">
+              <h2 id="edit-transaction-title" className="text-base font-semibold text-white">Edit Transaction</h2>
+              <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close edit transaction dialog">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -90,8 +95,9 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
             <form onSubmit={handleSubmit} className="p-5 pt-2 space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Category</label>
+                  <label htmlFor="edit-transaction-category" className="block text-xs text-slate-400 mb-1">Category</label>
                   <select
+                    id="edit-transaction-category"
                     value={form.category}
                     onChange={(e) => set('category', e.target.value)}
                     className="w-full bg-slate-700/50 border border-slate-600 rounded-lg text-sm text-white px-3 py-2 focus:border-emerald-400 focus:outline-none"
@@ -103,8 +109,9 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Subcategory</label>
+                  <label htmlFor="edit-transaction-subcategory" className="block text-xs text-slate-400 mb-1">Subcategory</label>
                   <select
+                    id="edit-transaction-subcategory"
                     value={form.subcategory}
                     onChange={(e) => set('subcategory', e.target.value)}
                     disabled={!form.category}
@@ -119,8 +126,9 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Notes</label>
+                <label htmlFor="edit-transaction-notes" className="block text-xs text-slate-400 mb-1">Notes</label>
                 <input
+                  id="edit-transaction-notes"
                   type="text"
                   value={form.notes}
                   onChange={(e) => set('notes', e.target.value)}
@@ -129,7 +137,7 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
                 />
               </div>
 
-              {error && <p className="text-rose-400 text-sm">{error}</p>}
+              {error && <p className="text-rose-400 text-sm" role="alert">{error}</p>}
 
               <button
                 type="submit"
@@ -139,7 +147,7 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
                 {mutation.isPending ? 'Saving...' : 'Save Changes'}
               </button>
             </form>
-          </motion.div>
+          </DialogSurface>
         </>
       )}
     </AnimatePresence>

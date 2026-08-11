@@ -12,6 +12,7 @@ import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
 import { StatCard } from '../components/StatCard';
 import { useConfirm } from '../components/ConfirmDialog';
+import DialogSurface from '../components/DialogSurface';
 
 function formatINR(amount) {
   if (amount == null) return '--';
@@ -116,14 +117,13 @@ function AddIncomeModal({ open, onClose, editSource = null }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <motion.div
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" role="presentation">
+      <DialogSurface
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="income-modal-title"
+        labelledBy="income-modal-title"
+        onClose={onClose}
         className="relative overflow-hidden rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-md mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
       >
         <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
@@ -157,11 +157,11 @@ function AddIncomeModal({ open, onClose, editSource = null }) {
             step="0.01"
           />
           <div>
-            <label className="block text-white/40 text-[0.75rem] mb-1.5" style={{ fontWeight: 400 }}>Frequency</label>
+            <label htmlFor="income-frequency" className="block text-white/40 text-[0.75rem] mb-1.5" style={{ fontWeight: 400 }}>Frequency</label>
             <select
+              id="income-frequency"
               value={frequency}
               onChange={(e) => handleFrequencyChange(e.target.value)}
-              aria-label="Income frequency"
               className="w-full px-3.5 py-2.5 bg-white/[0.06] backdrop-blur-[12px] border border-white/[0.12] rounded-[14px] text-white/80 text-[0.85rem] focus:outline-none focus:border-cyan-400/30"
             >
               <option value="monthly" className="bg-[#1a2a4a]">Monthly</option>
@@ -200,7 +200,7 @@ function AddIncomeModal({ open, onClose, editSource = null }) {
             </GlassButton>
           </div>
         </form>
-      </motion.div>
+      </DialogSurface>
     </div>
   );
 }

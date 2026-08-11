@@ -23,6 +23,7 @@ import {
   fetchLocalAIProfile,
 } from '../../api/client';
 import PinInput from '../PinInput';
+import DialogSurface from '../DialogSurface';
 import { openExternalUrl } from '../../config/external';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -328,16 +329,16 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
 
       {approvalOpen && model && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/65 p-4" role="presentation">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="local-model-approval-title"
+          <DialogSurface
+            labelledBy="local-model-approval-title"
+            describedBy="local-model-approval-description"
+            onClose={closeApproval}
             className="w-full max-w-lg rounded-2xl border border-white/[0.14] bg-[#102342] p-5 shadow-2xl"
           >
             <h3 id="local-model-approval-title" className="text-white/85 text-lg">
               {approvalOpen === 'download' ? 'Approve local model download' : 'Approve local model benchmark'}
             </h3>
-            <p className="mt-2 text-white/40 text-sm leading-relaxed">
+            <p id="local-model-approval-description" className="mt-2 text-white/40 text-sm leading-relaxed">
               {approvalOpen === 'download'
                 ? `Ollama will download ${recommendation.label} (${recommendation.size_gb} GB). This can use significant bandwidth and disk space.`
                 : 'GODFIN will send one short finance prompt to the selected model on this computer and measure its response speed.'}
@@ -406,7 +407,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
                     : 'Run benchmark'}
               </button>
             </div>
-          </div>
+          </DialogSurface>
         </div>
       )}
     </div>

@@ -22,6 +22,7 @@ import {
 import { websiteUrl } from '../config/website';
 import { StatCard } from '../components/StatCard';
 import { GlassButton } from '../components/GlassButton';
+import DialogSurface from '../components/DialogSurface';
 
 function formatINR(amount) {
   if (amount == null) return '--';
@@ -127,7 +128,6 @@ export default function Reports() {
   const [taxPackPassphrase, setTaxPackPassphrase] = useState('');
   const [taxPackConfirmation, setTaxPackConfirmation] = useState('');
   const taxPackPassphraseRef = useRef(null);
-  const taxPackDialogRef = useRef(null);
   const d = new Date(month + '-01');
   const prev = format(subMonths(d, 1), 'yyyy-MM');
   const next = format(new Date(d.getFullYear(), d.getMonth() + 1, 1), 'yyyy-MM');
@@ -189,43 +189,6 @@ export default function Reports() {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  useEffect(() => {
-    if (!taxPackOpen) return undefined;
-    const previouslyFocused = document.activeElement;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const frame = window.requestAnimationFrame(() => taxPackPassphraseRef.current?.focus());
-    const handleKeyDown = event => {
-      if (event.key === 'Escape' && !taxPackMutation.isPending) {
-        setTaxPackOpen(false);
-        setTaxPackPassphrase('');
-        setTaxPackConfirmation('');
-      }
-      if (event.key === 'Tab') {
-        const focusable = [...(taxPackDialogRef.current?.querySelectorAll(
-          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ) || [])];
-        if (!focusable.length) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousOverflow;
-      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
-    };
-  }, [taxPackOpen, taxPackMutation.isPending]);
-
   const taxPackPassphraseValid = taxPackPassphrase.length >= 12
     && taxPackPassphrase.length <= 128
     && taxPackPassphrase === taxPackConfirmation;
@@ -245,9 +208,9 @@ export default function Reports() {
           <p className="text-white/30 text-[0.8rem]">Deterministic reports with optional, consented AI analysis</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => setMonth(prev)} className="text-white/30 hover:text-white/60 transition-colors p-1"><ChevronLeft size={18} /></button>
+          <button onClick={() => setMonth(prev)} className="text-white/30 hover:text-white/60 transition-colors p-1" aria-label={`Show ${format(subMonths(d, 1), 'MMMM yyyy')} report`}><ChevronLeft size={18} /></button>
           <span className="text-white/70 text-[0.85rem] min-w-[130px] text-center" style={{ fontWeight: 400 }}>{monthLabel}</span>
-          <button onClick={() => setMonth(next)} disabled={next > current} className="text-white/30 hover:text-white/60 disabled:opacity-30 transition-colors p-1"><ChevronRight size={18} /></button>
+          <button onClick={() => setMonth(next)} disabled={next > current} className="text-white/30 hover:text-white/60 disabled:opacity-30 transition-colors p-1" aria-label={`Show ${format(new Date(d.getFullYear(), d.getMonth() + 1, 1), 'MMMM yyyy')} report`}><ChevronRight size={18} /></button>
         </div>
       </motion.div>
 
@@ -759,13 +722,15 @@ export default function Reports() {
             aria-hidden="true"
             className="fixed inset-0 z-50 cursor-default bg-black/65 backdrop-blur-sm"
             onClick={closeTaxPackDialog}
+            data-godfin-dialog-backdrop="true"
           />
-          <section
-            ref={taxPackDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="tax-pack-title"
-            aria-describedby="tax-pack-description"
+          <DialogSurface
+            as="section"
+            labelledBy="tax-pack-title"
+            describedBy="tax-pack-description"
+            initialFocusRef={taxPackPassphraseRef}
+            escapeCloses={!taxPackMutation.isPending}
+            onClose={closeTaxPackDialog}
             className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[24px] border border-white/[0.14] bg-[#102342] p-6 shadow-2xl"
           >
             <div className="flex items-start justify-between gap-4">
@@ -853,7 +818,7 @@ export default function Reports() {
                 </button>
               </div>
             </form>
-          </section>
+          </DialogSurface>
         </>
       )}
     </div>

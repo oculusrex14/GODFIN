@@ -14,6 +14,7 @@ import {
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
 import { useToast } from '../context/ToastContext';
+import DialogSurface from '../components/DialogSurface';
 
 function formatINR(amount) {
   if (amount == null) return '--';
@@ -388,6 +389,7 @@ export default function Subscriptions() {
                       onClick={() => openEdit(sub)}
                       className="text-white/20 hover:text-blue-400/60 transition-colors p-1"
                       title="Edit"
+                      aria-label={`Edit subscription ${sub.name}`}
                     >
                       <Pencil size={13} />
                     </button>
@@ -395,6 +397,7 @@ export default function Subscriptions() {
                       onClick={() => toggleMutation.mutate({ id: sub.id, is_active: false })}
                       className="text-white/20 hover:text-amber-400/60 transition-colors p-1"
                       title="Pause"
+                      aria-label={`Pause subscription ${sub.name}`}
                     >
                       <Pause size={13} />
                     </button>
@@ -402,6 +405,7 @@ export default function Subscriptions() {
                       onClick={() => deleteMutation.mutate(sub.id)}
                       className="text-white/20 hover:text-rose-400/60 transition-colors p-1"
                       title="Delete"
+                      aria-label={`Delete subscription ${sub.name}`}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -443,6 +447,7 @@ export default function Subscriptions() {
                       onClick={() => openEdit(sub)}
                       className="text-white/20 hover:text-blue-400/60 transition-colors p-1"
                       title="Edit"
+                      aria-label={`Edit subscription ${sub.name}`}
                     >
                       <Pencil size={13} />
                     </button>
@@ -450,6 +455,7 @@ export default function Subscriptions() {
                       onClick={() => toggleMutation.mutate({ id: sub.id, is_active: true })}
                       className="text-white/20 hover:text-emerald-400/60 transition-colors p-1"
                       title="Resume"
+                      aria-label={`Resume subscription ${sub.name}`}
                     >
                       <Play size={13} />
                     </button>
@@ -457,6 +463,7 @@ export default function Subscriptions() {
                       onClick={() => deleteMutation.mutate(sub.id)}
                       className="text-white/20 hover:text-rose-400/60 transition-colors p-1"
                       title="Delete"
+                      aria-label={`Delete subscription ${sub.name}`}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -471,17 +478,19 @@ export default function Subscriptions() {
       {/* Add Subscription Modal */}
       <AnimatePresence>
         {addOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <motion.div
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" role="presentation">
+            <DialogSurface
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              labelledBy="add-subscription-title"
+              onClose={() => setAddOpen(false)}
               className="relative overflow-hidden rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-md mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-5">
-                <h3 className="text-white/90 text-[1.1rem]" style={{ fontWeight: 400 }}>Add Subscription</h3>
-                <button onClick={() => setAddOpen(false)} className="text-white/30 hover:text-white/60"><X size={18} /></button>
+                <h3 id="add-subscription-title" className="text-white/90 text-[1.1rem]" style={{ fontWeight: 400 }}>Add Subscription</h3>
+                <button onClick={() => setAddOpen(false)} className="text-white/30 hover:text-white/60" aria-label="Close add subscription dialog"><X size={18} /></button>
               </div>
               <form
                 className="space-y-4"
@@ -517,8 +526,9 @@ export default function Subscriptions() {
                     min={1}
                   />
                   <div>
-                    <label className="text-white/40 text-[0.7rem] block mb-1.5">Currency</label>
+                    <label htmlFor="add-subscription-currency" className="text-white/40 text-[0.7rem] block mb-1.5">Currency</label>
                     <select
+                      id="add-subscription-currency"
                       value={form.currency}
                       onChange={(e) => setForm(p => ({ ...p, currency: e.target.value }))}
                       className="w-full bg-white/[0.06] border border-white/[0.12] rounded-[12px] px-3 py-2.5 text-[0.85rem] text-white/70 outline-none"
@@ -529,8 +539,9 @@ export default function Subscriptions() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-white/40 text-[0.7rem] block mb-1.5">Frequency</label>
+                    <label htmlFor="add-subscription-frequency" className="text-white/40 text-[0.7rem] block mb-1.5">Frequency</label>
                     <select
+                      id="add-subscription-frequency"
                       value={form.frequency}
                       onChange={(e) => setForm(p => ({ ...p, frequency: e.target.value }))}
                       className="w-full bg-white/[0.06] border border-white/[0.12] rounded-[12px] px-3 py-2.5 text-[0.85rem] text-white/70 outline-none"
@@ -580,7 +591,7 @@ export default function Subscriptions() {
                   {createMutation.isPending ? 'Adding...' : 'Add Subscription'}
                 </GlassButton>
               </form>
-            </motion.div>
+            </DialogSurface>
           </div>
         )}
       </AnimatePresence>
@@ -588,17 +599,19 @@ export default function Subscriptions() {
       {/* Edit Subscription Modal */}
       <AnimatePresence>
         {editSub && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <motion.div
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" role="presentation">
+            <DialogSurface
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              labelledBy="edit-subscription-title"
+              onClose={() => setEditSub(null)}
               className="relative overflow-hidden rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-md mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-5">
-                <h3 className="text-white/90 text-[1.1rem]" style={{ fontWeight: 400 }}>Edit Subscription</h3>
-                <button onClick={() => setEditSub(null)} className="text-white/30 hover:text-white/60"><X size={18} /></button>
+                <h3 id="edit-subscription-title" className="text-white/90 text-[1.1rem]" style={{ fontWeight: 400 }}>Edit Subscription</h3>
+                <button onClick={() => setEditSub(null)} className="text-white/30 hover:text-white/60" aria-label="Close edit subscription dialog"><X size={18} /></button>
               </div>
               <form
                 className="space-y-4"
@@ -635,8 +648,9 @@ export default function Subscriptions() {
                     min={1}
                   />
                   <div>
-                    <label className="text-white/40 text-[0.7rem] block mb-1.5">Currency</label>
+                    <label htmlFor="edit-subscription-currency" className="text-white/40 text-[0.7rem] block mb-1.5">Currency</label>
                     <select
+                      id="edit-subscription-currency"
                       value={editForm.currency}
                       onChange={(e) => setEditForm(p => ({ ...p, currency: e.target.value }))}
                       className="w-full bg-white/[0.06] border border-white/[0.12] rounded-[12px] px-3 py-2.5 text-[0.85rem] text-white/70 outline-none"
@@ -647,8 +661,9 @@ export default function Subscriptions() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-white/40 text-[0.7rem] block mb-1.5">Frequency</label>
+                    <label htmlFor="edit-subscription-frequency" className="text-white/40 text-[0.7rem] block mb-1.5">Frequency</label>
                     <select
+                      id="edit-subscription-frequency"
                       value={editForm.frequency}
                       onChange={(e) => setEditForm(p => ({ ...p, frequency: e.target.value }))}
                       className="w-full bg-white/[0.06] border border-white/[0.12] rounded-[12px] px-3 py-2.5 text-[0.85rem] text-white/70 outline-none"
@@ -697,7 +712,7 @@ export default function Subscriptions() {
                   {editMutation.isPending ? 'Saving...' : 'Save Changes'}
                 </GlassButton>
               </form>
-            </motion.div>
+            </DialogSurface>
           </div>
         )}
       </AnimatePresence>

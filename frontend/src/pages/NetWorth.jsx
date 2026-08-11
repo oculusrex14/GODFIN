@@ -28,6 +28,7 @@ import CalculationInfo from '../components/CalculationInfo';
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
 import { GlassSelect } from '../components/GlassSelect';
+import DialogSurface from '../components/DialogSurface';
 import { useToast } from '../context/ToastContext';
 
 const INITIAL_FORM = {
@@ -241,6 +242,7 @@ export default function NetWorth() {
         >
           <input
             type="password"
+            aria-label="Twelve Data API key"
             value={apiKey}
             onChange={event => setApiKey(event.target.value)}
             placeholder={marketData?.configured ? 'Replace encrypted API key' : 'Twelve Data API key'}
@@ -376,7 +378,8 @@ export default function NetWorth() {
               setForm(INITIAL_FORM);
             }}
           >
-            <motion.form
+            <DialogSurface
+              as={motion.form}
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
@@ -393,10 +396,16 @@ export default function NetWorth() {
                   expires_on: form.expires_on || null,
                 });
               }}
+              labelledBy="net-worth-item-title"
+              onClose={() => {
+                setOpen(false);
+                setEditingId(null);
+                setForm(INITIAL_FORM);
+              }}
               className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[22px] border border-white/[0.14] bg-[#102443]/95 p-5 shadow-2xl"
             >
               <div className="mb-5 flex items-center justify-between">
-                <h2 className="text-white/85">{editingId ? 'Edit valuation' : 'Add asset or liability'}</h2>
+                <h2 id="net-worth-item-title" className="text-white/85">{editingId ? 'Edit valuation' : 'Add asset or liability'}</h2>
                 <button
                   type="button"
                   onClick={() => {
@@ -405,6 +414,7 @@ export default function NetWorth() {
                     setForm(INITIAL_FORM);
                   }}
                   className="text-white/35"
+                  aria-label="Close asset or liability dialog"
                 >
                   <X size={18} />
                 </button>
@@ -412,18 +422,18 @@ export default function NetWorth() {
               <div className="grid sm:grid-cols-2 gap-3">
                 <GlassInput label="Name" value={form.name} required onChange={e => setForm({ ...form, name: e.target.value })} />
                 <div>
-                  <label className="block text-white/40 text-[0.75rem] mb-1.5">Type</label>
-                  <GlassSelect value={form.item_type} onChange={value => setForm({ ...form, item_type: value })} options={[
+                  <label htmlFor="net-worth-item-type" className="block text-white/40 text-[0.75rem] mb-1.5">Type</label>
+                  <GlassSelect id="net-worth-item-type" value={form.item_type} onChange={value => setForm({ ...form, item_type: value })} options={[
                     { value: 'asset', label: 'Asset' }, { value: 'liability', label: 'Liability' },
                   ]} />
                 </div>
                 <div>
-                  <label className="block text-white/40 text-[0.75rem] mb-1.5">Class</label>
-                  <GlassSelect value={form.asset_class} onChange={value => setForm({ ...form, asset_class: value })} options={ASSET_CLASSES.map(value => ({ value, label: value.replaceAll('_', ' ') }))} />
+                  <label htmlFor="net-worth-asset-class" className="block text-white/40 text-[0.75rem] mb-1.5">Class</label>
+                  <GlassSelect id="net-worth-asset-class" value={form.asset_class} onChange={value => setForm({ ...form, asset_class: value })} options={ASSET_CLASSES.map(value => ({ value, label: value.replaceAll('_', ' ') }))} />
                 </div>
                 <div>
-                  <label className="block text-white/40 text-[0.75rem] mb-1.5">Valuation</label>
-                  <GlassSelect value={form.valuation_mode} onChange={value => setForm({ ...form, valuation_mode: value })} options={[
+                  <label htmlFor="net-worth-valuation-mode" className="block text-white/40 text-[0.75rem] mb-1.5">Valuation</label>
+                  <GlassSelect id="net-worth-valuation-mode" value={form.valuation_mode} onChange={value => setForm({ ...form, valuation_mode: value })} options={[
                     { value: 'manual', label: 'Manual sourced value' }, { value: 'market', label: 'Live liquid-asset quote' },
                   ]} />
                 </div>
@@ -454,7 +464,7 @@ export default function NetWorth() {
                 </GlassButton>
                 <GlassButton type="submit" disabled={saveMutation.isPending}>Save locally</GlassButton>
               </div>
-            </motion.form>
+            </DialogSurface>
           </div>
         )}
       </AnimatePresence>

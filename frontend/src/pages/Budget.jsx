@@ -17,6 +17,7 @@ import {
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
 import CalculationInfo from '../components/CalculationInfo';
+import DialogSurface from '../components/DialogSurface';
 import { useToast } from '../context/ToastContext';
 
 const MIN_GOAL_DATE = format(addDays(new Date(), 1), 'yyyy-MM-dd');
@@ -371,6 +372,7 @@ export default function Budget() {
                     <button
                       onClick={() => deleteMutation.mutate(goal.id)}
                       className="text-white/15 hover:text-rose-400/60 transition-colors p-1"
+                      aria-label={`Delete goal ${goal.name}`}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -467,20 +469,22 @@ export default function Budget() {
       {/* Simulation Results Modal */}
       <AnimatePresence>
         {simResult && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setSimResult(null)}>
-            <motion.div
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setSimResult(null)} role="presentation">
+            <DialogSurface
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              labelledBy="goal-simulation-title"
+              onClose={() => setSimResult(null)}
               onClick={(e) => e.stopPropagation()}
               className="relative overflow-hidden rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-md mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-5">
-                <h3 className="text-white/90 text-[1.1rem] flex items-center gap-2" style={{ fontWeight: 400 }}>
+                <h3 id="goal-simulation-title" className="text-white/90 text-[1.1rem] flex items-center gap-2" style={{ fontWeight: 400 }}>
                   <Sparkles size={16} className="text-cyan-400/60" /> Simulation Results
                 </h3>
-                <button onClick={() => setSimResult(null)} className="text-white/30 hover:text-white/60"><X size={18} /></button>
+                <button onClick={() => setSimResult(null)} className="text-white/30 hover:text-white/60" aria-label="Close simulation results"><X size={18} /></button>
               </div>
 
               <div className="space-y-3">
@@ -560,7 +564,7 @@ export default function Budget() {
                   </p>
                 </div>
               </div>
-            </motion.div>
+            </DialogSurface>
           </div>
         )}
       </AnimatePresence>
@@ -568,22 +572,22 @@ export default function Budget() {
       {/* Goal savings ledger */}
       <AnimatePresence>
         {savingsGoal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <motion.div
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" role="presentation">
+            <DialogSurface
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               className="relative max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-[24px] border border-white/[0.15] bg-[#0d2040]/95 p-6 shadow-[0_16px_64px_rgba(0,0,0,0.3)] backdrop-blur-[32px] mx-4"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="goal-savings-title"
+              labelledBy="goal-savings-title"
+              describedBy="goal-savings-description"
+              onClose={() => setSavingsGoal(null)}
             >
               <div className="flex items-center justify-between mb-5">
                 <div>
                   <h3 id="goal-savings-title" className="text-white/90 text-[1.1rem]">
                     Update {savingsGoal.name}
                   </h3>
-                  <p className="mt-1 text-[0.72rem] text-white/30">Every change stays in an auditable ledger.</p>
+                  <p id="goal-savings-description" className="mt-1 text-[0.72rem] text-white/30">Every change stays in an auditable ledger.</p>
                 </div>
                 <button onClick={() => setSavingsGoal(null)} className="text-white/30 hover:text-white/60" aria-label="Close savings history">
                   <X size={18} />
@@ -676,7 +680,7 @@ export default function Budget() {
                   </div>
                 )}
               </div>
-            </motion.div>
+            </DialogSurface>
           </div>
         )}
       </AnimatePresence>
@@ -684,22 +688,22 @@ export default function Budget() {
       {/* FD/RD contribution review */}
       <AnimatePresence>
         {suggestionsOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <motion.div
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" role="presentation">
+            <DialogSurface
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               className="relative max-h-[88vh] w-full max-w-xl overflow-y-auto rounded-[24px] border border-amber-300/[0.18] bg-[#0d2040]/95 p-6 shadow-[0_16px_64px_rgba(0,0,0,0.3)] backdrop-blur-[32px] mx-4"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="deposit-review-title"
+              labelledBy="deposit-review-title"
+              describedBy="deposit-review-description"
+              onClose={() => setSuggestionsOpen(false)}
             >
               <div className="flex items-center justify-between">
                 <div>
                   <h3 id="deposit-review-title" className="flex items-center gap-2 text-white/90 text-[1.1rem]">
                     <AlertTriangle size={16} className="text-amber-300/80" /> Review detected deposits
                   </h3>
-                  <p className="mt-1 text-[0.72rem] text-white/35">Nothing changes a goal until you confirm it.</p>
+                  <p id="deposit-review-description" className="mt-1 text-[0.72rem] text-white/35">Nothing changes a goal until you confirm it.</p>
                 </div>
                 <button onClick={() => setSuggestionsOpen(false)} className="text-white/30 hover:text-white/60" aria-label="Close deposit review">
                   <X size={18} />
@@ -747,7 +751,7 @@ export default function Budget() {
                   </div>
                 ))}
               </div>
-            </motion.div>
+            </DialogSurface>
           </div>
         )}
       </AnimatePresence>
@@ -755,17 +759,19 @@ export default function Budget() {
       {/* Add Goal Modal */}
       <AnimatePresence>
         {addOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <motion.div
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" role="presentation">
+            <DialogSurface
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              labelledBy="new-goal-title"
+              onClose={() => setAddOpen(false)}
               className="relative overflow-hidden rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-md mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-5">
-                <h3 className="text-white/90 text-[1.1rem]" style={{ fontWeight: 400 }}>New Goal</h3>
-                <button onClick={() => setAddOpen(false)} className="text-white/30 hover:text-white/60"><X size={18} /></button>
+                <h3 id="new-goal-title" className="text-white/90 text-[1.1rem]" style={{ fontWeight: 400 }}>New Goal</h3>
+                <button onClick={() => setAddOpen(false)} className="text-white/30 hover:text-white/60" aria-label="Close new goal dialog"><X size={18} /></button>
               </div>
               <form
                 className="space-y-4"
@@ -827,7 +833,7 @@ export default function Budget() {
                   {createMutation.isPending ? 'Creating...' : 'Create Goal'}
                 </GlassButton>
               </form>
-            </motion.div>
+            </DialogSurface>
           </div>
         )}
       </AnimatePresence>

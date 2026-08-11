@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { createTransaction, fetchAccounts } from '../api/client';
 import { useTaxonomy } from '../hooks/useTaxonomy';
+import DialogSurface from './DialogSurface';
 
 const INITIAL = {
   date: format(new Date(), 'yyyy-MM-dd'),
@@ -78,17 +79,21 @@ export default function QuickAddModal({ open, onClose }) {
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/60 z-50"
             onClick={onClose}
+            data-godfin-dialog-backdrop="true"
+            aria-hidden="true"
           />
-          <motion.div
+          <DialogSurface
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            labelledBy="quick-add-title"
+            onClose={onClose}
             className="fixed inset-x-4 bottom-4 top-auto sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-full sm:max-w-md bg-slate-800 border border-slate-700 rounded-2xl z-50 overflow-hidden"
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
-              <h2 className="text-base font-semibold text-white">Add Transaction</h2>
-              <button onClick={onClose} className="text-slate-400 hover:text-white">
+              <h2 id="quick-add-title" className="text-base font-semibold text-white">Add Transaction</h2>
+              <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close add transaction dialog">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -96,8 +101,9 @@ export default function QuickAddModal({ open, onClose }) {
             <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Date</label>
+                  <label htmlFor="quick-add-date" className="block text-xs text-slate-400 mb-1">Date</label>
                   <input
+                    id="quick-add-date"
                     type="date"
                     value={form.date}
                     onChange={(e) => set('date', e.target.value)}
@@ -105,13 +111,14 @@ export default function QuickAddModal({ open, onClose }) {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Type</label>
-                  <div className="flex rounded-lg overflow-hidden border border-slate-600">
+                  <span id="quick-add-type-label" className="block text-xs text-slate-400 mb-1">Type</span>
+                  <div className="flex rounded-lg overflow-hidden border border-slate-600" role="group" aria-labelledby="quick-add-type-label">
                     {['debit', 'credit'].map((t) => (
                       <button
                         key={t}
                         type="button"
                         onClick={() => set('type', t)}
+                        aria-pressed={form.type === t}
                         className={`flex-1 py-2 text-sm capitalize transition-colors ${
                           form.type === t
                             ? t === 'debit'
@@ -128,8 +135,9 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Merchant</label>
+                <label htmlFor="quick-add-merchant" className="block text-xs text-slate-400 mb-1">Merchant</label>
                 <input
+                  id="quick-add-merchant"
                   type="text"
                   value={form.merchant_raw}
                   onChange={(e) => set('merchant_raw', e.target.value)}
@@ -139,8 +147,9 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Amount</label>
+                <label htmlFor="quick-add-amount" className="block text-xs text-slate-400 mb-1">Amount</label>
                 <input
+                  id="quick-add-amount"
                   type="number"
                   step="0.01"
                   min="0"
@@ -152,8 +161,9 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Account</label>
+                <label htmlFor="quick-add-account" className="block text-xs text-slate-400 mb-1">Account</label>
                 <select
+                  id="quick-add-account"
                   value={form.account_id || accounts?.[0]?.id || ''}
                   onChange={(e) => set('account_id', e.target.value)}
                   className="w-full bg-slate-700/50 border border-slate-600 rounded-lg text-sm text-white px-3 py-2 focus:border-emerald-400 focus:outline-none"
@@ -166,8 +176,9 @@ export default function QuickAddModal({ open, onClose }) {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Category</label>
+                  <label htmlFor="quick-add-category" className="block text-xs text-slate-400 mb-1">Category</label>
                   <select
+                    id="quick-add-category"
                     value={form.category}
                     onChange={(e) => set('category', e.target.value)}
                     className="w-full bg-slate-700/50 border border-slate-600 rounded-lg text-sm text-white px-3 py-2 focus:border-emerald-400 focus:outline-none"
@@ -179,8 +190,9 @@ export default function QuickAddModal({ open, onClose }) {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Subcategory</label>
+                  <label htmlFor="quick-add-subcategory" className="block text-xs text-slate-400 mb-1">Subcategory</label>
                   <select
+                    id="quick-add-subcategory"
                     value={form.subcategory}
                     onChange={(e) => set('subcategory', e.target.value)}
                     disabled={!form.category}
@@ -195,8 +207,9 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Notes</label>
+                <label htmlFor="quick-add-notes" className="block text-xs text-slate-400 mb-1">Notes</label>
                 <input
+                  id="quick-add-notes"
                   type="text"
                   value={form.notes}
                   onChange={(e) => set('notes', e.target.value)}
@@ -206,7 +219,7 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               {error && (
-                <p className="text-rose-400 text-sm">{error}</p>
+                <p className="text-rose-400 text-sm" role="alert">{error}</p>
               )}
 
               <button
@@ -217,7 +230,7 @@ export default function QuickAddModal({ open, onClose }) {
                 {mutation.isPending ? 'Adding...' : 'Add Transaction'}
               </button>
             </form>
-          </motion.div>
+          </DialogSurface>
         </>
       )}
     </AnimatePresence>

@@ -68,7 +68,7 @@ export default function CalculationInfo({
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
         setOpen(false);
-        buttonRef.current?.blur();
+        buttonRef.current?.focus({ preventScroll: true });
       }
     };
     window.addEventListener('resize', handleViewportChange);
@@ -125,6 +125,7 @@ export default function CalculationInfo({
         aria-label={`How ${title} is calculated`}
         aria-expanded={open}
         aria-controls={id}
+        aria-describedby={open ? id : undefined}
         onFocus={() => setOpen(true)}
         onBlur={scheduleClose}
         onClick={event => {
@@ -134,7 +135,8 @@ export default function CalculationInfo({
         onKeyDown={event => {
           if (event.key === 'Escape') {
             setOpen(false);
-            event.currentTarget.blur();
+            event.stopPropagation();
+            event.currentTarget.focus({ preventScroll: true });
           }
         }}
         className="w-7 h-7 -m-1 grid place-items-center rounded-full text-white/28 hover:text-cyan-200/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50"

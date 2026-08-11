@@ -215,7 +215,7 @@ export default function UploadPage() {
                         <p className="text-white/80 text-[0.85rem]">{file.name}</p>
                         <p className="text-white/30 text-[0.7rem]">{(file.size / 1024).toFixed(1)} KB</p>
                       </div>
-                      <button onClick={() => { setFile(null); resetResults(); }} className="ml-2 text-white/30 hover:text-rose-400/70">
+                      <button onClick={() => { setFile(null); resetResults(); }} className="ml-2 text-white/30 hover:text-rose-400/70" aria-label={`Remove selected file ${file.name}`}>
                         <Trash2 size={15} />
                       </button>
                     </div>
@@ -604,6 +604,7 @@ export default function UploadPage() {
                               <div className="mb-3">
                                 <p className="text-white/25 text-[0.65rem] mb-1.5">Subcategory (optional):</p>
                                 <select
+                                  aria-label={`Subcategory for ${item.merchant_normalized || item.merchant_raw}`}
                                   value={reviewSubcategory[item.id] || ''}
                                   onChange={(e) => setReviewSubcategory(prev => ({ ...prev, [item.id]: e.target.value }))}
                                   className="w-full bg-white/[0.06] border border-white/[0.12] rounded-[8px] px-2 py-1.5 text-[0.7rem] text-white/70 focus:outline-none focus:border-cyan-400/30"

@@ -15,6 +15,7 @@ import {
   testLLMConnection,
 } from '../../api/llm';
 import { GlassButton } from '../GlassButton';
+import DialogSurface from '../DialogSurface';
 
 // Static glassmorphism style constants - defined at module level to avoid recreating on every render
 const GLASS_INPUT = 'bg-white/[0.08] backdrop-blur-[16px] border border-white/[0.15] text-white/80 text-[0.8rem] rounded-[14px] px-4 py-2.5 focus:outline-none focus:border-cyan-400/30 transition-all';
@@ -322,6 +323,7 @@ function LLMSettings() {
                 onClick={() => handleEdit(currentConfig)}
                 className="p-2 text-white/40 hover:text-white/80 transition-colors rounded-[10px] hover:bg-white/[0.08]"
                 title="Edit configuration"
+                aria-label="Edit AI configuration"
               >
                 <Edit2 className="h-4 w-4" />
               </button>
@@ -330,6 +332,7 @@ function LLMSettings() {
                 disabled={deleteMutation.isPending}
                 className="p-2 text-white/40 hover:text-rose-400 transition-colors rounded-[10px] hover:bg-rose-500/10"
                 title="Delete configuration"
+                aria-label="Delete AI configuration"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
@@ -378,30 +381,34 @@ function LLMSettings() {
 
       {/* Configuration Modal — portal to body to escape parent overflow/stacking context */}
       {showConfigModal && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <motion.div
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4" role="presentation">
+          <DialogSurface
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
+            labelledBy="llm-configuration-title"
+            describedBy="llm-configuration-description"
+            onClose={handleCloseModal}
             className="relative rounded-[20px] bg-[#0d1f3c]/95 backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.1)] max-w-lg w-full max-h-[85vh] overflow-y-auto"
           >
             <div className={GLASS_GRADIENT_LINE} />
             <div className="p-6">
-              <h3 className="text-[1.1rem] text-white/90 mb-1" style={{ fontWeight: 500 }}>
+              <h3 id="llm-configuration-title" className="text-[1.1rem] text-white/90 mb-1" style={{ fontWeight: 500 }}>
                 {editingConfig ? 'Edit LLM Configuration' : 'Configure LLM Provider'}
               </h3>
-              <p className="text-white/40 text-[0.8rem] mb-6">
+              <p id="llm-configuration-description" className="text-white/40 text-[0.8rem] mb-6">
                 Select an AI provider for transaction classification
               </p>
 
               <div className="space-y-5">
                 {/* Provider Selection */}
                 <div>
-                  <label className="text-white/50 text-[0.8rem] block mb-2">
+                  <label htmlFor="llm-provider" className="text-white/50 text-[0.8rem] block mb-2">
                     Provider
                     {providersLoading && <span className="ml-2 text-white/30">(Loading...)</span>}
                   </label>
                   <div className="relative">
                     <select
+                      id="llm-provider"
                       value={selectedProvider}
                       onChange={(e) => handleProviderChange(e.target.value)}
                       className={`w-full appearance-none ${GLASS_INPUT} ${GLASS_INPUT_HOVER} cursor-pointer disabled:opacity-50`}
@@ -440,7 +447,9 @@ function LLMSettings() {
                       {availableAuthMethods.map((method) => (
                         <button
                           key={method}
+                          type="button"
                           onClick={() => setSelectedAuth(method)}
+                          aria-pressed={selectedAuth === method}
                           disabled={selectedProvider === 'ollama_local'}
                           className={`flex-1 px-3 py-2 rounded-[14px] text-[0.8rem] transition-all backdrop-blur-[12px] border ${
                             selectedAuth === method
@@ -463,14 +472,16 @@ function LLMSettings() {
                 {/* Model Selection */}
                 {selectedProvider && availableModels && (
                   <div>
-                    <label className="text-white/50 text-[0.8rem] block mb-2">
+                    <p id="llm-model-label" className="text-white/50 text-[0.8rem] block mb-2">
                       Model
-                    </label>
+                    </p>
 
                     {availableModels.manual ? (
                       // Manual entry for Ollama Local
                       <div className="space-y-2">
                         <input
+                          id="llm-model-manual"
+                          aria-labelledby="llm-model-label"
                           type="text"
                           value={selectedModel}
                           onChange={(e) => setSelectedModel(e.target.value)}
@@ -481,7 +492,9 @@ function LLMSettings() {
                           {availableModels.suggestions.map((suggestion) => (
                             <button
                               key={suggestion}
+                              type="button"
                               onClick={() => setSelectedModel(suggestion)}
+                              aria-pressed={selectedModel === suggestion}
                               className="text-[0.75rem] px-2.5 py-1 bg-white/[0.08] text-white/50 rounded-[10px] hover:bg-white/[0.12] hover:text-white/70 transition-all border border-white/[0.08]"
                               title="Click to use this model"
                             >
@@ -495,11 +508,13 @@ function LLMSettings() {
                       </div>
                     ) : (
                       // Dropdown for other providers
-                      <div className="space-y-2">
+                      <div className="space-y-2" role="group" aria-labelledby="llm-model-label">
                         {availableModels.map((model) => (
                           <button
                             key={model.value}
+                            type="button"
                             onClick={() => setSelectedModel(model.value)}
+                            aria-pressed={selectedModel === model.value}
                             className={`w-full flex items-center justify-between px-3 py-2 rounded-[14px] text-[0.8rem] transition-all backdrop-blur-[12px] border ${
                               selectedModel === model.value
                                 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/30 shadow-[0_0_16px_rgba(34,211,238,0.1)]'
@@ -522,11 +537,12 @@ function LLMSettings() {
                 {/* Base URL (for Ollama) */}
                 {selectedProvider?.includes('ollama') && (
                   <div>
-                    <label className="text-white/50 text-[0.8rem] block mb-2 flex items-center gap-1">
+                    <label htmlFor="llm-base-url" className="text-white/50 text-[0.8rem] block mb-2 flex items-center gap-1">
                       <Server className="h-3 w-3" />
                       Base URL
                     </label>
                     <input
+                      id="llm-base-url"
                       type="text"
                       value={baseUrl}
                       onChange={(e) => setBaseUrl(e.target.value)}
@@ -539,7 +555,7 @@ function LLMSettings() {
                 {/* API Key */}
                 {selectedProvider && selectedAuth === 'openapi' && providersData?.[selectedProvider]?.requires_auth && (
                   <div>
-                    <label className="text-white/50 text-[0.8rem] block mb-2 flex items-center gap-1">
+                    <label htmlFor="llm-api-key" className="text-white/50 text-[0.8rem] block mb-2 flex items-center gap-1">
                       <Key className="h-3 w-3" />
                       API Key
                       {editingConfig?.has_api_key && (
@@ -547,6 +563,7 @@ function LLMSettings() {
                       )}
                     </label>
                     <input
+                      id="llm-api-key"
                       type="password"
                       value={apiKey}
                       onChange={(e) => setApiKey(e.target.value)}
@@ -630,7 +647,7 @@ function LLMSettings() {
                 </button>
               </div>
             </div>
-          </motion.div>
+          </DialogSurface>
         </div>,
         document.body
       )}

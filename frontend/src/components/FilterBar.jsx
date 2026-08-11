@@ -179,6 +179,7 @@ export default function FilterBar({ filters, onChange }) {
           onClick={clear}
           className="text-slate-400 hover:text-white transition-colors p-2"
           title="Clear filters"
+          aria-label="Clear transaction filters"
         >
           <X className="h-4 w-4" />
         </button>

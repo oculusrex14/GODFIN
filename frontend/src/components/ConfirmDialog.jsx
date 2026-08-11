@@ -1,26 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
+import DialogSurface from './DialogSurface';
 
 export function ConfirmDialog({ isOpen, title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', onConfirm, onCancel, danger = false }) {
   const cancelRef = useRef(null);
-
-  useEffect(() => {
-    if (isOpen) {
-      const timer = setTimeout(() => cancelRef.current?.focus(), 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (isOpen) {
-      const handleKeyDown = (e) => {
-        if (e.key === 'Escape') onCancel?.();
-      };
-      document.addEventListener('keydown', handleKeyDown);
-      return () => document.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [isOpen, onCancel]);
 
   return (
     <AnimatePresence>
@@ -32,14 +16,17 @@ export function ConfirmDialog({ isOpen, title, message, confirmLabel = 'Confirm'
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
             onClick={onCancel}
+            data-godfin-dialog-backdrop="true"
+            aria-hidden="true"
           />
-          <motion.div
+          <DialogSurface
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="confirm-title"
+            labelledBy="confirm-title"
+            describedBy="confirm-description"
+            initialFocusRef={cancelRef}
+            onClose={onCancel}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-[#1a2a4a] border border-white/[0.12] rounded-[20px] shadow-2xl z-50 overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
@@ -54,7 +41,7 @@ export function ConfirmDialog({ isOpen, title, message, confirmLabel = 'Confirm'
                   <X size={18} />
                 </button>
               </div>
-              <p className="text-white/50 text-[0.9rem] mb-6">{message}</p>
+              <p id="confirm-description" className="text-white/50 text-[0.9rem] mb-6">{message}</p>
               <div className="flex gap-3 justify-end">
                 <button
                   ref={cancelRef}
@@ -75,7 +62,7 @@ export function ConfirmDialog({ isOpen, title, message, confirmLabel = 'Confirm'
                 </button>
               </div>
             </div>
-          </motion.div>
+          </DialogSurface>
         </>
       )}
     </AnimatePresence>
