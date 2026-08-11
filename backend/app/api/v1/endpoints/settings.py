@@ -45,6 +45,13 @@ def _get_backup_dir(db: Session) -> str:
     return setting.value if setting else './backups'
 
 
+def _safe_nonnegative_int(value: str | None) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 # --- App Settings ---
 
 @router.get("")
@@ -109,6 +116,56 @@ def settings_health(
     backup_dir = _get_backup_dir(db)
     backups = list_backups(backup_dir)
     latest_backup = backups[0] if backups else None
+    backup_health_keys = {
+        "backup_scheduler_status",
+        "backup_scheduler_failure_code",
+        "backup_scheduler_last_failure_at",
+        "backup_scheduler_next_retry_at",
+        "backup_scheduler_failure_count",
+        "backup_job_status",
+        "backup_last_success_at",
+        "backup_job_last_failure_at",
+        "backup_job_failure_code",
+        "backup_job_next_retry_at",
+        "backup_job_failure_count",
+    }
+    backup_health = {
+        setting.key: setting.value
+        for setting in db.query(AppSetting)
+        .filter(AppSetting.key.in_(backup_health_keys))
+        .all()
+    }
+    scheduler_status = backup_health.get("backup_scheduler_status", "unknown")
+    backup_job_status = backup_health.get("backup_job_status", "never")
+    scheduler_degraded = scheduler_status == "degraded"
+    backup_job_degraded = backup_job_status == "degraded"
+    backup_degraded = scheduler_degraded or backup_job_degraded
+    last_success_at = backup_health.get("backup_last_success_at") or (
+        latest_backup["created_at"] if latest_backup else None
+    )
+    next_retry_at = (
+        backup_health.get("backup_scheduler_next_retry_at")
+        if scheduler_degraded
+        else backup_health.get("backup_job_next_retry_at")
+    )
+    if scheduler_degraded:
+        backup_message = (
+            "Automatic backup protection could not start. GODFIN will retry "
+            "automatically; manual backups remain available."
+        )
+    elif backup_job_degraded:
+        backup_message = (
+            "The latest automatic backup failed. The last successful backup "
+            "was preserved and GODFIN will retry automatically."
+        )
+    elif latest_backup:
+        backup_message = "Automatic backup protection is active and backups are available."
+    elif scheduler_status == "operational":
+        backup_message = (
+            "Automatic backup protection is active. No backup has completed yet."
+        )
+    else:
+        backup_message = "No backup has been created yet."
 
     last_ingest = db.query(AppSetting).filter_by(key="last_ingestion_run").first()
     network_setting = db.query(AppSetting).filter_by(key="allow_network_access").first()
@@ -126,15 +183,36 @@ def settings_health(
             "message": llm_message,
         },
         "backup": {
-            "status": "ok" if latest_backup else "never",
+            "status": (
+                "degraded"
+                if backup_degraded
+                else "ok"
+                if latest_backup
+                else "never"
+            ),
+            "scheduler_status": scheduler_status,
+            "job_status": backup_job_status,
             "directory": backup_dir,
             "count": len(backups),
             "last_backup": latest_backup,
-            "message": (
-                "Backups are available."
-                if latest_backup
-                else "No backup has been created yet."
+            "last_success_at": last_success_at,
+            "last_failure_at": (
+                backup_health.get("backup_scheduler_last_failure_at")
+                if scheduler_degraded
+                else backup_health.get("backup_job_last_failure_at")
             ),
+            "next_retry_at": next_retry_at or None,
+            "failure_code": (
+                backup_health.get("backup_scheduler_failure_code")
+                if scheduler_degraded
+                else backup_health.get("backup_job_failure_code")
+            ) or None,
+            "failure_count": _safe_nonnegative_int(
+                backup_health.get("backup_scheduler_failure_count")
+                if scheduler_degraded
+                else backup_health.get("backup_job_failure_count")
+            ),
+            "message": backup_message,
         },
         "ingestion": {
             "status": "ok" if last_ingest and last_ingest.value else "never",

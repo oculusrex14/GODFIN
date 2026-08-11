@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import {
   fetchSettings, fetchSettingsHealth, updateNetworkAccess, updateDeveloperMode, fetchDeveloperMode, triggerBackup, fetchBackups,
-  downloadCSV, fetchSystemStatus, restartBackend,
+  downloadCSV, downloadSupportDiagnostics, fetchSystemStatus, restartBackend,
   createRule, deleteRule, resetData,
   fetchEmbeddingStatus, enableEmbeddings,
   fetchOnboardingStatus, updateOnboardingStatus,
@@ -202,6 +202,12 @@ export default function Settings() {
     onError: (err) => showToast(err?.message || 'Backup failed', 'error'),
   });
 
+  const diagnosticsMutation = useMutation({
+    mutationFn: downloadSupportDiagnostics,
+    onSuccess: () => showToast('Support report downloaded.'),
+    onError: (err) => showToast(err?.message || 'Support report could not be created.', 'error'),
+  });
+
   const restartMutation = useMutation({
     mutationFn: restartBackend,
     onSuccess: (data) => {
@@ -321,6 +327,28 @@ export default function Settings() {
           <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Settings</h1>
         </div>
       </motion.div>
+
+      {health?.backup?.status === 'degraded' && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="rounded-[18px] border border-rose-400/25 bg-rose-400/[0.09] px-4 py-3 text-rose-100"
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
+            <div>
+              <p className="text-sm font-medium">Automatic backup protection needs attention</p>
+              <p className="mt-1 text-xs leading-relaxed text-white/55">{health.backup.message}</p>
+              <p className="mt-2 text-[0.68rem] text-white/35">
+                Last successful backup: {formatBackupDate(health.backup.last_success_at)}
+                {health.backup.next_retry_at
+                  ? ` · Next automatic retry: ${formatBackupDate(health.backup.next_retry_at)}`
+                  : ''}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Trust & service health */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
@@ -732,6 +760,22 @@ export default function Settings() {
                 onChange={handleNetworkToggle}
                 disabled={updateMutation.isPending}
               />
+            </div>
+            <div className="pt-4 border-t border-white/[0.06] flex items-center justify-between gap-4">
+              <div>
+                <div className="text-white/70 text-[0.85rem]">Support report</div>
+                <div className="text-white/25 text-[0.7rem]">
+                  Download service health without transactions, credentials, account details, or local file paths.
+                </div>
+              </div>
+              <GlassButton
+                variant="secondary"
+                icon={<Download size={14} />}
+                onClick={() => diagnosticsMutation.mutate()}
+                disabled={diagnosticsMutation.isPending}
+              >
+                {diagnosticsMutation.isPending ? 'Preparing…' : 'Download'}
+              </GlassButton>
             </div>
             <div className="pt-4 border-t border-white/[0.06]">
               <div className="flex items-center justify-between">

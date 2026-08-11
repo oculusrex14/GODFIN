@@ -106,11 +106,26 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to initialize LLM provider: {e}")
 
     # Start background scheduler
+    scheduler_recovery = None
     try:
-        from app.core.scheduler import start_scheduler
-        start_scheduler(DB_PATH, backup_dir)
-    except Exception as e:
-        logger.warning(f"Scheduler not started: {e}")
+        from app.core.scheduler import (
+            schedule_scheduler_recovery,
+            start_scheduler,
+        )
+
+        scheduler_recovery = schedule_scheduler_recovery
+        if not start_scheduler(DB_PATH, backup_dir):
+            logger.warning("Backup scheduler is degraded and will retry")
+    except Exception as exc:
+        logger.error("Backup scheduler startup failed (%s)", type(exc).__name__)
+        if scheduler_recovery is not None:
+            try:
+                scheduler_recovery(DB_PATH, backup_dir)
+            except Exception as recovery_exc:
+                logger.error(
+                    "Backup scheduler recovery could not be scheduled (%s)",
+                    type(recovery_exc).__name__,
+                )
 
     yield
 

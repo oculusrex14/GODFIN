@@ -8,14 +8,16 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.config import settings as app_settings
 from app.core.database import get_db
 from app.models.app_setting import AppSetting
 
@@ -33,6 +35,29 @@ class SystemStatus(BaseModel):
 class RestartResponse(BaseModel):
     message: str
     restarting: bool
+
+
+class DiagnosticApplicationStatus(BaseModel):
+    version: str
+    api_status: Literal["operational"]
+
+
+class DiagnosticBackupStatus(BaseModel):
+    status: Literal["operational", "degraded", "unknown"]
+    scheduler_status: str
+    job_status: str
+    last_success_at: Optional[str] = None
+    last_failure_at: Optional[str] = None
+    next_retry_at: Optional[str] = None
+    failure_code: Optional[str] = None
+    failure_count: int = Field(ge=0)
+
+
+class SupportDiagnostics(BaseModel):
+    schema_version: Literal[1]
+    generated_at_utc: str
+    application: DiagnosticApplicationStatus
+    backup_protection: DiagnosticBackupStatus
 
 
 class LocalModelAction(BaseModel):
@@ -55,6 +80,77 @@ def get_system_status(
         backend_url="http://localhost:5100",
         frontend_url="http://localhost:5200",
     )
+
+
+@router.get("/diagnostics", response_model=SupportDiagnostics)
+def download_support_diagnostics(
+    response: Response,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Export support-safe subsystem state without local paths or user data."""
+    allowed_keys = {
+        "backup_scheduler_status",
+        "backup_scheduler_failure_code",
+        "backup_scheduler_last_failure_at",
+        "backup_scheduler_next_retry_at",
+        "backup_scheduler_failure_count",
+        "backup_job_status",
+        "backup_last_success_at",
+        "backup_job_last_failure_at",
+        "backup_job_failure_code",
+        "backup_job_next_retry_at",
+        "backup_job_failure_count",
+    }
+    values = {
+        setting.key: setting.value
+        for setting in db.query(AppSetting)
+        .filter(AppSetting.key.in_(allowed_keys))
+        .all()
+    }
+    scheduler_status = values.get("backup_scheduler_status", "unknown")
+    job_status = values.get("backup_job_status", "never")
+    scheduler_degraded = scheduler_status == "degraded"
+    job_degraded = job_status == "degraded"
+    if scheduler_degraded or job_degraded:
+        protection_status = "degraded"
+    elif scheduler_status == "operational":
+        protection_status = "operational"
+    else:
+        protection_status = "unknown"
+    active_prefix = "backup_scheduler" if scheduler_degraded else "backup_job"
+    try:
+        failure_count = max(
+            0,
+            int(values.get(f"{active_prefix}_failure_count") or 0),
+        )
+    except (TypeError, ValueError):
+        failure_count = 0
+
+    payload = {
+        "schema_version": 1,
+        "generated_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
+        "application": {
+            "version": app_settings.VERSION,
+            "api_status": "operational",
+        },
+        "backup_protection": {
+            "status": protection_status,
+            "scheduler_status": scheduler_status,
+            "job_status": job_status,
+            "last_success_at": values.get("backup_last_success_at") or None,
+            "last_failure_at": values.get(f"{active_prefix}_last_failure_at") or None,
+            "next_retry_at": values.get(f"{active_prefix}_next_retry_at") or None,
+            "failure_code": values.get(f"{active_prefix}_failure_code") or None,
+            "failure_count": failure_count,
+        },
+    }
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Content-Disposition"] = (
+        "attachment; filename=godfin-support-diagnostics.json"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return SupportDiagnostics(**payload)
 
 
 @router.post("/restart", response_model=RestartResponse)

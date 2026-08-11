@@ -842,6 +842,16 @@ export function fetchSystemStatus() {
   return apiFetch('/system/status');
 }
 
+export async function downloadSupportDiagnostics() {
+  const blob = await apiFetch('/system/diagnostics', { responseType: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'godfin-support-diagnostics.json';
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export function restartBackend() {
   return apiFetch('/system/restart', { method: 'POST' });
 }

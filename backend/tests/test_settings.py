@@ -114,6 +114,33 @@ def test_settings_health_card_payload(auth_client):
     assert data['network']['allow_network_access'] is False
 
 
+def test_settings_health_surfaces_persistent_backup_degradation(
+    auth_client,
+    db_session,
+):
+    values = {
+        "backup_scheduler_status": "degraded",
+        "backup_scheduler_failure_code": "scheduler_start_failed",
+        "backup_scheduler_last_failure_at": "2026-08-11T01:00:00+00:00",
+        "backup_scheduler_next_retry_at": "2026-08-11T01:01:00+00:00",
+        "backup_scheduler_failure_count": "2",
+        "backup_last_success_at": "2026-08-10T18:29:00+00:00",
+    }
+    for key, value in values.items():
+        db_session.merge(AppSetting(key=key, value=value))
+    db_session.commit()
+
+    backup = auth_client.get('/api/v1/settings/health').json()['backup']
+
+    assert backup['status'] == 'degraded'
+    assert backup['scheduler_status'] == 'degraded'
+    assert backup['failure_code'] == 'scheduler_start_failed'
+    assert backup['failure_count'] == 2
+    assert backup['last_success_at'] == '2026-08-10T18:29:00+00:00'
+    assert backup['next_retry_at'] == '2026-08-11T01:01:00+00:00'
+    assert 'retry automatically' in backup['message'].lower()
+
+
 def test_network_access_toggle_requires_restart(auth_client):
     resp = auth_client.put(
         '/api/v1/settings/preferences/network-access',
