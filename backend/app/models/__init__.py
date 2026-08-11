@@ -29,6 +29,7 @@ from app.models.net_worth import NetWorthItem, NetWorthQuote
 from app.models.behavior_insight import BehaviorInsightPreference
 from app.models.reward_pilot import RewardPilotSubmission
 from app.models.gmail_oauth_attempt import GmailOAuthAttempt
+from app.models.background_job import BackgroundJob
 
 __all__ = [
     "Account", "Transaction", "TransactionSplit", "MerchantMemory",
@@ -40,4 +41,5 @@ __all__ = [
     "ClassificationPattern", "NetWorthItem", "NetWorthQuote",
     "BehaviorInsightPreference", "RewardPilotSubmission",
     "GmailOAuthAttempt",
+    "BackgroundJob",
 ]

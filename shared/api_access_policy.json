@@ -164,6 +164,9 @@
     "GET /api/v1/profile": {
       "access": "authenticated_free"
     },
+    "GET /api/v1/ready": {
+      "access": "public"
+    },
     "GET /api/v1/recurring": {
       "access": "authenticated_free"
     },
@@ -360,7 +363,13 @@
     "POST /api/v1/ingest/gmail/range": {
       "access": "authenticated_free"
     },
+    "POST /api/v1/ingest/gmail/range/cancel": {
+      "access": "authenticated_free"
+    },
     "POST /api/v1/ingest/gmail/range/start": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/ingest/gmail/sync/cancel": {
       "access": "authenticated_free"
     },
     "POST /api/v1/ingest/settings": {

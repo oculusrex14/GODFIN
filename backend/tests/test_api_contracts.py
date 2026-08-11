@@ -38,6 +38,7 @@ PUBLIC_ROUTES = {
     ("auth.py", "verify_pin"),
     ("gmail.py", "gmail_oauth_callback"),
     ("health.py", "health_check"),
+    ("health.py", "readiness_check"),
 }
 
 
@@ -404,8 +405,8 @@ def test_openapi_documents_one_error_envelope_and_success_status_per_operation()
                 assert error_schema == {
                     "$ref": "#/components/schemas/APIErrorResponse"
                 }
-    assert len(operation_ids) == 176
+    assert len(operation_ids) == 179
     # Freeze the audited legacy debt: a new route may not add another generic
     # success body. Precise success schemas are being reduced separately while
     # every error/status/auth contract is enforced now.
-    assert len(untyped_success) == 139
+    assert len(untyped_success) == 142

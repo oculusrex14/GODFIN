@@ -5,17 +5,23 @@ import json
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user, hash_token
+from app.core.background_jobs import (
+    JobQueueFull,
+    enqueue_job,
+    latest_job,
+    request_job_cancel,
+)
 from app.core.backup import create_backup
 from app.core.config import settings as app_config
 from app.core.data_deletion import delete_transactions_with_dependents
 from app.core.database import get_db
-from app.core.errors import IntegrationUnavailableError
+from app.core.errors import IntegrationUnavailableError, StateConflictError
 from app.core.gmail_service import (
     GmailConfigurationError,
     GmailError,
@@ -27,8 +33,7 @@ from app.core.gmail_service import (
 )
 from app.core.ingestion import (
     get_ingestion_history, run_ingestion, run_ingestion_with_dates,
-    run_ingestion_with_dates_background,
-    run_initial_sync, run_initial_sync_background,
+    run_initial_sync,
 )
 from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
@@ -372,7 +377,6 @@ def trigger_initial_sync(
 
 @router.post("/ingest/gmail/initial/start")
 def start_initial_sync_background(
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -383,11 +387,6 @@ def start_initial_sync_background(
     if not is_connected():
         raise HTTPException(status_code=400, detail="Gmail not connected")
 
-    # Check if already running
-    status_setting = db.query(AppSetting).filter_by(key='sync_status').first()
-    if status_setting and status_setting.value == 'running':
-        return {"success": True, "message": "Sync already in progress", "already_running": True}
-
     # Check if initial sync already completed
     completed = db.query(AppSetting).filter_by(key='initial_sync_completed').first()
     if completed and completed.value == 'true':
@@ -397,9 +396,31 @@ def start_initial_sync_background(
             "already_completed": True,
         }
 
-    background_tasks.add_task(run_initial_sync_background)
+    try:
+        queued = enqueue_job(
+            "gmail_initial_sync",
+            active_key="gmail-ingestion",
+            max_attempts=3,
+            public_message="Preparing the first Gmail import…",
+        )
+    except JobQueueFull as exc:
+        raise StateConflictError(
+            code="BACKGROUND_QUEUE_FULL",
+            message="GODFIN is already handling too much background work.",
+            hint="Wait for the current work to finish, then try again.",
+        ) from exc
 
-    return {"success": True, "message": "Initial sync started in background"}
+    return {
+        "success": True,
+        "message": (
+            "Initial sync started in background"
+            if queued.created
+            else "A Gmail import is already in progress"
+        ),
+        "job_id": queued.job_id,
+        "started": queued.created,
+        "already_running": not queued.created,
+    }
 
 
 @router.get("/ingest/gmail/sync-status")
@@ -441,7 +462,7 @@ def get_sync_status(
         except json.JSONDecodeError:
             parsed_result = None
 
-    return {
+    payload = {
         "status": status,
         "processed": processed,
         "total": total,
@@ -449,6 +470,33 @@ def get_sync_status(
         "result": parsed_result,
         "error": (values['sync_error'] or '').strip() or None,
     }
+    try:
+        job = latest_job(kind="gmail_initial_sync", active_key="gmail-ingestion")
+    except Exception:
+        job = None
+    if job and job["kind"] == "gmail_initial_sync":
+        payload["job_id"] = job["id"]
+        payload["attempt"] = job["attempt"]
+        payload["retry_at"] = job["retry_at"]
+        if job["status"] in {"queued", "running", "retry_wait", "cancel_requested"}:
+            payload["status"] = "running"
+            payload["percent"] = job["progress"]
+            payload["total"] = max(payload["total"], job["total"])
+        elif job["status"] in {"failed", "poisoned"}:
+            payload["status"] = "error"
+            payload["error"] = job["message"]
+        elif job["status"] == "cancelled":
+            payload["status"] = "cancelled"
+    return payload
+
+
+@router.post("/ingest/gmail/sync/cancel")
+def cancel_initial_sync_background(
+    _user: bool = Depends(get_current_user),
+):
+    job = latest_job(kind="gmail_initial_sync", active_key="gmail-ingestion")
+    cancelled = bool(job and request_job_cancel(job["id"]))
+    return {"cancel_requested": cancelled, "job_id": job["id"] if job else None}
 
 
 # --- Ingest with Date Range ---
@@ -511,7 +559,6 @@ def trigger_ingestion_range(
 @router.post("/ingest/gmail/range/start")
 def start_ingestion_range_background(
     request: DateRangeRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -525,21 +572,38 @@ def start_ingestion_range_background(
     start = request.start_date
     end = request.end_date
 
-    # Check if already running
-    status_setting = db.query(AppSetting).filter_by(key='ingest_now_status').first()
-    if status_setting and status_setting.value == 'running':
-        return {"success": True, "message": "Ingestion already in progress", "already_running": True}
-
     # end_date is inclusive in the UI, so add 1 day for the query
     end_plus_one = (end + timedelta(days=1)).strftime('%Y-%m-%d')
 
-    background_tasks.add_task(
-        run_ingestion_with_dates_background,
-        start.isoformat(),
-        end_plus_one,
-    )
+    try:
+        queued = enqueue_job(
+            "gmail_date_range",
+            payload={
+                "start_date": start.isoformat(),
+                "end_date": end_plus_one,
+            },
+            active_key="gmail-ingestion",
+            max_attempts=3,
+            public_message="Preparing the selected Gmail date range…",
+        )
+    except JobQueueFull as exc:
+        raise StateConflictError(
+            code="BACKGROUND_QUEUE_FULL",
+            message="GODFIN is already handling too much background work.",
+            hint="Wait for the current work to finish, then try again.",
+        ) from exc
 
-    return {"success": True, "message": "Ingestion started"}
+    return {
+        "success": True,
+        "message": (
+            "Ingestion started"
+            if queued.created
+            else "A Gmail import is already in progress"
+        ),
+        "job_id": queued.job_id,
+        "started": queued.created,
+        "already_running": not queued.created,
+    }
 
 
 @router.get("/ingest/gmail/range/status")
@@ -576,7 +640,7 @@ def get_ingestion_range_status(
         except json.JSONDecodeError:
             parsed_result = None
 
-    return {
+    payload = {
         "status": status,
         "processed": processed,
         "total": total,
@@ -586,6 +650,33 @@ def get_ingestion_range_status(
         "result": parsed_result,
         "error": (values['ingest_now_error'] or '').strip() or None,
     }
+    try:
+        job = latest_job(kind="gmail_date_range", active_key="gmail-ingestion")
+    except Exception:
+        job = None
+    if job and job["kind"] == "gmail_date_range":
+        payload["job_id"] = job["id"]
+        payload["attempt"] = job["attempt"]
+        payload["retry_at"] = job["retry_at"]
+        if job["status"] in {"queued", "running", "retry_wait", "cancel_requested"}:
+            payload["status"] = "running"
+            payload["percent"] = job["progress"]
+            payload["total"] = max(payload["total"], job["total"])
+        elif job["status"] in {"failed", "poisoned"}:
+            payload["status"] = "error"
+            payload["error"] = job["message"]
+        elif job["status"] == "cancelled":
+            payload["status"] = "cancelled"
+    return payload
+
+
+@router.post("/ingest/gmail/range/cancel")
+def cancel_ingestion_range_background(
+    _user: bool = Depends(get_current_user),
+):
+    job = latest_job(kind="gmail_date_range", active_key="gmail-ingestion")
+    cancelled = bool(job and request_job_cancel(job["id"]))
+    return {"cancel_requested": cancelled, "job_id": job["id"] if job else None}
 
 
 # --- Scheduler/History Status ---

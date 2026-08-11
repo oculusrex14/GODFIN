@@ -28,6 +28,7 @@ jobs:
       - run: python scripts/verify_documentation_contracts.py
       - run: python scripts/verify_api_access_policy.py
       - run: python scripts/verify_test_governance.py
+      - run: python scripts/verify_performance_contract.py
       - name: Reject executable pickle deserialization in production code
         shell: bash
         run: |

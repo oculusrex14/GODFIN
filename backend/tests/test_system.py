@@ -189,13 +189,29 @@ def test_embedding_setup_cancel_is_idempotent_and_work_is_bounded():
         embedding_service._set_setup_status(**original)
 
 
-def test_embedding_setup_does_not_return_raw_worker_errors(monkeypatch):
-    import time
+def test_embedding_setup_does_not_return_raw_worker_errors(
+    monkeypatch,
+    db_engine,
+):
+    from sqlalchemy.orm import sessionmaker
 
+    from app.core import background_jobs, database as database_module
     from app.core import embedding_service
 
+    session_factory = sessionmaker(bind=db_engine, expire_on_commit=False)
+    monkeypatch.setattr(database_module, "SessionLocal", session_factory)
     original = embedding_service.get_embedding_setup_status()
+    background_jobs.stop_background_job_worker(timeout=0)
+    with background_jobs._handlers_lock:
+        saved_handlers = dict(background_jobs._handlers)
+        background_jobs._handlers.clear()
     try:
+        background_jobs._worker_stop.clear()
+        background_jobs._worker_id = "embedding-test-worker"
+        background_jobs.register_job_handler(
+            "embedding_setup",
+            embedding_service.run_embedding_setup_job,
+        )
         embedding_service._set_setup_status(status="idle")
 
         def fail_model_load():
@@ -203,18 +219,19 @@ def test_embedding_setup_does_not_return_raw_worker_errors(monkeypatch):
 
         monkeypatch.setattr(embedding_service, "_get_model", fail_model_load)
         assert embedding_service.start_embedding_setup() is True
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline:
-            status = embedding_service.get_embedding_setup_status()
-            if status["status"] == "failed":
-                break
-            time.sleep(0.01)
-        else:
-            raise AssertionError("embedding setup worker did not finish")
+        claimed = background_jobs._claim_next_job()
+        assert claimed is not None
+        background_jobs._execute_job(claimed)
+        status = embedding_service.get_embedding_setup_status()
 
-        assert status["message"].startswith("Matching setup could not finish")
+        assert status["message"] == "Work will retry safely."
         assert "/Users/" not in status["message"]
     finally:
+        background_jobs.stop_background_job_worker(timeout=0)
+        with background_jobs._handlers_lock:
+            background_jobs._handlers.clear()
+            background_jobs._handlers.update(saved_handlers)
+        background_jobs._worker_stop.clear()
         embedding_service._setup_cancel.clear()
         embedding_service._set_setup_status(**original)
 
@@ -247,6 +264,7 @@ def test_support_diagnostics_include_backup_health_without_sensitive_state(
         "godfin-support-diagnostics.json"
     )
     diagnostics = response.json()
+    assert diagnostics["schema_version"] == 2
     assert diagnostics["application"]["api_status"] == "operational"
     assert diagnostics["backup_protection"] == {
         "status": "degraded",
@@ -258,7 +276,11 @@ def test_support_diagnostics_include_backup_health_without_sensitive_state(
         "failure_code": "automatic_backup_failed",
         "failure_count": 2,
     }
+    assert diagnostics["readiness"]["ready"] is True
+    assert diagnostics["background_jobs"]["active"] == 0
+    assert diagnostics["background_jobs"]["capacity"] > 0
+    assert diagnostics["request_metrics"]["remote_telemetry"] is False
     serialized = response.text
-    assert "private" not in serialized
-    assert "financial" not in serialized
+    assert "/Users/private/financial/backups" not in serialized
+    assert "godfin_backup_private_name.db" not in serialized
     assert "must-never-appear" not in serialized

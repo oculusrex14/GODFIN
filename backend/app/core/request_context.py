@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
+from time import perf_counter
 from uuid import uuid4
+
+from app.core.local_metrics import record_request
 
 
 _request_id: ContextVar[str | None] = ContextVar("godfin_request_id", default=None)
@@ -29,12 +32,16 @@ class RequestContextMiddleware:
             return
 
         request_id = new_request_id()
+        started = perf_counter()
+        status_code = 500
         state = scope.setdefault("state", {})
         state["request_id"] = request_id
         token = _request_id.set(request_id)
 
         async def send_with_request_id(message):
+            nonlocal status_code
             if message.get("type") == "http.response.start":
+                status_code = int(message.get("status") or 500)
                 headers = list(message.get("headers", []))
                 headers.append((b"x-godfin-request-id", request_id.encode("ascii")))
                 message = {**message, "headers": headers}
@@ -43,4 +50,16 @@ class RequestContextMiddleware:
         try:
             await self.app(scope, receive, send_with_request_id)
         finally:
+            route = scope.get("route")
+            operation = str(
+                getattr(route, "name", None)
+                or getattr(route, "path", None)
+                or "unmatched"
+            )
+            record_request(
+                str(scope.get("method") or "UNKNOWN"),
+                operation,
+                status_code,
+                (perf_counter() - started) * 1000,
+            )
             _request_id.reset(token)

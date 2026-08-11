@@ -6,9 +6,12 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from app.core import backup as backup_module
+from app.core import background_jobs
 from app.core import database as database_module
+from app.core import job_handlers
 from app.core import scheduler as scheduler_module
 from app.models.app_setting import AppSetting
+from app.models.background_job import BackgroundJob
 
 
 class _FakeTimer:
@@ -71,6 +74,10 @@ def _settings(session_factory) -> dict[str, str]:
 @pytest.fixture
 def scheduler_runtime(monkeypatch, db_engine):
     session_factory = sessionmaker(bind=db_engine)
+    background_jobs.stop_background_job_worker(timeout=0)
+    with background_jobs._handlers_lock:
+        saved_handlers = dict(background_jobs._handlers)
+        background_jobs._handlers.clear()
     monkeypatch.setattr(database_module, "SessionLocal", session_factory)
     monkeypatch.setattr(scheduler_module.threading, "Timer", _FakeTimer)
     monkeypatch.setattr(scheduler_module.random, "uniform", lambda *_args: 0.0)
@@ -81,9 +88,20 @@ def scheduler_runtime(monkeypatch, db_engine):
     scheduler_module._scheduler_retry_attempts = 0
     scheduler_module._backup_retry_attempts = 0
     scheduler_module._shutdown_requested = False
+    background_jobs._worker_stop.clear()
+    background_jobs._worker_id = "scheduler-test-worker"
+    background_jobs.register_job_handler(
+        "automatic_backup",
+        job_handlers._automatic_backup,
+    )
     yield session_factory
     scheduler_module.stop_scheduler()
     scheduler_module._scheduler = None
+    background_jobs.stop_background_job_worker(timeout=0)
+    with background_jobs._handlers_lock:
+        background_jobs._handlers.clear()
+        background_jobs._handlers.update(saved_handlers)
+    background_jobs._worker_stop.clear()
 
 
 def test_scheduler_start_failure_is_persistent_and_has_one_bounded_retry(
@@ -139,15 +157,26 @@ def test_failed_automatic_backup_preserves_last_success_and_recovers_on_retry(
         "/tmp/synthetic-backups",
     ) is True
     fake_scheduler.jobs["nightly_batch"]()
+    claimed = background_jobs._claim_next_job()
+    assert claimed is not None
+    background_jobs._execute_job(claimed)
 
     failed = _settings(scheduler_runtime)
     assert failed["backup_job_status"] == "degraded"
     assert failed["backup_job_failure_code"] == "automatic_backup_failed"
     assert failed["backup_job_failure_count"] == "1"
     assert failed["backup_last_success_at"] == "2026-08-01T23:59:00+00:00"
-    assert len(_FakeTimer.created) == 1
-
-    _FakeTimer.created[0].fire()
+    assert len(_FakeTimer.created) == 0
+    db = scheduler_runtime()
+    try:
+        job = db.query(BackgroundJob).filter_by(id=claimed).one()
+        assert job.status == "retry_wait"
+        job.available_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+    finally:
+        db.close()
+    assert background_jobs._claim_next_job() == claimed
+    background_jobs._execute_job(claimed)
     recovered = _settings(scheduler_runtime)
     assert recovered["backup_job_status"] == "ok"
     assert recovered["backup_job_failure_code"] == ""
@@ -243,9 +272,10 @@ def test_persisted_backup_failure_retries_after_application_restart(
     assert pending["backup_job_failure_code"] == "automatic_backup_failed"
     assert pending["backup_job_last_failure_at"] == "2026-08-02T00:01:00+00:00"
     assert pending["backup_last_success_at"] == "2026-08-01T23:59:00+00:00"
-    assert len(_FakeTimer.created) == 1
-
-    _FakeTimer.created[0].fire()
+    assert len(_FakeTimer.created) == 0
+    claimed = background_jobs._claim_next_job()
+    assert claimed is not None
+    background_jobs._execute_job(claimed)
     recovered = _settings(scheduler_runtime)
     assert recovered["backup_job_status"] == "ok"
     assert recovered["backup_last_filename"] == "godfin_backup_recovered_after_restart.db"

@@ -1,26 +1,84 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "regression_margin": 0.15,
   "budgets": {
     "cold_start_ms": {
       "absolute_max": 8000,
-      "accepted_baseline": 6900
+      "accepted_baseline": 6900,
+      "unit": "milliseconds",
+      "consumer": "desktop/scripts/verify-package.mjs"
     },
     "navigation_p95_ms": {
       "absolute_max": 250,
-      "accepted_baseline": 215
+      "accepted_baseline": 215,
+      "unit": "milliseconds",
+      "consumer": "playwright-tests/tests/production-smoke.test.js"
     },
     "transaction_filter_10000_ms": {
       "absolute_max": 750,
-      "accepted_baseline": 650
+      "accepted_baseline": 650,
+      "unit": "milliseconds",
+      "consumer": "backend/tests/test_performance_budgets.py"
     },
     "structured_import_1000_ms": {
       "absolute_max": 15000,
-      "accepted_baseline": 13000
+      "accepted_baseline": 13000,
+      "unit": "milliseconds",
+      "consumer": "backend/tests/test_performance_budgets.py"
     },
     "idle_combined_memory_mb": {
       "absolute_max": 700,
-      "accepted_baseline": 600
+      "accepted_baseline": 600,
+      "unit": "mebibytes",
+      "consumer": "desktop/scripts/verify-package.mjs"
+    },
+    "dashboard_10000_ms": {
+      "absolute_max": 250,
+      "accepted_baseline": 100,
+      "unit": "milliseconds",
+      "consumer": "backend/tests/test_performance_budgets.py"
+    },
+    "dashboard_10000_selects": {
+      "absolute_max": 5,
+      "accepted_baseline": 5,
+      "unit": "select_statements",
+      "consumer": "backend/tests/test_performance_budgets.py"
+    },
+    "report_summary_10000_ms": {
+      "absolute_max": 350,
+      "accepted_baseline": 150,
+      "unit": "milliseconds",
+      "consumer": "backend/tests/test_performance_budgets.py"
+    },
+    "report_summary_10000_selects": {
+      "absolute_max": 6,
+      "accepted_baseline": 6,
+      "unit": "select_statements",
+      "consumer": "backend/tests/test_performance_budgets.py"
+    },
+    "behavior_insights_10000_ms": {
+      "absolute_max": 1000,
+      "accepted_baseline": 500,
+      "unit": "milliseconds",
+      "consumer": "backend/tests/test_performance_budgets.py"
+    },
+    "behavior_insights_10000_selects": {
+      "absolute_max": 5,
+      "accepted_baseline": 5,
+      "unit": "select_statements",
+      "consumer": "backend/tests/test_performance_budgets.py"
+    },
+    "recurring_detection_1000_merchants_ms": {
+      "absolute_max": 3000,
+      "accepted_baseline": 1500,
+      "unit": "milliseconds",
+      "consumer": "backend/tests/test_performance_budgets.py"
+    },
+    "recurring_detection_1000_merchants_selects": {
+      "absolute_max": 3,
+      "accepted_baseline": 3,
+      "unit": "select_statements",
+      "consumer": "backend/tests/test_performance_budgets.py"
     }
   }
 }

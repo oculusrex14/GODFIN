@@ -158,7 +158,6 @@ def test_revision_16_adds_guarded_recurring_provenance_idempotently(tmp_path):
         connection.commit()
     finally:
         connection.close()
-
     apply_additive_schema_updates(str(db_path))
     apply_additive_schema_updates(str(db_path))
 
@@ -187,6 +186,50 @@ def test_revision_16_adds_guarded_recurring_provenance_idempotently(tmp_path):
         "detection_version",
     }.issubset(columns)
     assert provenance == ("[]", "2.0")
+
+
+def test_revision_17_adds_durable_background_job_leases_idempotently(tmp_path):
+    db_path = tmp_path / "revision-17.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "CREATE TABLE app_settings (key VARCHAR(100) PRIMARY KEY, value TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO app_settings(key, value) VALUES ('schema_revision', '16')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(background_jobs)")
+        }
+        indexes = {
+            row[1]: bool(row[2])
+            for row in connection.execute("PRAGMA index_list(background_jobs)")
+        }
+        assert {
+            "id",
+            "kind",
+            "active_key",
+            "status",
+            "available_at",
+            "lease_owner",
+            "lease_expires_at",
+            "cancel_requested",
+            "correlation_id",
+        }.issubset(columns)
+        assert indexes["ix_background_jobs_active_key"] is True
+        assert "ix_background_jobs_ready" in indexes
+        assert "ix_background_jobs_kind_created" in indexes
+    finally:
+        connection.close()
 
 
 def _create_legacy_database(path: Path) -> None:

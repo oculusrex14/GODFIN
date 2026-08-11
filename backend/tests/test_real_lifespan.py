@@ -18,7 +18,14 @@ def test_real_lifespan_runs_migrations_seeds_services_and_shutdown(
     """Exercise the production lifespan instead of the test-only bypass."""
 
     from app import main
-    from app.core import auth, encryption, llm_runtime, scheduler, startup_migrations
+    from app.core import (
+        auth,
+        database as database_module,
+        encryption,
+        llm_runtime,
+        scheduler,
+        startup_migrations,
+    )
     from app import seed
 
     db_path = tmp_path / "lifespan.db"
@@ -44,6 +51,7 @@ def test_real_lifespan_runs_migrations_seeds_services_and_shutdown(
     monkeypatch.setattr(main, "DB_PATH", str(db_path))
     monkeypatch.setattr(main, "engine", engine)
     monkeypatch.setattr(main, "SessionLocal", Session)
+    monkeypatch.setattr(database_module, "SessionLocal", Session)
     monkeypatch.setattr(main, "setup_logging", lambda: events.append("logging"))
 
     real_initialize = encryption.initialize_encryption
@@ -135,6 +143,7 @@ def test_real_lifespan_runs_migrations_seeds_services_and_shutdown(
         async with main.lifespan(main.app):
             assert main.app.state.lifecycle_status == "ready"
             assert main.app.state.scheduler_status == "ready"
+            assert main.app.state.job_worker_status == "ready"
             with Session() as db:
                 assert db.query(Account).count() == 2
                 assert db.query(AppSetting).filter_by(key="is_first_run").one()

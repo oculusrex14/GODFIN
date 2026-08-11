@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI):
 
     app.state.lifecycle_status = "starting"
     app.state.scheduler_status = "starting"
+    app.state.job_worker_status = "starting"
 
     # Initialize structured logging
     setup_logging()
@@ -103,6 +104,23 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Register durable handlers only after the schema exists, then recover
+    # expired leases and start the bounded local dispatcher. API startup stays
+    # available in a degraded state if optional background work cannot start.
+    try:
+        from app.core.background_jobs import start_background_job_worker
+        from app.core.job_handlers import register_default_job_handlers
+
+        register_default_job_handlers()
+        start_background_job_worker()
+        app.state.job_worker_status = "ready"
+    except Exception as exc:
+        app.state.job_worker_status = "degraded"
+        logger.error(
+            "Background job worker startup failed (%s)",
+            type(exc).__name__,
+        )
+
     # Initialize LLM provider from database
     try:
         from app.core.llm_runtime import initialize_active_llm
@@ -157,9 +175,16 @@ async def lifespan(app: FastAPI):
         stop_scheduler()
     except Exception:
         pass
+    try:
+        from app.core.background_jobs import stop_background_job_worker
+
+        stop_background_job_worker()
+    except Exception:
+        logger.warning("Background job worker did not stop cleanly")
 
     app.state.lifecycle_status = "stopped"
     app.state.scheduler_status = "stopped"
+    app.state.job_worker_status = "stopped"
     logger.info("GODFIN shutting down")
 
 

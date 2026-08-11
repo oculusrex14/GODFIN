@@ -26,7 +26,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 16
+CURRENT_SCHEMA_REVISION = 17
 
 
 class SchemaMigrationError(RuntimeError):
@@ -1495,6 +1495,123 @@ def _validate_revision_16(connection: sqlite3.Connection) -> None:
             )
 
 
+def _apply_revision_17(connection: sqlite3.Connection) -> None:
+    """Install the durable, lease-based local background-job ledger."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS background_jobs (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            kind VARCHAR(80) NOT NULL,
+            active_key VARCHAR(160),
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            status VARCHAR(24) NOT NULL DEFAULT 'queued',
+            progress INTEGER NOT NULL DEFAULT 0,
+            total INTEGER NOT NULL DEFAULT 0,
+            result_json TEXT,
+            public_message VARCHAR(500),
+            failure_code VARCHAR(80),
+            attempt INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 3,
+            available_at DATETIME NOT NULL,
+            lease_owner VARCHAR(64),
+            lease_expires_at DATETIME,
+            cancel_requested BOOLEAN NOT NULL DEFAULT 0,
+            correlation_id VARCHAR(32),
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            started_at DATETIME,
+            heartbeat_at DATETIME,
+            finished_at DATETIME,
+            CONSTRAINT ck_background_jobs_status CHECK (
+                status IN (
+                    'queued','running','retry_wait','cancel_requested',
+                    'completed','failed','cancelled','poisoned'
+                )
+            ),
+            CONSTRAINT ck_background_jobs_progress CHECK (
+                progress >= 0 AND progress <= 100
+            ),
+            CONSTRAINT ck_background_jobs_total CHECK (total >= 0),
+            CONSTRAINT ck_background_jobs_attempts CHECK (
+                attempt >= 0 AND max_attempts >= 1 AND attempt <= max_attempts
+            )
+        )
+        """
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "ix_background_jobs_active_key ON background_jobs(active_key)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_background_jobs_ready "
+        "ON background_jobs(status, available_at)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_background_jobs_kind_created "
+        "ON background_jobs(kind, created_at)"
+    )
+
+
+def _validate_revision_17(connection: sqlite3.Connection) -> None:
+    required_columns = {
+        "id",
+        "kind",
+        "active_key",
+        "payload_json",
+        "status",
+        "progress",
+        "total",
+        "result_json",
+        "public_message",
+        "failure_code",
+        "attempt",
+        "max_attempts",
+        "available_at",
+        "lease_owner",
+        "lease_expires_at",
+        "cancel_requested",
+        "correlation_id",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "heartbeat_at",
+        "finished_at",
+    }
+    columns = _table_columns(connection, "background_jobs")
+    if required_columns.difference(columns):
+        raise SchemaMigrationError(
+            "The durable background-job ledger is incomplete."
+        )
+    indexes = {
+        row[1]: bool(row[2])
+        for row in connection.execute("PRAGMA index_list(background_jobs)")
+    }
+    if not indexes.get("ix_background_jobs_active_key"):
+        raise SchemaMigrationError(
+            "The background-job single-flight boundary is missing."
+        )
+    for name in (
+        "ix_background_jobs_ready",
+        "ix_background_jobs_kind_created",
+    ):
+        if name not in indexes:
+            raise SchemaMigrationError(
+                "A required background-job scheduling index is missing."
+            )
+    invalid = connection.execute(
+        "SELECT COUNT(*) FROM background_jobs WHERE "
+        "status NOT IN ("
+        "'queued','running','retry_wait','cancel_requested',"
+        "'completed','failed','cancelled','poisoned'"
+        ") OR progress < 0 OR progress > 100 OR total < 0 "
+        "OR attempt < 0 OR max_attempts < 1 OR attempt > max_attempts"
+    ).fetchone()[0]
+    if invalid:
+        raise SchemaMigrationError(
+            f"The background-job ledger contains {invalid} invalid row(s)."
+        )
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -1531,6 +1648,12 @@ MIGRATION_REGISTRY = (
         name="add_recurring_detection_provenance",
         apply=_apply_revision_16,
         validate=_validate_revision_16,
+    ),
+    SchemaMigration(
+        revision=17,
+        name="add_durable_background_job_leases",
+        apply=_apply_revision_17,
+        validate=_validate_revision_17,
     ),
 )
 

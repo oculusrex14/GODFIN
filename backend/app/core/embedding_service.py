@@ -11,6 +11,13 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
+from app.core.background_jobs import (
+    JobContext,
+    JobExecutionError,
+    enqueue_job,
+    latest_job,
+    request_job_cancel,
+)
 from app.models.merchant_memory import MerchantMemory
 
 logger = logging.getLogger(__name__)
@@ -56,8 +63,11 @@ def _get_model():
                 threads=max(1, min(4, os.cpu_count() or 1)),
             )
             logger.info(f"Loaded embedding model: {MODEL_NAME}")
-        except Exception as e:
-            logger.error(f"Failed to load embedding model: {e}")
+        except Exception as exc:
+            logger.error(
+                "Failed to load embedding model (%s)",
+                type(exc).__name__,
+            )
             return None
     return _model
 
@@ -69,8 +79,11 @@ def generate_embedding(text: str) -> Optional[np.ndarray]:
     try:
         embedding = next(model.embed([text]))
         return np.asarray(embedding, dtype=np.float32)
-    except Exception as e:
-        logger.error(f"Embedding generation failed: {e}")
+    except Exception as exc:
+        logger.error(
+            "Embedding generation failed (%s)",
+            type(exc).__name__,
+        )
         return None
 
 
@@ -189,6 +202,33 @@ def backfill_embeddings(db: Session) -> int:
 
 
 def get_embedding_setup_status() -> dict:
+    try:
+        job = latest_job(kind="embedding_setup", active_key="embedding-setup")
+    except Exception:
+        job = None
+    if job is not None:
+        status_map = {
+            "queued": "queued",
+            "running": "downloading" if job["progress"] < 25 else "indexing",
+            "retry_wait": "failed",
+            "cancel_requested": "cancelling",
+            "completed": "ready",
+            "failed": "failed",
+            "cancelled": "cancelled",
+            "poisoned": "failed",
+        }
+        result = job.get("result") or {}
+        return {
+            "job_id": job["id"],
+            "status": status_map[job["status"]],
+            "progress": job["progress"],
+            "message": job["message"],
+            "updated": int(result.get("updated") or 0),
+            "total": job["total"],
+            "attempt": job["attempt"],
+            "retry_at": job["retry_at"],
+            "failure_code": job["failure_code"],
+        }
     with _setup_lock:
         return dict(_setup_status)
 
@@ -200,6 +240,17 @@ def _set_setup_status(**updates) -> None:
 
 def cancel_embedding_setup() -> bool:
     """Request cancellation without exposing worker or filesystem details."""
+    try:
+        job = latest_job(kind="embedding_setup", active_key="embedding-setup")
+    except Exception:
+        job = None
+    if job is not None and job["status"] in {
+        "queued",
+        "running",
+        "retry_wait",
+        "cancel_requested",
+    }:
+        return request_job_cancel(job["id"])
     with _setup_lock:
         if _setup_status["status"] not in {"queued", "downloading", "indexing"}:
             return False
@@ -212,99 +263,111 @@ def cancel_embedding_setup() -> bool:
 
 
 def start_embedding_setup() -> bool:
-    """Download the model and index merchants in a background thread."""
-    with _setup_lock:
-        if _setup_status["status"] in {
-            "queued",
-            "downloading",
-            "indexing",
-            "cancelling",
-        }:
-            return False
-        _setup_cancel.clear()
-        _setup_status.update(
-            status="queued",
-            progress=1,
-            message="Preparing the local embedding model…",
-            updated=0,
-            total=0,
-        )
+    """Queue one durable, single-flight local embedding setup."""
+    result = enqueue_job(
+        "embedding_setup",
+        active_key="embedding-setup",
+        max_attempts=3,
+        public_message="Preparing similar-description matching…",
+    )
+    return result.created
 
-    def worker() -> None:
-        db = None
-        try:
-            _set_setup_status(
-                status="downloading",
-                progress=5,
-                message="Downloading the local model (~100 MB)…",
-            )
-            if _get_model() is None:
-                raise RuntimeError("The embedding model could not be downloaded.")
-            if _setup_cancel.is_set():
-                _set_setup_status(
-                    status="cancelled",
-                    progress=0,
-                    message="Matching setup was cancelled. No partial index was saved.",
-                )
-                return
 
-            db = SessionLocal()
-            memories = [
-                memory
-                for memory in db.query(MerchantMemory)
-                .order_by(MerchantMemory.id)
-                .limit(MAX_SETUP_MERCHANTS)
-                .all()
-                if _embedding_needs_refresh(memory)
-            ]
-            total = len(memories)
-            _set_setup_status(
-                status="indexing",
-                progress=25,
-                message="Indexing merchant memory locally…",
+def run_embedding_setup_job(
+    job_context: JobContext,
+    _payload: dict,
+) -> dict:
+    """Download and generate vectors without holding a database transaction."""
+    _setup_cancel.clear()
+    _set_setup_status(
+        status="downloading",
+        progress=5,
+        message="Downloading the local model (~100 MB)…",
+        updated=0,
+        total=0,
+    )
+    job_context.progress(
+        5,
+        message="Downloading the local matching model (~100 MB)…",
+    )
+    if _get_model() is None:
+        raise JobExecutionError("EMBEDDING_MODEL_UNAVAILABLE", retryable=True)
+    job_context.check_cancelled()
+
+    read_db = SessionLocal()
+    try:
+        memories = [
+            memory
+            for memory in read_db.query(MerchantMemory)
+            .order_by(MerchantMemory.id)
+            .limit(MAX_SETUP_MERCHANTS)
+            .all()
+            if _embedding_needs_refresh(memory)
+        ]
+        snapshots = [(memory.id, memory.normalized_name) for memory in memories]
+        read_db.rollback()
+    finally:
+        read_db.close()
+
+    total = len(snapshots)
+    _set_setup_status(
+        status="indexing",
+        progress=25,
+        message="Indexing merchant memory locally…",
+        total=total,
+    )
+    job_context.progress(
+        25,
+        total=total,
+        message="Building private merchant matches locally…",
+    )
+
+    generated: list[tuple[str, bytes]] = []
+    progress_interval = max(1, total // 100)
+    for index, (memory_id, normalized_name) in enumerate(snapshots, start=1):
+        job_context.check_cancelled()
+        embedding = generate_embedding(normalized_name)
+        if embedding is None:
+            raise JobExecutionError("EMBEDDING_GENERATION_FAILED", retryable=True)
+        generated.append((memory_id, serialize_embedding(embedding)))
+        if index == total or index % progress_interval == 0:
+            progress = 85 if total == 0 else 25 + int((index / total) * 60)
+            _set_setup_status(progress=progress, updated=index)
+            job_context.progress(
+                progress,
                 total=total,
+                message=f"Prepared {index} of {total} private merchant matches…",
             )
 
-            updated = 0
-            for index, memory in enumerate(memories, start=1):
-                if _setup_cancel.is_set():
-                    db.rollback()
-                    _set_setup_status(
-                        status="cancelled",
-                        progress=0,
-                        message="Matching setup was cancelled. No partial index was saved.",
-                        updated=0,
-                    )
-                    return
-                if update_merchant_embedding(db, memory):
-                    updated += 1
-                progress = 100 if total == 0 else 25 + int((index / total) * 75)
-                _set_setup_status(progress=progress, updated=updated)
+    job_context.check_cancelled()
+    write_db = SessionLocal()
+    try:
+        by_id = {
+            memory.id: memory
+            for memory in write_db.query(MerchantMemory)
+            .filter(MerchantMemory.id.in_([item[0] for item in generated]))
+            .all()
+        } if generated else {}
+        for memory_id, embedding_bytes in generated:
+            memory = by_id.get(memory_id)
+            if memory is None:
+                continue
+            memory.embedding_vector = embedding_bytes
+            memory.embedding_model_version = MODEL_NAME
+        job_context.check_cancelled()
+        write_db.commit()
+    except Exception:
+        write_db.rollback()
+        raise
+    finally:
+        write_db.close()
 
-            db.commit()
-            _set_setup_status(
-                status="ready",
-                progress=100,
-                message="Similar-description matching is ready.",
-                updated=updated,
-                total=total,
-            )
-        except Exception:
-            if db is not None:
-                db.rollback()
-            logger.exception("Embedding setup failed")
-            _set_setup_status(
-                status="failed",
-                progress=0,
-                message="Matching setup could not finish. Check your connection and available disk space, then try again.",
-            )
-        finally:
-            if db is not None:
-                db.close()
-
-    threading.Thread(
-        target=worker,
-        name="godfin-embedding-setup",
-        daemon=True,
-    ).start()
-    return True
+    updated = len(by_id)
+    _set_setup_status(
+        status="ready",
+        progress=100,
+        message="Similar-description matching is ready.",
+        updated=updated,
+        total=total,
+    )
+    return {"updated": updated, "total": total}

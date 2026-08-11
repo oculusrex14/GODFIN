@@ -47,10 +47,13 @@ class DiagnosticBackupStatus(BaseModel):
 
 
 class SupportDiagnostics(BaseModel):
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     generated_at_utc: str
     application: DiagnosticApplicationStatus
     backup_protection: DiagnosticBackupStatus
+    readiness: dict
+    background_jobs: dict
+    request_metrics: dict
 
 
 class LocalModelAction(BaseModel):
@@ -93,6 +96,7 @@ def get_system_status(
 
 @router.get("/diagnostics", response_model=SupportDiagnostics)
 def download_support_diagnostics(
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -136,8 +140,14 @@ def download_support_diagnostics(
     except (TypeError, ValueError):
         failure_count = 0
 
+    from app.api.v1.endpoints.health import readiness_snapshot
+    from app.core.background_jobs import job_queue_summary
+    from app.core.local_metrics import request_metrics_snapshot
+
+    jobs = job_queue_summary(db)
+    readiness = readiness_snapshot(request, db)
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
         "application": {
             "version": app_settings.VERSION,
@@ -153,6 +163,9 @@ def download_support_diagnostics(
             "failure_code": values.get(f"{active_prefix}_failure_code") or None,
             "failure_count": failure_count,
         },
+        "readiness": readiness,
+        "background_jobs": jobs,
+        "request_metrics": request_metrics_snapshot(),
     }
     response.headers["Cache-Control"] = "no-store"
     response.headers["Content-Disposition"] = (

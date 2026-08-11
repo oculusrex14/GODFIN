@@ -281,6 +281,79 @@ def _set_manual_ingestion_running(db: Session, running: bool):
     db.commit()
 
 
+def _enqueue_scheduled_job(
+    kind: str,
+    active_key: str,
+    message: str,
+    *,
+    max_attempts: int,
+) -> bool:
+    from app.core.background_jobs import JobQueueFull, enqueue_job
+
+    try:
+        queued = enqueue_job(
+            kind,
+            active_key=active_key,
+            max_attempts=max_attempts,
+            public_message=message,
+        )
+    except JobQueueFull:
+        logger.warning(
+            "Scheduled work was deferred because the local queue is full",
+            extra={
+                "operation_id": kind,
+                "error_code": "BACKGROUND_QUEUE_FULL",
+            },
+        )
+        return False
+    except Exception as exc:
+        logger.error(
+            "Scheduled work could not be queued (%s)",
+            type(exc).__name__,
+            extra={
+                "operation_id": kind,
+                "error_code": "BACKGROUND_ENQUEUE_FAILED",
+                "cause_type": type(exc).__name__,
+            },
+        )
+        return False
+    if queued.created:
+        logger.info("Queued scheduled operation %s", kind)
+    else:
+        logger.info("Skipped duplicate scheduled operation %s", kind)
+    return True
+
+
+def _enqueue_automatic_backup() -> bool:
+    return _enqueue_scheduled_job(
+        "automatic_backup",
+        "automatic-backup",
+        "Automatic safety backup is waiting to start.",
+        max_attempts=5,
+    )
+
+
+def _enqueue_scheduled_gmail() -> bool:
+    global _last_ingestion_attempt
+
+    _last_ingestion_attempt = datetime.now(timezone.utc)
+    return _enqueue_scheduled_job(
+        "gmail_scheduled",
+        "gmail-ingestion",
+        "Automatic Gmail import is waiting to start.",
+        max_attempts=4,
+    )
+
+
+def _enqueue_weekly_digest() -> bool:
+    return _enqueue_scheduled_job(
+        "weekly_digest",
+        "weekly-digest",
+        "Weekly money summary is waiting to start.",
+        max_attempts=3,
+    )
+
+
 def start_scheduler(db_path: str, backup_dir: str) -> bool:
     """Start background scheduler with polling and nightly batch jobs."""
     global _backup_retry_attempts, _scheduler_retry_attempts
@@ -299,157 +372,18 @@ def start_scheduler(db_path: str, backup_dir: str) -> bool:
         _record_scheduler_operational()
         return True
 
-    from app.core.backup import create_backup
-
     def nightly_batch():
-        global _backup_retry_attempts, _backup_retry_timer
-
-        logger.info("Running nightly batch job")
-        try:
-            filename = create_backup(db_path, backup_dir)
-            with _scheduler_lock:
-                _backup_retry_attempts = 0
-                _cancel_timer(_backup_retry_timer)
-                _backup_retry_timer = None
-            _record_backup_success(filename)
-            logger.info("Nightly backup complete")
-        except Exception as exc:
+        if not _enqueue_automatic_backup():
             attempt, retry_at = _schedule_backup_retry(nightly_batch)
-            _record_backup_failure("automatic_backup_failed", retry_at, attempt)
-            logger.error(
-                "Nightly backup failed (%s); bounded retry %d is scheduled",
-                type(exc).__name__,
-                attempt,
-            )
+            _record_backup_failure("automatic_backup_enqueue_failed", retry_at, attempt)
 
     def polling_job():
-        """Scheduled job to check for new Gmail transactions."""
-        global _last_ingestion_attempt, _ingestion_retry_attempts
-
-        # Prevent concurrent execution
-        if not _ingestion_lock.acquire(blocking=False):
-            logger.info("Skipping scheduled ingestion - another instance is running")
-            return
-
-        try:
-            _last_ingestion_attempt = datetime.now(timezone.utc)
-
-            from app.core.database import SessionLocal
-            from app.core.gmail_service import is_connected
-            from app.core.ingestion import run_ingestion
-
-            db = SessionLocal()
-            try:
-                # Check if auto-ingestion is enabled
-                if not _is_auto_ingestion_enabled(db):
-                    logger.debug("Auto-ingestion is disabled")
-                    return
-
-                # Check if Gmail is connected
-                if not is_connected():
-                    logger.debug("Gmail not connected - skipping ingestion")
-                    return
-
-                # Check if manual ingestion is running
-                if _is_manual_ingestion_running(db):
-                    logger.info("Manual ingestion in progress - skipping scheduled run")
-                    return
-
-                logger.info("Starting scheduled ingestion")
-                result = run_ingestion(db)
-
-                if result.created > 0:
-                    logger.info(f"Scheduled ingestion complete: {result.created} new transactions")
-                else:
-                    logger.debug(f"Scheduled ingestion complete: no new transactions")
-
-                _update_last_run(success=True, new_transactions=result.created)
-                _ingestion_retry_attempts = 0
-
-            finally:
-                db.close()
-
-        except Exception as exc:
-            failure_code = str(
-                getattr(exc, "code", "AUTOMATIC_INGESTION_FAILED")
-            )[:80]
-            logger.exception(
-                "Scheduled ingestion failed",
-                extra={
-                    "operation_id": "scheduled_gmail_ingestion",
-                    "error_code": failure_code,
-                    "cause_type": type(exc).__name__,
-                },
-            )
-            _update_last_run(success=False, error_code=failure_code)
-            if bool(getattr(exc, "retryable", False)):
-                _ingestion_retry_attempts += 1
-                delay = _retry_delay_seconds(_ingestion_retry_attempts)
-                scheduler.add_job(
-                    polling_job,
-                    "date",
-                    run_date=datetime.now(timezone.utc) + timedelta(seconds=delay),
-                    id="polling_retry",
-                    replace_existing=True,
-                    max_instances=1,
-                    misfire_grace_time=60,
-                )
-                logger.warning(
-                    "Scheduled Gmail ingestion will retry in %.1f seconds",
-                    delay,
-                )
-        finally:
-            _ingestion_lock.release()
+        """Queue one cross-process single-flight Gmail ingestion."""
+        _enqueue_scheduled_gmail()
 
     def weekly_digest_job():
-        """Generate and send an explicitly enabled digest from this device."""
-        from app.core.advisor_digest import build_weekly_digest, digest_to_html
-        from app.core.database import SessionLocal
-        from app.core.gmail_service import gmail_service
-        from app.core.license import license_status
-        from app.models.app_setting import AppSetting
-
-        db = SessionLocal()
-        try:
-            enabled = (
-                db.query(AppSetting)
-                .filter_by(key="advisor_weekly_digest_enabled")
-                .first()
-            )
-            recipient = (
-                db.query(AppSetting)
-                .filter_by(key="advisor_weekly_digest_recipient")
-                .first()
-            )
-            if not enabled or enabled.value != "true" or not recipient or not recipient.value:
-                return
-            if "advanced_reports" not in license_status(db)["features"]:
-                logger.info("Skipping weekly digest because the paid license is inactive")
-                return
-            digest = build_weekly_digest(db)
-            gmail_service.send_email(
-                recipient.value,
-                f"GODFIN weekly digest · {digest['period']['end']}",
-                digest_to_html(digest),
-            )
-            setting = (
-                db.query(AppSetting)
-                .filter_by(key="advisor_weekly_digest_last_sent")
-                .first()
-            )
-            if setting is None:
-                setting = AppSetting(
-                    key="advisor_weekly_digest_last_sent", value=""
-                )
-                db.add(setting)
-            setting.value = datetime.now(timezone.utc).isoformat()
-            db.commit()
-            logger.info("Weekly advisor digest sent through the user's Gmail account")
-        except Exception as error:
-            logger.error("Weekly advisor digest failed: %s", error)
-            db.rollback()
-        finally:
-            db.close()
+        """Queue one cross-process single-flight weekly digest."""
+        _enqueue_weekly_digest()
 
     # Nightly batch at 23:59
     scheduler.add_job(
@@ -507,8 +441,11 @@ def start_scheduler(db_path: str, backup_dir: str) -> bool:
         _scheduler_retry_timer = None
     _record_scheduler_operational()
     if _backup_retry_required():
-        attempt, retry_at = _schedule_backup_retry(nightly_batch)
-        _record_backup_retry_pending(retry_at, attempt)
+        if _enqueue_automatic_backup():
+            _record_backup_retry_pending(_utc_now(), 1)
+        else:
+            attempt, retry_at = _schedule_backup_retry(nightly_batch)
+            _record_backup_retry_pending(retry_at, attempt)
     logger.info(f"Scheduler started with nightly batch and {initial_frequency}-min polling")
     return True
 
@@ -562,16 +499,22 @@ def reschedule_polling_job(new_minutes: int) -> bool:
 
         # Reschedule with new interval
         scheduler.add_job(
-            polling_job,
+            _enqueue_scheduled_gmail,
             'interval',
             minutes=new_minutes,
             id='polling',
             replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60,
         )
         logger.info(f"Rescheduled polling job to run every {new_minutes} minutes")
         return True
-    except Exception as e:
-        logger.error(f"Failed to reschedule polling job: {e}")
+    except Exception as exc:
+        logger.error(
+            "Failed to reschedule polling job (%s)",
+            type(exc).__name__,
+        )
         return False
 
 

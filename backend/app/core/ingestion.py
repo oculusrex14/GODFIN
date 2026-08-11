@@ -13,6 +13,7 @@ from app.core.account_mapping import (
     resolve_profile_account,
     resolve_sender_mapping,
 )
+from app.core.background_jobs import JobCancelled, JobContext
 from app.core.classifier import classify_transaction, get_review_status
 from app.core.audit import FinalizedPeriodError, assert_period_writable
 from app.core.email_parser import (
@@ -220,6 +221,126 @@ def run_ingestion(db: Session, mock_messages: Optional[list] = None) -> Ingestio
     return result
 
 
+def run_scheduled_ingestion_background(
+    job_context: JobContext | None = None,
+) -> dict:
+    """Fetch Gmail without holding a SQLite transaction, then import locally.
+
+    Reading the incremental cursor and importing the returned messages use
+    separate short-lived sessions. A slow Gmail request therefore cannot keep a
+    read transaction open while the UI or another worker needs to write.
+    """
+    from app.core.database import SessionLocal
+
+    cursor_db = SessionLocal()
+    try:
+        history_setting = cursor_db.query(AppSetting).filter_by(
+            key="last_gmail_history_id"
+        ).first()
+        history_id = (
+            history_setting.value
+            if history_setting and history_setting.value
+            else None
+        )
+        last_run_setting = cursor_db.query(AppSetting).filter_by(
+            key="last_ingestion_run"
+        ).first()
+        last_run_value = (
+            last_run_setting.value
+            if last_run_setting and last_run_setting.value
+            else None
+        )
+        cursor_db.rollback()
+    finally:
+        cursor_db.close()
+
+    if job_context is not None:
+        job_context.progress(10, message="Checking Gmail for new transactions…")
+        job_context.check_cancelled()
+
+    result = IngestionResult()
+    try:
+        fetched = fetch_messages(history_id=history_id)
+    except GmailSyncError as exc:
+        if exc.code != "history_expired":
+            raise
+        fallback_start = date(date.today().year, 1, 1)
+        if last_run_value:
+            try:
+                fallback_start = (
+                    datetime.fromisoformat(last_run_value).date()
+                    - timedelta(days=1)
+                )
+            except ValueError:
+                pass
+        fetched = fetch_messages(
+            after_date=fallback_start.isoformat(),
+            before_date=(date.today() + timedelta(days=1)).isoformat(),
+            max_results=1000,
+        )
+        result.full_resync = True
+
+    messages, new_history_id = fetched
+    _record_fetch_status(result, fetched)
+    total = len(messages)
+    if job_context is not None:
+        job_context.progress(
+            25,
+            total=total,
+            message="Gmail messages are ready to import.",
+        )
+
+    import_db = SessionLocal()
+    try:
+        for index, message in enumerate(messages):
+            if job_context is not None and index % 25 == 0:
+                job_context.check_cancelled()
+            _process_message_with_savepoint(import_db, message, result)
+            if job_context is not None and (
+                (index + 1) % 25 == 0 or index + 1 == total
+            ):
+                progress = (
+                    90
+                    if total == 0
+                    else 25 + int(((index + 1) / total) * 65)
+                )
+                job_context.progress(
+                    progress,
+                    total=total,
+                    message=f"Imported {index + 1} of {total} Gmail messages…",
+                )
+
+        if job_context is not None:
+            job_context.progress(
+                92,
+                total=total,
+                message="Checking recurring payments and goal suggestions…",
+            )
+        _run_post_ingestion_detection(import_db, result)
+        completed = result.source_status in {"complete", "empty"}
+        if new_history_id and completed:
+            _update_setting(import_db, "last_gmail_history_id", new_history_id)
+        if completed:
+            _update_setting(
+                import_db,
+                "last_ingestion_run",
+                datetime.now(timezone.utc).isoformat(),
+            )
+        import_db.commit()
+        if job_context is not None:
+            job_context.progress(
+                99,
+                total=total,
+                message="Finishing the Gmail import…",
+            )
+        return result.to_dict()
+    except Exception:
+        import_db.rollback()
+        raise
+    finally:
+        import_db.close()
+
+
 def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
     sender = msg.get('sender', '')
     subject = msg.get('subject', '')
@@ -409,7 +530,9 @@ def run_initial_sync(db: Session) -> IngestionResult:
     return result
 
 
-def run_initial_sync_background() -> None:
+def run_initial_sync_background(
+    job_context: JobContext | None = None,
+) -> dict:
     """
     Background task version of initial sync. Opens its own DB session
     and writes progress to app_settings for polling.
@@ -418,6 +541,11 @@ def run_initial_sync_background() -> None:
 
     db = SessionLocal()
     try:
+        if job_context is not None:
+            job_context.progress(
+                1,
+                message="Preparing the first Gmail import…",
+            )
         # Mark as running
         _update_setting(db, 'sync_status', 'running')
         _update_setting(db, 'sync_progress_processed', '0')
@@ -442,19 +570,40 @@ def run_initial_sync_background() -> None:
         total = len(messages)
         _update_setting(db, 'sync_progress_total', str(total))
         db.commit()
+        if job_context is not None:
+            job_context.progress(
+                10,
+                total=total,
+                message="Gmail messages are ready to import.",
+            )
 
         result = IngestionResult()
         _record_fetch_status(result, fetched)
         batch_size = 25
 
         for i, msg in enumerate(messages):
+            if job_context is not None and i % batch_size == 0:
+                job_context.check_cancelled()
             _process_message_with_savepoint(db, msg, result)
 
             # Update progress every batch_size messages
             if (i + 1) % batch_size == 0 or (i + 1) == total:
                 _update_setting(db, 'sync_progress_processed', str(i + 1))
                 db.commit()
+                if job_context is not None:
+                    progress = 90 if total == 0 else 10 + int(((i + 1) / total) * 80)
+                    job_context.progress(
+                        progress,
+                        total=total,
+                        message=f"Imported {i + 1} of {total} Gmail messages…",
+                    )
 
+        if job_context is not None:
+            job_context.progress(
+                92,
+                total=total,
+                message="Checking recurring payments and goal suggestions…",
+            )
         _run_post_ingestion_detection(db, result)
 
         # Finalize
@@ -470,9 +619,25 @@ def run_initial_sync_background() -> None:
         _update_setting(db, 'sync_result', json.dumps(result.to_dict()))
         _update_setting(db, 'sync_progress_processed', str(total))
         db.commit()
+        if job_context is not None:
+            job_context.progress(
+                99,
+                total=total,
+                message="Finishing the first Gmail import…",
+            )
 
         logger.info(f"Background initial sync complete: {result.created} created, {result.processed} processed")
+        return result.to_dict()
 
+    except JobCancelled:
+        db.rollback()
+        try:
+            _update_setting(db, 'sync_status', 'cancelled')
+            _update_setting(db, 'sync_error', '')
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise
     except Exception as exc:
         logger.exception(
             "Background initial sync failed",
@@ -491,12 +656,17 @@ def run_initial_sync_background() -> None:
             )
             db.commit()
         except Exception:
-            pass
+            db.rollback()
+        raise
     finally:
         db.close()
 
 
-def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) -> None:
+def run_ingestion_with_dates_background(
+    start_date_str: str,
+    end_date_str: str,
+    job_context: JobContext | None = None,
+) -> dict:
     """
     Background task version of date-range ingestion. Opens its own DB session
     and writes progress to app_settings for polling.
@@ -507,6 +677,11 @@ def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) 
 
     db = SessionLocal()
     try:
+        if job_context is not None:
+            job_context.progress(
+                1,
+                message="Preparing the selected Gmail date range…",
+            )
         # Mark as running
         _update_setting(db, 'ingest_now_status', 'running')
         _update_setting(db, 'ingest_now_processed', '0')
@@ -532,10 +707,18 @@ def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) 
         _update_setting(db, 'ingest_now_batch_total', str(total_batches))
         _update_setting(db, 'ingest_now_total', str(total_batches))
         db.commit()
+        if job_context is not None:
+            job_context.progress(
+                5,
+                total=total_batches,
+                message=f"Prepared {total_batches} Gmail import batch(es).",
+            )
 
         result = IngestionResult()
 
         for batch_idx, (batch_after, batch_before) in enumerate(batches):
+            if job_context is not None:
+                job_context.check_cancelled()
             _update_setting(db, 'ingest_now_batch_current', str(batch_idx + 1))
             db.commit()
 
@@ -554,7 +737,27 @@ def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) 
             # Update progress after each batch
             _update_setting(db, 'ingest_now_processed', str(batch_idx + 1))
             db.commit()
+            if job_context is not None:
+                progress = (
+                    90
+                    if total_batches == 0
+                    else 5 + int(((batch_idx + 1) / total_batches) * 85)
+                )
+                job_context.progress(
+                    progress,
+                    total=total_batches,
+                    message=(
+                        f"Imported Gmail batch {batch_idx + 1} "
+                        f"of {total_batches}…"
+                    ),
+                )
 
+        if job_context is not None:
+            job_context.progress(
+                92,
+                total=total_batches,
+                message="Checking recurring payments and goal suggestions…",
+            )
         _run_post_ingestion_detection(db, result)
 
         # Finalize
@@ -568,9 +771,25 @@ def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) 
         _update_setting(db, 'ingest_now_result', json.dumps(result.to_dict()))
         _update_setting(db, 'ingest_now_processed', str(total_batches))
         db.commit()
+        if job_context is not None:
+            job_context.progress(
+                99,
+                total=total_batches,
+                message="Finishing the Gmail import…",
+            )
 
         logger.info(f"Background date-range ingestion complete: {result.created} created, {result.processed} processed")
+        return result.to_dict()
 
+    except JobCancelled:
+        db.rollback()
+        try:
+            _update_setting(db, 'ingest_now_status', 'cancelled')
+            _update_setting(db, 'ingest_now_error', '')
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise
     except Exception as exc:
         logger.exception(
             "Background date-range ingestion failed",
@@ -589,7 +808,8 @@ def run_ingestion_with_dates_background(start_date_str: str, end_date_str: str) 
             )
             db.commit()
         except Exception:
-            pass
+            db.rollback()
+        raise
     finally:
         db.close()
 
