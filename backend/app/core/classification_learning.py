@@ -13,6 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from app.core.csv_security import spreadsheet_safe_row
 from app.models.app_setting import AppSetting
 from app.models.classification_learning import (
     ClassificationCorrection,
@@ -396,26 +397,30 @@ def export_learning_memory_csv(db: Session) -> str:
     )
     for merchant in db.query(MerchantMemory).order_by(MerchantMemory.normalized_name):
         writer.writerow(
-            [
-                "exact_merchant",
-                merchant.normalized_name,
-                merchant.category,
-                merchant.subcategory or "",
-                merchant.times_seen,
-                merchant.avg_confidence,
-            ]
+            spreadsheet_safe_row(
+                [
+                    "exact_merchant",
+                    merchant.normalized_name,
+                    merchant.category,
+                    merchant.subcategory or "",
+                    merchant.times_seen,
+                    merchant.avg_confidence,
+                ]
+            )
         )
     for pattern in db.query(ClassificationPattern).order_by(
         ClassificationPattern.pattern_display
     ):
         writer.writerow(
-            [
-                "confirmed_pattern",
-                pattern.pattern_display,
-                pattern.category,
-                pattern.subcategory or "",
-                pattern.confirmations,
-                pattern.confidence,
-            ]
+            spreadsheet_safe_row(
+                [
+                    "confirmed_pattern",
+                    pattern.pattern_display,
+                    pattern.category,
+                    pattern.subcategory or "",
+                    pattern.confirmations,
+                    pattern.confidence,
+                ]
+            )
         )
     return output.getvalue()

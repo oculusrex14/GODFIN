@@ -11,6 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.csv_security import spreadsheet_safe_mapping, spreadsheet_safe_row
 from app.core.database import get_db
 from app.core.reporting import (
     DetailedReportUnavailable,
@@ -277,11 +278,11 @@ def report_csv(
         month = _default_month(db)
 
     year, mon = int(month[:4]), int(month[5:7])
-    start = datetime(year, mon, 1)
+    start = date(year, mon, 1)
     if mon == 12:
-        end = datetime(year + 1, 1, 1)
+        end = date(year + 1, 1, 1)
     else:
-        end = datetime(year, mon + 1, 1)
+        end = date(year, mon + 1, 1)
 
     txns = (
         db.query(Transaction)
@@ -300,16 +301,20 @@ def report_csv(
         'Subcategory', 'Account', 'Is Recurring',
     ])
     for t in txns:
-        writer.writerow([
-            t.date.strftime('%Y-%m-%d') if t.date else '',
-            t.merchant_normalized or t.merchant_raw or '',
-            f'{t.amount:.2f}' if t.amount is not None else '',
-            t.type or '',
-            t.category or '',
-            t.subcategory or '',
-            _account_label(accounts.get(t.account_id)),
-            t.is_recurring,
-        ])
+        writer.writerow(
+            spreadsheet_safe_row(
+                [
+                    t.date.strftime('%Y-%m-%d') if t.date else '',
+                    t.merchant_normalized or t.merchant_raw or '',
+                    f'{t.amount:.2f}' if t.amount is not None else '',
+                    t.type or '',
+                    t.category or '',
+                    t.subcategory or '',
+                    _account_label(accounts.get(t.account_id)),
+                    t.is_recurring,
+                ]
+            )
+        )
 
     csv_bytes = output.getvalue().encode('utf-8')
     return Response(
@@ -385,7 +390,7 @@ def report_financial_year(
     ]
     writer = csv.DictWriter(output, fieldnames=columns)
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows(spreadsheet_safe_mapping(row) for row in rows)
     return Response(
         content=output.getvalue().encode("utf-8"),
         media_type="text/csv",

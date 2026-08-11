@@ -16,6 +16,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
+from app.core.csv_security import spreadsheet_safe_cell
 from app.models.account import Account
 from app.models.audit_session import AuditSession
 from app.models.transaction import Transaction
@@ -90,9 +91,7 @@ def _safe_text(value: Any) -> Any:
     if not isinstance(value, str):
         return value
     cleaned = value.replace("\x00", "").strip()
-    if cleaned.startswith(("=", "+", "-", "@")):
-        return f"'{cleaned}"
-    return cleaned
+    return spreadsheet_safe_cell(cleaned)
 
 
 def _redact_sensitive_text(value: Any) -> str:

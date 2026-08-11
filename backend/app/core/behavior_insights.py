@@ -10,6 +10,7 @@ from typing import Any, Iterable
 from sqlalchemy.orm import Session
 
 from app.core.budget import ELASTICITY
+from app.core.csv_security import spreadsheet_safe_row
 from app.core.fx import (
     FxRateSnapshot,
     FxRateUnavailable,
@@ -721,20 +722,22 @@ def export_behavior_insights_csv(db: Session) -> str:
     )
     for item in payload["metrics"]:
         writer.writerow(
-            [
-                item["label"],
-                item["available"],
-                item["value"],
-                item["unit"],
-                item["period"],
-                item["confidence"],
-                item["sample_size"],
-                item["minimum_sample"],
-                item["unavailable_reason"] or "",
-                item["formula"],
-                item["evidence"],
-                item["provenance"],
-                item["correction_note"] or "",
-            ]
+            spreadsheet_safe_row(
+                [
+                    item["label"],
+                    item["available"],
+                    item["value"],
+                    item["unit"],
+                    item["period"],
+                    item["confidence"],
+                    item["sample_size"],
+                    item["minimum_sample"],
+                    item["unavailable_reason"] or "",
+                    item["formula"],
+                    item["evidence"],
+                    item["provenance"],
+                    item["correction_note"] or "",
+                ]
+            )
         )
     return output.getvalue()
