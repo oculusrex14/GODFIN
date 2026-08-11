@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
 import { commerceConfigured, siteUrl } from "@/lib/env";
 import {
   isProductCode,
@@ -27,6 +28,12 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
+    const addressLimit = await checkRateLimit(request, {
+      bucket: "checkout:address",
+      limit: 20,
+      windowSeconds: 60 * 60,
+    });
+    if (!addressLimit.allowed) return rateLimitResponse(addressLimit);
     const supabase = await createSupabaseServerClient();
     if (!supabase) {
       return NextResponse.json(
@@ -43,6 +50,13 @@ export async function POST(request: Request) {
         { status: 401 },
       );
     }
+    const userLimit = await checkRateLimit(request, {
+      bucket: "checkout:user",
+      limit: 10,
+      windowSeconds: 60 * 60,
+      subject: `user:${user.id}`,
+    });
+    if (!userLimit.allowed) return rateLimitResponse(userLimit);
 
     const body = (await request.json()) as { product?: unknown };
     if (isRetiredHostedCreditCode(body.product)) {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
 import { sendLicenseEmail } from "@/lib/email";
 import { serverEnv } from "@/lib/env";
 import { licenseKeyForSession, type LicenseTier } from "@/lib/license";
@@ -10,6 +11,12 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    const addressLimit = await checkRateLimit(request, {
+      bucket: "license-resend:address",
+      limit: 15,
+      windowSeconds: 24 * 60 * 60,
+    });
+    if (!addressLimit.allowed) return rateLimitResponse(addressLimit);
     const supabase = await createSupabaseServerClient();
     const {
       data: { user },
@@ -17,6 +24,13 @@ export async function POST(request: Request) {
     if (!user?.email) {
       return NextResponse.json({ message: "Sign in required." }, { status: 401 });
     }
+    const userLimit = await checkRateLimit(request, {
+      bucket: "license-resend:user",
+      limit: 3,
+      windowSeconds: 24 * 60 * 60,
+      subject: `user:${user.id}`,
+    });
+    if (!userLimit.allowed) return rateLimitResponse(userLimit);
 
     const body = (await request.json()) as { license_id?: unknown };
     if (typeof body.license_id !== "string") {

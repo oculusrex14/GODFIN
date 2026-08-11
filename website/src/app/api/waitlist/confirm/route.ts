@@ -1,12 +1,24 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 
+import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
 import { siteUrl } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  try {
+    const addressLimit = await checkRateLimit(request, {
+      bucket: "waitlist-confirm:address",
+      limit: 30,
+      windowSeconds: 60 * 60,
+    });
+    if (!addressLimit.allowed) return rateLimitResponse(addressLimit);
+  } catch (error) {
+    console.error("Waitlist confirmation abuse control failed", error);
+    return NextResponse.redirect(`${siteUrl()}/?waitlist=error#waitlist`);
+  }
   const url = new URL(request.url);
   const token = url.searchParams.get("token") || "";
   if (!/^[A-Za-z0-9_-]{40,100}$/.test(token)) {

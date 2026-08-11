@@ -48,7 +48,7 @@ export function DeviceActivations({
   }
 
   return (
-    <section className="account-card" style={{ marginTop: 22 }}>
+    <section className="account-card account-card-top-spaced">
       <h2>Active devices</h2>
       <p className="lead">
         Each paid lifetime license supports three active installations. Device

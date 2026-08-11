@@ -61,7 +61,7 @@ export default function PricingPage() {
     <>
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+          <div className="eyebrow eyebrow-accent">
             No software subscriptions
           </div>
           <h1>Own the app. Add AI only when it helps.</h1>
@@ -123,7 +123,7 @@ export default function PricingPage() {
       <section className="section section-soft">
         <div className="shell">
           <div className="section-head">
-            <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+            <div className="eyebrow eyebrow-accent">
               Optional AI
             </div>
             <h2>Use AI without a GODFIN subscription.</h2>

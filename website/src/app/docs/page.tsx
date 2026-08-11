@@ -10,7 +10,7 @@ export default function DocsPage() {
     <>
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+          <div className="eyebrow eyebrow-accent">
             Documentation
           </div>
           <h1>From first launch to a clean month</h1>

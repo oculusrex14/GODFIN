@@ -46,6 +46,7 @@ export function commerceConfigured(): boolean {
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
+    "ABUSE_HASH_SECRET",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
     "STRIPE_PRICE_PRO",
@@ -75,6 +76,7 @@ export function waitlistConfigured(): boolean {
       && [
         "NEXT_PUBLIC_SUPABASE_URL",
         "SUPABASE_SERVICE_ROLE_KEY",
+        "ABUSE_HASH_SECRET",
         "RESEND_API_KEY",
         "RESEND_FROM_EMAIL",
       ].every(present),
@@ -84,6 +86,7 @@ export function waitlistConfigured(): boolean {
 export const serverEnv = {
   required,
   supabaseServiceRoleKey: () => required("SUPABASE_SERVICE_ROLE_KEY"),
+  abuseHashSecret: () => required("ABUSE_HASH_SECRET"),
   stripeSecretKey: () => required("STRIPE_SECRET_KEY"),
   stripeWebhookSecret: () => required("STRIPE_WEBHOOK_SECRET"),
   licenseSigningSecret: () => required("LICENSE_SIGNING_SECRET"),

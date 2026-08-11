@@ -195,7 +195,7 @@ export default function HomePage() {
       <section className="section" id="features">
         <div className="shell">
           <div className="section-head">
-            <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+            <div className="eyebrow eyebrow-accent">
               Built around your boundaries
             </div>
             <h2>Private enough for money. Practical enough for Monday.</h2>
@@ -222,7 +222,7 @@ export default function HomePage() {
       <section className="section product-tour" id="product-tour">
         <div className="shell">
           <div className="section-head center">
-            <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+            <div className="eyebrow eyebrow-accent">
               A complete local workflow
             </div>
             <h2>Follow the work, from statement to reviewed evidence.</h2>
@@ -239,7 +239,7 @@ export default function HomePage() {
                 <div className="chapter-icon">
                   <Database size={20} />
                 </div>
-                <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+                <div className="eyebrow eyebrow-accent">
                   01 · Statement import
                 </div>
                 <h3>Review the bank file before it becomes your ledger.</h3>
@@ -286,10 +286,7 @@ export default function HomePage() {
                     <div className="chapter-icon">
                       <Icon size={20} />
                     </div>
-                    <div
-                      className="eyebrow"
-                      style={{ color: "var(--teal-dark)" }}
-                    >
+                    <div className="eyebrow eyebrow-accent">
                       {eyebrow}
                     </div>
                     <h3>{title}</h3>
@@ -351,7 +348,7 @@ export default function HomePage() {
       <section className="section section-soft">
         <div className="shell">
           <div className="section-head center">
-            <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+            <div className="eyebrow eyebrow-accent">
               Simple ownership
             </div>
             <h2>Start free. Upgrade once.</h2>
@@ -361,7 +358,7 @@ export default function HomePage() {
               supported provider key, or no AI at all.
             </p>
           </div>
-          <div className="inline-actions" style={{ justifyContent: "center" }}>
+          <div className="inline-actions inline-actions-center">
             <Link className="button" href="/pricing">
               Compare plans <ArrowRight size={17} />
             </Link>
@@ -375,7 +372,7 @@ export default function HomePage() {
       <section className="section" id="waitlist">
         <div className="shell waitlist-shell">
           <div className="section-head">
-            <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+            <div className="eyebrow eyebrow-accent">
               Private launch
             </div>
             <h2>Help shape a finance app that starts with trust.</h2>

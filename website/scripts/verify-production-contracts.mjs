@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -71,6 +71,26 @@ assert.doesNotMatch(purchaseButton, /checkoutCountry|localeCountry/);
 const regionalPricing = await text("src/lib/regional-pricing.ts");
 assert.match(regionalPricing, /x-vercel-ip-country/);
 assert.match(regionalPricing, /country === "IN" \? "IN" : "US"/);
+
+const abuseControl = await text("src/lib/abuse-control.ts");
+assert.match(abuseControl, /x-vercel-forwarded-for/);
+assert.match(abuseControl, /createHmac\("sha256", serverEnv\.abuseHashSecret\(\)\)/);
+assert.match(abuseControl, /check_public_rate_limit/);
+assert.match(abuseControl, /status:\s*429/);
+for (const rateLimitedRoute of [
+  "src/app/api/checkout/route.ts",
+  "src/app/api/waitlist/route.ts",
+  "src/app/api/waitlist/confirm/route.ts",
+  "src/app/api/license/resend/route.ts",
+  "src/app/api/license/verify/route.ts",
+  "src/app/auth/callback/route.ts",
+]) {
+  assert.match(
+    await text(rateLimitedRoute),
+    /checkRateLimit/,
+    `${rateLimitedRoute} is missing durable abuse control.`,
+  );
+}
 
 const publicContentPaths = [
   "src/app/page.tsx",
@@ -187,6 +207,56 @@ for (const grant of privilegedFunctionGrants) {
   assert.equal(grant[2].trim(), "service_role");
 }
 
+const abuseMigration = await text(
+  "supabase/migrations/0005_public_abuse_controls.sql",
+);
+for (const requiredSql of [
+  /create table if not exists public\.public_rate_limits/,
+  /alter table public\.public_rate_limits enable row level security/,
+  /create or replace function public\.check_public_rate_limit/,
+  /security definer[\s\S]*?set search_path = ''/,
+  /on conflict \(bucket, subject_hash\) do update/,
+  /grant execute on function public\.check_public_rate_limit[\s\S]*?to service_role/,
+]) {
+  assert.match(abuseMigration, requiredSql);
+}
+
+const middleware = await text("src/middleware.ts");
+const nextConfig = await text("next.config.ts");
+const rootLayout = await text("src/app/layout.tsx");
+assert.match(middleware, /crypto\.randomUUID\(\)/);
+assert.match(middleware, /'nonce-\$\{nonce\}' 'strict-dynamic'/);
+assert.match(middleware, /style-src-elem 'self' 'nonce-\$\{nonce\}'/);
+assert.match(middleware, /style-src-attr 'none'/);
+assert.match(
+  middleware,
+  /connect-src 'self'\$\{development \? " ws: wss:" : ""\}/,
+);
+assert.doesNotMatch(middleware, /unsafe-inline/);
+assert.doesNotMatch(nextConfig, /unsafe-inline/);
+assert.match(nextConfig, /default-src 'none'/);
+assert.match(rootLayout, /dynamic = "force-dynamic"/);
+assert.match(rootLayout, /<PrivacyAnalytics nonce=\{nonce\}/);
+
+async function sourceFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map((entry) => {
+      const fullPath = path.join(directory, entry.name);
+      return entry.isDirectory() ? sourceFiles(fullPath) : [fullPath];
+    }),
+  );
+  return nested.flat();
+}
+for (const sourcePath of await sourceFiles(path.join(websiteRoot, "src"))) {
+  if (!sourcePath.endsWith(".tsx")) continue;
+  assert.doesNotMatch(
+    await readFile(sourcePath, "utf8"),
+    /style=\{\{/,
+    `${path.relative(websiteRoot, sourcePath)} contains an inline style.`,
+  );
+}
+
 const entitlementSigner = await text("src/lib/entitlement-signing.ts");
 assert.match(entitlementSigner, /algorithm:\s*"Ed25519"/);
 assert.match(entitlementSigner, /installation_hash:\s*installationHash/);
@@ -214,6 +284,7 @@ for (const name of [
   "STRIPE_PRICE_MAX_US",
   "PPP_CHECKOUT_ENABLED",
   "LICENSE_SIGNING_SECRET",
+  "ABUSE_HASH_SECRET",
   "LICENSE_ENTITLEMENT_ACTIVE_KEY_VERSION",
   "LICENSE_ENTITLEMENT_PRIVATE_KEYS_JSON",
   "RESEND_API_KEY",

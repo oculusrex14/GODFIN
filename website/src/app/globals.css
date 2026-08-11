@@ -766,6 +766,71 @@ p {
   }
 }
 
+.eyebrow-accent {
+  color: var(--teal-dark);
+}
+
+.inline-actions-center {
+  justify-content: center;
+}
+
+.account-card-spaced {
+  margin-bottom: 22px;
+}
+
+.license-key-spaced {
+  margin: 18px 0;
+}
+
+.form-error-inline {
+  margin-top: 12px;
+  color: #9c352d;
+}
+
+.form-error-small {
+  margin-top: 10px;
+  color: #a13c32;
+  font-size: 12px;
+}
+
+.section-heading-spaced {
+  margin-top: 24px;
+}
+
+.account-card-top-spaced {
+  margin-top: 22px;
+}
+
+.account-actions {
+  margin-bottom: 22px;
+}
+
+.account-caption {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.push-right {
+  margin-left: auto;
+}
+
+.license-entry {
+  margin-top: 20px;
+}
+
+.status-pill-offset {
+  margin-left: 8px;
+}
+
+.text-capitalize {
+  text-transform: capitalize;
+}
+
+.purchase-entry {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
 @media (max-width: 620px) {
   .shell {
     width: min(100% - 28px, 1180px);

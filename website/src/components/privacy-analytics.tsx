@@ -75,11 +75,11 @@ export function CheckoutAnalytics({
   return null;
 }
 
-export function PrivacyAnalytics() {
+export function PrivacyAnalytics({ nonce }: { nonce?: string }) {
   const measurementId = process.env.NEXT_PUBLIC_GA_ID;
   const { consent, choose } = useAnalyticsConsent();
 
-  if (!measurementId) return null;
+  if (!measurementId || !/^G-[A-Z0-9]{6,20}$/.test(measurementId)) return null;
 
   return (
     <>
@@ -88,8 +88,9 @@ export function PrivacyAnalytics() {
           <Script
             src={`https://www.googletagmanager.com/gtag/js?id=${measurementId}`}
             strategy="afterInteractive"
+            nonce={nonce}
           />
-          <Script id="godfin-analytics" strategy="afterInteractive">
+          <Script id="godfin-analytics" strategy="afterInteractive" nonce={nonce}>
             {`
               window.dataLayer = window.dataLayer || [];
               function gtag(){dataLayer.push(arguments);}

@@ -13,7 +13,7 @@ export default function TermsPage() {
     <>
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+          <div className="eyebrow eyebrow-accent">
             Effective 29 July 2026
           </div>
           <h1>Terms of service</h1>

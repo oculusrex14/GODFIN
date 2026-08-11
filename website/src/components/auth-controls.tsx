@@ -34,7 +34,7 @@ export function SignInButton({ next = "/account" }: { next?: string }) {
         <LogIn size={17} />
         {pending ? "Opening Google…" : "Continue with Google"}
       </button>
-      {error ? <p style={{ color: "#9c352d", marginTop: 12 }}>{error}</p> : null}
+      {error ? <p className="form-error-inline">{error}</p> : null}
     </>
   );
 }

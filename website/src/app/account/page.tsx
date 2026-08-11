@@ -124,7 +124,7 @@ export default async function AccountPage({
       ) : null}
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+          <div className="eyebrow eyebrow-accent">
             Website account
           </div>
           <h1>{user ? "Your GODFIN account" : "Licenses without a subscription"}</h1>
@@ -168,14 +168,14 @@ export default async function AccountPage({
               {checkoutLicenseKey ? (
                 <CopyLicenseKey licenseKey={checkoutLicenseKey} />
               ) : null}
-              <div className="inline-actions" style={{ marginBottom: 22 }}>
+              <div className="inline-actions account-actions">
                 <div>
                   <strong>{user.email}</strong>
-                  <div style={{ color: "var(--muted)", fontSize: 13 }}>
+                  <div className="account-caption">
                     Website account only · financial records stay in the desktop app
                   </div>
                 </div>
-                <div style={{ marginLeft: "auto" }}>
+                <div className="push-right">
                   <SignOutButton />
                 </div>
               </div>
@@ -184,17 +184,14 @@ export default async function AccountPage({
                   <h2>Licenses</h2>
                   {licenses.length ? (
                     licenses.map((license) => (
-                      <div key={license.id} style={{ marginTop: 20 }}>
+                      <div className="license-entry" key={license.id}>
                         <span className="status-pill">{license.status}</span>
                         {license.kind === "owner_test" ? (
-                          <span
-                            className="status-pill"
-                            style={{ marginLeft: 8 }}
-                          >
+                          <span className="status-pill status-pill-offset">
                             Owner test · no purchase
                           </span>
                         ) : null}
-                        <h3 style={{ textTransform: "capitalize" }}>
+                        <h3 className="text-capitalize">
                           GODFIN {license.tier}
                         </h3>
                         <p className="license-key">
@@ -204,7 +201,7 @@ export default async function AccountPage({
                         {license.kind === "purchase" ? (
                           <ResendLicenseButton licenseId={license.id} />
                         ) : (
-                          <p style={{ color: "var(--muted)", fontSize: 13 }}>
+                          <p className="account-caption">
                             Private test entitlement. Uses the same three-device
                             verification and deactivation controls as paid licenses.
                           </p>
@@ -219,15 +216,9 @@ export default async function AccountPage({
                   <h2>Purchase history</h2>
                   {purchases.length ? (
                     purchases.map((purchase) => (
-                      <div
-                        key={purchase.id}
-                        style={{
-                          borderTop: "1px solid var(--line)",
-                          padding: "14px 0",
-                        }}
-                      >
+                      <div className="purchase-entry" key={purchase.id}>
                         <strong>{purchase.product_code.replaceAll("_", " ")}</strong>
-                        <div style={{ color: "var(--muted)", fontSize: 13 }}>
+                        <div className="account-caption">
                           ₹{(purchase.amount_total / 100).toLocaleString("en-IN")} ·{" "}
                           {new Date(purchase.created_at).toLocaleDateString("en-IN")}
                         </div>

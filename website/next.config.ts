@@ -11,25 +11,18 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: "/(.*)",
+        source: "/api/:path*",
         headers: [
           {
             key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              "base-uri 'self'",
-              "connect-src 'self' ws: wss: https://*.supabase.co https://www.google-analytics.com https://region1.google-analytics.com",
-              "font-src 'self' data:",
-              "form-action 'self' https://checkout.stripe.com",
-              "frame-ancestors 'none'",
-              "frame-src https://checkout.stripe.com https://accounts.google.com",
-              "img-src 'self' data: blob:",
-              "object-src 'none'",
-              "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
-              "style-src 'self' 'unsafe-inline'",
-              "upgrade-insecure-requests",
-            ].join("; "),
+            value: "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
           },
+          { key: "Cache-Control", value: "no-store" },
+        ],
+      },
+      {
+        source: "/(.*)",
+        headers: [
           {
             key: "Cross-Origin-Opener-Policy",
             value: "same-origin-allow-popups",

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
 import {
   activationLimit,
   ENTITLEMENTS,
@@ -35,6 +36,13 @@ export async function POST(request: Request) {
       );
     }
 
+    const addressLimit = await checkRateLimit(request, {
+      bucket: "license-verify:address",
+      limit: 120,
+      windowSeconds: 60 * 60,
+    });
+    if (!addressLimit.allowed) return rateLimitResponse(addressLimit);
+
     const admin = createAdminClient();
     const deviceLabel =
       typeof body.device_label === "string"
@@ -42,6 +50,13 @@ export async function POST(request: Request) {
         : "GODFIN device";
 
     const licenseHash = hashLicenseKey(body.license_key);
+    const licenseLimit = await checkRateLimit(request, {
+      bucket: "license-verify:key",
+      limit: 30,
+      windowSeconds: 60 * 60,
+      subject: `license:${licenseHash}`,
+    });
+    if (!licenseLimit.allowed) return rateLimitResponse(licenseLimit);
     const { data: license, error: licenseError } = await admin
       .from("licenses")
       .select("tier")

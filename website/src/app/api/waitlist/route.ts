@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 
+import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
 import { sendWaitlistConfirmationEmail } from "@/lib/email";
 import { siteUrl, waitlistConfigured } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -38,6 +39,12 @@ export async function POST(request: Request) {
     if (typeof body.company === "string" && body.company.trim()) {
       return NextResponse.json({ accepted: true }, { status: 202 });
     }
+    const addressLimit = await checkRateLimit(request, {
+      bucket: "waitlist:address",
+      limit: 5,
+      windowSeconds: 60 * 60,
+    });
+    if (!addressLimit.allowed) return rateLimitResponse(addressLimit);
 
     const email =
       typeof body.email === "string" ? body.email.trim().slice(0, 254) : "";
@@ -64,6 +71,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const emailLimit = await checkRateLimit(request, {
+      bucket: "waitlist:email",
+      limit: 3,
+      windowSeconds: 24 * 60 * 60,
+      subject: `email:${emailNormalized}`,
+    });
+    if (!emailLimit.allowed) return rateLimitResponse(emailLimit);
+
     const admin = createAdminClient();
     const { data: existing, error: lookupError } = await admin
       .from("waitlist_entries")
@@ -72,7 +87,7 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (lookupError) throw lookupError;
     if (existing?.confirmed_at) {
-      return NextResponse.json({ accepted: true, already_confirmed: true });
+      return NextResponse.json({ accepted: true, confirmation_required: true });
     }
 
     const token = randomBytes(32).toString("base64url");

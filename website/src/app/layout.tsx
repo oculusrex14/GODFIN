@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -33,16 +34,19 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export const dynamic = "force-dynamic";
+
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const nonce = (await headers()).get("x-nonce") || undefined;
   return (
     <html lang="en-IN">
       <body>
         <SiteHeader />
         <main>{children}</main>
         <SiteFooter />
-        <PrivacyAnalytics />
+        <PrivacyAnalytics nonce={nonce} />
       </body>
     </html>
   );

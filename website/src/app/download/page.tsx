@@ -12,7 +12,7 @@ export default function DownloadPage() {
     <>
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+          <div className="eyebrow eyebrow-accent">
             Local desktop app
           </div>
           <h1>Download GODFIN</h1>

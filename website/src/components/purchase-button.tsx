@@ -63,7 +63,7 @@ export function PurchaseButton({
             : "Checkout opens after payment verification"}
       </button>
       {error ? (
-        <p style={{ color: "#a13c32", fontSize: 12, marginTop: 10 }}>{error}</p>
+        <p className="form-error-small">{error}</p>
       ) : null}
     </>
   );

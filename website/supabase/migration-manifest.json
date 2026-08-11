@@ -4,6 +4,7 @@
     "0001_website_licensing.sql": "b32ee53ce3b2144b7e89f9428329e71f6dbc4292a7bf35f038be6e984f0e3224",
     "0002_phase2_entitlements_waitlist.sql": "be046525a33382e5d3226f628ad6d024284e32443ea00e647c69fc6074a88f78",
     "0003_owner_test_licenses.sql": "bf7b8d8e37168fcaafc0ff4e54e09c3e3cd982765ee48c6ee2da282225c2902d",
-    "0004_signed_entitlements_payment_reversals_rls.sql": "f8876369b8bc68e7063e70303eff30eb2dc57915abaddcd59be2743a3d8e5359"
+    "0004_signed_entitlements_payment_reversals_rls.sql": "f8876369b8bc68e7063e70303eff30eb2dc57915abaddcd59be2743a3d8e5359",
+    "0005_public_abuse_controls.sql": "eeea3e0aff5c5bc9607903c730c4eab67b4fa75ead5d8a70a792652f0474fe3b"
   }
 }
