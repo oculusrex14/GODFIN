@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
@@ -10,11 +10,13 @@ import {
   fetchSubscriptions, createSubscription, updateSubscription, deleteSubscription,
   fetchSubscriptionStats, fetchSubscriptionSuggestions, scanSubscriptionSuggestions,
   decideSubscriptionSuggestion, fetchSubscriptionReminders, refreshExchangeRates,
+  restoreSubscription,
 } from '../api/client';
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
 import { useToast } from '../context/ToastContext';
 import DialogSurface from '../components/DialogSurface';
+import { useConfirm } from '../components/ConfirmDialog';
 
 function formatINR(amount) {
   if (amount == null) return '--';
@@ -43,6 +45,9 @@ export default function Subscriptions() {
   const { addToast: showToast } = useToast();
   const [addOpen, setAddOpen] = useState(false);
   const [editSub, setEditSub] = useState(null);
+  const [recentDeletion, setRecentDeletion] = useState(null);
+  const undoRef = useRef(null);
+  const { confirm, ConfirmDialog: ConfirmDialogComponent } = useConfirm();
   const [form, setForm] = useState({
     name: '', amount: '', currency: 'INR', frequency: 'monthly', category: '', subcategory: '', next_payment_date: '', notes: '',
   });
@@ -116,8 +121,21 @@ export default function Subscriptions() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: deleteSubscription,
-    onSuccess: () => { invalidate(); showToast('Subscription deleted'); },
+    mutationFn: sub => deleteSubscription(sub.id).then(result => ({ ...result, sub })),
+    onSuccess: result => {
+      invalidate();
+      setRecentDeletion(result);
+      showToast('Subscription removed. You can undo this change.', 'info');
+    },
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: restoreSubscription,
+    onSuccess: () => {
+      invalidate();
+      setRecentDeletion(null);
+      showToast('Subscription restored.', 'success');
+    },
   });
 
   const toggleMutation = useMutation({
@@ -149,6 +167,21 @@ export default function Subscriptions() {
     setEditSub(sub);
   };
 
+  useEffect(() => {
+    if (recentDeletion) undoRef.current?.focus();
+  }, [recentDeletion]);
+
+  const requestDelete = async (sub) => {
+    const confirmed = await confirm({
+      title: `Remove ${sub.name}?`,
+      message: 'This will hide 1 subscription from reminders and totals. You can undo it; the local record is not erased.',
+      confirmLabel: 'Remove subscription',
+      cancelLabel: 'Keep subscription',
+      danger: true,
+    });
+    if (confirmed) deleteMutation.mutate(sub);
+  };
+
   const activeSubs = subs.filter(s => s.is_active);
   const inactiveSubs = subs.filter(s => !s.is_active);
 
@@ -172,6 +205,21 @@ export default function Subscriptions() {
         </div>
         <GlassButton icon={<Plus size={15} />} onClick={() => setAddOpen(true)}>Add</GlassButton>
       </motion.div>
+
+      {recentDeletion && (
+        <div role="status" className="mb-5 flex flex-wrap items-center gap-3 rounded-[14px] border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-50/65">
+          <span className="flex-1">Removed {recentDeletion.sub.name}. The local record can be recovered.</span>
+          <button
+            ref={undoRef}
+            type="button"
+            onClick={() => restoreMutation.mutate(recentDeletion.id)}
+            disabled={restoreMutation.isPending}
+            className="min-h-10 rounded-lg border border-amber-200/25 px-3 text-amber-50/80 hover:bg-amber-200/[0.08] disabled:opacity-40"
+          >
+            {restoreMutation.isPending ? 'Restoring…' : 'Undo'}
+          </button>
+        </div>
+      )}
 
       {/* Stats Cards */}
       {stats && (
@@ -402,7 +450,8 @@ export default function Subscriptions() {
                       <Pause size={13} />
                     </button>
                     <button
-                      onClick={() => deleteMutation.mutate(sub.id)}
+                      onClick={() => requestDelete(sub)}
+                      disabled={deleteMutation.isPending}
                       className="text-white/20 hover:text-rose-400/60 transition-colors p-1"
                       title="Delete"
                       aria-label={`Delete subscription ${sub.name}`}
@@ -460,7 +509,8 @@ export default function Subscriptions() {
                       <Play size={13} />
                     </button>
                     <button
-                      onClick={() => deleteMutation.mutate(sub.id)}
+                      onClick={() => requestDelete(sub)}
+                      disabled={deleteMutation.isPending}
                       className="text-white/20 hover:text-rose-400/60 transition-colors p-1"
                       title="Delete"
                       aria-label={`Delete subscription ${sub.name}`}
@@ -716,6 +766,7 @@ export default function Subscriptions() {
           </div>
         )}
       </AnimatePresence>
+      <ConfirmDialogComponent />
     </div>
   );
 }

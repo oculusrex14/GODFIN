@@ -85,6 +85,9 @@ class Subscription(Base):
     subcategory: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     next_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
     notes: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     _legacy_fx_rate_to_inr: Mapped[Optional[Decimal]] = mapped_column(
         "fx_rate_to_inr", Numeric(24, 12), nullable=True

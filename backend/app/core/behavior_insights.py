@@ -294,7 +294,10 @@ def compute_behavior_insights(
         else 0
     )
     active_subscriptions = (
-        db.query(Subscription).filter(Subscription.is_active.is_(True)).all()
+        db.query(Subscription).filter(
+            Subscription.is_active.is_(True),
+            Subscription.deleted_at.is_(None),
+        ).all()
     )
     subscription_currencies = {
         (item.currency or "INR").upper() for item in active_subscriptions

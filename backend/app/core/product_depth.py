@@ -341,7 +341,7 @@ def decide_subscription_suggestion(
         if suggestion.confirmed_subscription_id:
             return (
                 db.query(Subscription)
-                .filter_by(id=suggestion.confirmed_subscription_id)
+                .filter_by(id=suggestion.confirmed_subscription_id, deleted_at=None)
                 .first()
             )
         frequency = (
@@ -382,7 +382,10 @@ def upcoming_subscription_reminders(
     today = date.today()
     horizon = today + timedelta(days=days)
     reminders = []
-    for subscription in db.query(Subscription).filter_by(is_active=True).all():
+    for subscription in db.query(Subscription).filter_by(
+        is_active=True,
+        deleted_at=None,
+    ).all():
         due = subscription.next_payment_date
         if not due:
             continue

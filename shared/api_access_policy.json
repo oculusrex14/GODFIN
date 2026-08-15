@@ -23,10 +23,17 @@
       "access": "paid",
       "feature": "net_worth"
     },
+    "POST /api/v1/net-worth/{item_id}/restore": {
+      "access": "paid",
+      "feature": "net_worth"
+    },
     "DELETE /api/v1/settings/developer/rules/{rule_id}": {
       "access": "authenticated_free"
     },
     "DELETE /api/v1/subscriptions/{sub_id}": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/subscriptions/{sub_id}/restore": {
       "access": "authenticated_free"
     },
     "DELETE /api/v1/transactions/{transaction_id}": {

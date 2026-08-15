@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import date
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -28,6 +28,7 @@ from app.core.product_depth import (
     sync_subscription_suggestions,
     upcoming_subscription_reminders,
 )
+from app.core.time import utcnow_naive
 from app.models.subscription import Subscription
 from app.models.subscription_suggestion import SubscriptionSuggestion
 from app.schemas.financial import (
@@ -137,6 +138,14 @@ class SubscriptionSuggestionDecision(BaseModel):
     snooze_days: int = Field(default=7, ge=1, le=90)
 
 
+class RecoverableDeletionResponse(BaseModel):
+    id: str
+    status: Literal["deleted", "restored"]
+    affected_records: int
+    deleted_at: Optional[str]
+    recovery: str
+
+
 def _suggestion_response(suggestion: SubscriptionSuggestion) -> dict:
     return {
         "id": suggestion.id,
@@ -212,7 +221,7 @@ async def list_subscriptions(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    query = db.query(Subscription)
+    query = db.query(Subscription).filter(Subscription.deleted_at.is_(None))
     if is_active is not None:
         query = query.filter(Subscription.is_active == is_active)
     items = query.order_by(Subscription.created_at.desc()).all()
@@ -258,7 +267,7 @@ async def get_subscription_stats(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    subs = db.query(Subscription).all()
+    subs = db.query(Subscription).filter(Subscription.deleted_at.is_(None)).all()
     active = [s for s in subs if s.is_active]
     inactive = [s for s in subs if not s.is_active]
     currencies = {(item.currency or "INR").upper() for item in active} or {"INR"}
@@ -335,6 +344,7 @@ async def refresh_exchange_rates(
         db.query(Subscription)
         .filter(
             Subscription.is_active.is_(True),
+            Subscription.deleted_at.is_(None),
             Subscription.currency != "INR",
         )
         .all()
@@ -433,7 +443,7 @@ async def get_subscription(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    sub = db.query(Subscription).filter_by(id=sub_id).first()
+    sub = db.query(Subscription).filter_by(id=sub_id, deleted_at=None).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
     currencies = {(sub.currency or "INR").upper()}
@@ -448,7 +458,7 @@ async def update_subscription(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    sub = db.query(Subscription).filter_by(id=sub_id).first()
+    sub = db.query(Subscription).filter_by(id=sub_id, deleted_at=None).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
@@ -473,14 +483,44 @@ async def update_subscription(
     return _to_response(sub, snapshot, fx_metadata)
 
 
-@router.delete("/{sub_id}", status_code=204)
+@router.delete("/{sub_id}", response_model=RecoverableDeletionResponse)
 def delete_subscription(
     sub_id: str,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    sub = db.query(Subscription).filter_by(id=sub_id).first()
+    sub = db.query(Subscription).filter_by(id=sub_id, deleted_at=None).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
-    db.delete(sub)
+    sub.deleted_at = utcnow_naive()
     db.commit()
+    return RecoverableDeletionResponse(
+        id=sub.id,
+        status="deleted",
+        affected_records=1,
+        deleted_at=sub.deleted_at.isoformat(),
+        recovery="Use Undo to restore this subscription.",
+    )
+
+
+@router.post("/{sub_id}/restore", response_model=RecoverableDeletionResponse)
+def restore_subscription(
+    sub_id: str,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    sub = db.query(Subscription).filter(
+        Subscription.id == sub_id,
+        Subscription.deleted_at.is_not(None),
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Deleted subscription not found")
+    sub.deleted_at = None
+    db.commit()
+    return RecoverableDeletionResponse(
+        id=sub.id,
+        status="restored",
+        affected_records=1,
+        deleted_at=None,
+        recovery="The subscription is visible in your records again.",
+    )

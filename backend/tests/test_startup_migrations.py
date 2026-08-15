@@ -232,6 +232,38 @@ def test_revision_17_adds_durable_background_job_leases_idempotently(tmp_path):
         connection.close()
 
 
+def test_revision_18_adds_recoverable_deletion_markers_idempotently(tmp_path):
+    db_path = tmp_path / "revision-18.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE subscriptions (id TEXT PRIMARY KEY);
+            CREATE TABLE net_worth_items (id TEXT PRIMARY KEY);
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    connection = sqlite3.connect(db_path)
+    try:
+        startup_migrations._apply_revision_18(connection)
+        startup_migrations._apply_revision_18(connection)
+        startup_migrations._validate_revision_18(connection)
+        for table in ("subscriptions", "net_worth_items"):
+            columns = {
+                row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')
+            }
+            indexes = {
+                row[1] for row in connection.execute(f'PRAGMA index_list("{table}")')
+            }
+            assert "deleted_at" in columns
+            assert f"ix_{table}_deleted_at" in indexes
+    finally:
+        connection.close()
+
+
 def _create_legacy_database(path: Path) -> None:
     connection = sqlite3.connect(path)
     try:

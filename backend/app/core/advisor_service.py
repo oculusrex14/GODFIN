@@ -160,7 +160,11 @@ def build_financial_profile_text(db: Session) -> str:
     # Subscriptions
     sub_total = float(
         db.query(func.coalesce(func.sum(Subscription.amount), 0))
-        .filter(Subscription.is_active == True, Subscription.frequency == 'monthly')
+        .filter(
+            Subscription.is_active == True,
+            Subscription.deleted_at.is_(None),
+            Subscription.frequency == 'monthly',
+        )
         .scalar()
     )
 

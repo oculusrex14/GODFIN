@@ -26,7 +26,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 17
+CURRENT_SCHEMA_REVISION = 18
 
 
 class SchemaMigrationError(RuntimeError):
@@ -1612,6 +1612,47 @@ def _validate_revision_17(connection: sqlite3.Connection) -> None:
         )
 
 
+def _apply_revision_18(connection: sqlite3.Connection) -> None:
+    """Add recoverable soft-deletion markers for ordinary user records."""
+    for table in ("subscriptions", "net_worth_items"):
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not exists:
+            continue
+        columns = _table_columns(connection, table)
+        if "deleted_at" not in columns:
+            connection.execute(
+                f'ALTER TABLE "{table}" ADD COLUMN deleted_at DATETIME'
+            )
+        connection.execute(
+            f'CREATE INDEX IF NOT EXISTS "ix_{table}_deleted_at" '
+            f'ON "{table}"(deleted_at)'
+        )
+
+
+def _validate_revision_18(connection: sqlite3.Connection) -> None:
+    for table in ("subscriptions", "net_worth_items"):
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not exists:
+            continue
+        if "deleted_at" not in _table_columns(connection, table):
+            raise SchemaMigrationError(
+                f"The {table} recovery marker was not installed."
+            )
+        indexes = {
+            row[1] for row in connection.execute(f'PRAGMA index_list("{table}")')
+        }
+        if f"ix_{table}_deleted_at" not in indexes:
+            raise SchemaMigrationError(
+                f"The {table} recovery index was not installed."
+            )
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -1654,6 +1695,12 @@ MIGRATION_REGISTRY = (
         name="add_durable_background_job_leases",
         apply=_apply_revision_17,
         validate=_validate_revision_17,
+    ),
+    SchemaMigration(
+        revision=18,
+        name="add_recoverable_record_deletion",
+        apply=_apply_revision_18,
+        validate=_validate_revision_18,
     ),
 )
 

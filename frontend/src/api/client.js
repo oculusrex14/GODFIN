@@ -794,6 +794,10 @@ export function deleteSubscription(id) {
   return apiFetch(`/subscriptions/${id}`, { method: 'DELETE' });
 }
 
+export function restoreSubscription(id) {
+  return apiFetch(`/subscriptions/${id}/restore`, { method: 'POST' });
+}
+
 export function fetchSubscriptionStats() {
   return apiFetch('/subscriptions/stats');
 }
@@ -911,6 +915,10 @@ export function updateNetWorthItem({ id, ...data }) {
 
 export function deleteNetWorthItem(id) {
   return apiFetch(`/net-worth/${id}`, { method: 'DELETE' });
+}
+
+export function restoreNetWorthItem(id) {
+  return apiFetch(`/net-worth/${id}/restore`, { method: 'POST' });
 }
 
 export function refreshNetWorthQuote(id) {

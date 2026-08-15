@@ -155,6 +155,7 @@ def refresh_manual_item_rates(
         db.query(NetWorthItem)
         .filter(
             NetWorthItem.is_active.is_(True),
+            NetWorthItem.deleted_at.is_(None),
             NetWorthItem.valuation_mode == "manual",
         )
         .all()
@@ -203,7 +204,10 @@ def _items_with_latest_quote(
     query = (
         db.query(NetWorthItem, NetWorthQuote)
         .outerjoin(NetWorthQuote, NetWorthQuote.id == _latest_quote_subquery())
-        .filter(NetWorthItem.is_active.is_(True))
+        .filter(
+            NetWorthItem.is_active.is_(True),
+            NetWorthItem.deleted_at.is_(None),
+        )
     )
     if liquid_only:
         query = query.filter(

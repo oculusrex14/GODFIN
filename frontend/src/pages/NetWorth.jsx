@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -22,6 +22,7 @@ import {
   fetchMarketDataStatus,
   fetchNetWorth,
   refreshNetWorthQuote,
+  restoreNetWorthItem,
   updateNetWorthItem,
 } from '../api/client';
 import CalculationInfo from '../components/CalculationInfo';
@@ -29,6 +30,7 @@ import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
 import { GlassSelect } from '../components/GlassSelect';
 import DialogSurface from '../components/DialogSurface';
+import { useConfirm } from '../components/ConfirmDialog';
 import { useToast } from '../context/ToastContext';
 
 const INITIAL_FORM = {
@@ -83,8 +85,11 @@ export default function NetWorth() {
   const [editingId, setEditingId] = useState(null);
   const [apiKey, setApiKey] = useState('');
   const [baseCurrency, setBaseCurrency] = useState('');
+  const [recentDeletion, setRecentDeletion] = useState(null);
+  const undoRef = useRef(null);
   const queryClient = useQueryClient();
   const { addToast } = useToast();
+  const { confirm, ConfirmDialog: ConfirmDialogComponent } = useConfirm();
   const { data: license } = useQuery({ queryKey: ['license'], queryFn: fetchLicenseStatus });
   const entitled = license?.features?.includes('net_worth');
   const { data: summary } = useQuery({
@@ -113,8 +118,20 @@ export default function NetWorth() {
     },
   });
   const deleteMutation = useMutation({
-    mutationFn: deleteNetWorthItem,
-    onSuccess: refresh,
+    mutationFn: item => deleteNetWorthItem(item.id).then(result => ({ ...result, item })),
+    onSuccess: result => {
+      setRecentDeletion(result);
+      refresh();
+      addToast('Net-worth item removed. You can undo this change.', 'info');
+    },
+  });
+  const restoreMutation = useMutation({
+    mutationFn: restoreNetWorthItem,
+    onSuccess: () => {
+      setRecentDeletion(null);
+      refresh();
+      addToast('Net-worth item restored.', 'success');
+    },
   });
   const quoteMutation = useMutation({
     mutationFn: refreshNetWorthQuote,
@@ -144,6 +161,22 @@ export default function NetWorth() {
     assets: summary?.items?.filter(item => item.item_type === 'asset') || [],
     liabilities: summary?.items?.filter(item => item.item_type === 'liability') || [],
   }), [summary]);
+
+  useEffect(() => {
+    if (recentDeletion) undoRef.current?.focus();
+  }, [recentDeletion]);
+
+  const requestDelete = async (item) => {
+    const quoteCount = item.quote_history?.length || 0;
+    const confirmed = await confirm({
+      title: `Remove ${item.name}?`,
+      message: `This will hide 1 item${quoteCount ? ` and ${quoteCount} saved quote${quoteCount === 1 ? '' : 's'}` : ''} from your net-worth totals. You can undo it; no history is erased.`,
+      confirmLabel: 'Remove item',
+      cancelLabel: 'Keep item',
+      danger: true,
+    });
+    if (confirmed) deleteMutation.mutate(item);
+  };
 
   if (license && !entitled) {
     return (
@@ -179,6 +212,21 @@ export default function NetWorth() {
           Add item
         </GlassButton>
       </div>
+
+      {recentDeletion && (
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-[14px] border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-50/65">
+          <span className="flex-1">Removed {recentDeletion.item.name}. {recentDeletion.affected_records} local record{recentDeletion.affected_records === 1 ? '' : 's'} can be recovered.</span>
+          <button
+            ref={undoRef}
+            type="button"
+            onClick={() => restoreMutation.mutate(recentDeletion.id)}
+            disabled={restoreMutation.isPending}
+            className="min-h-10 rounded-lg border border-amber-200/25 px-3 text-amber-50/80 hover:bg-amber-200/[0.08] disabled:opacity-40"
+          >
+            {restoreMutation.isPending ? 'Restoring…' : 'Undo'}
+          </button>
+        </div>
+      )}
 
       <div className="grid sm:grid-cols-3 gap-3">
         {[
@@ -349,7 +397,8 @@ export default function NetWorth() {
                         <Pencil size={12} /> Edit
                       </button>
                       <button
-                        onClick={() => deleteMutation.mutate(item.id)}
+                        onClick={() => requestDelete(item)}
+                        disabled={deleteMutation.isPending}
                         className="ml-auto inline-flex items-center gap-1.5 text-rose-200/40 text-xs"
                       >
                         <Trash2 size={12} /> Remove
@@ -468,6 +517,7 @@ export default function NetWorth() {
           </div>
         )}
       </AnimatePresence>
+      <ConfirmDialogComponent />
     </div>
   );
 }

@@ -204,6 +204,9 @@ class NetWorthItem(Base):
     expires_on: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(default=utcnow_naive)
     updated_at: Mapped[datetime] = mapped_column(
         default=utcnow_naive, onupdate=utcnow_naive

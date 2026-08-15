@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Literal
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -108,6 +109,14 @@ class NetWorthItemUpdate(BaseModel):
                 "is_active",
             },
         )
+
+
+class RecoverableNetWorthDeletion(BaseModel):
+    id: str
+    status: Literal["deleted", "restored"]
+    affected_records: int
+    deleted_at: str | None
+    recovery: str
 
 
 class MarketDataConfig(BaseModel):
@@ -245,7 +254,7 @@ def get_item(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    item = db.query(NetWorthItem).filter_by(id=item_id).first()
+    item = db.query(NetWorthItem).filter_by(id=item_id, deleted_at=None).first()
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")
     context = build_valuation_context(
@@ -262,7 +271,7 @@ def update_item(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    item = db.query(NetWorthItem).filter_by(id=item_id).first()
+    item = db.query(NetWorthItem).filter_by(id=item_id, deleted_at=None).first()
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")
     updates = body.model_dump(exclude_unset=True)
@@ -298,7 +307,7 @@ def update_item(
 
 @router.delete(
     "/{item_id}",
-    status_code=204,
+    response_model=RecoverableNetWorthDeletion,
     dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
 )
 def delete_item(
@@ -306,11 +315,47 @@ def delete_item(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    item = db.query(NetWorthItem).filter_by(id=item_id).first()
+    item = db.query(NetWorthItem).filter_by(id=item_id, deleted_at=None).first()
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")
-    db.delete(item)
+    affected_records = 1 + len(item.quotes)
+    item.deleted_at = utcnow_naive()
     db.commit()
+    return RecoverableNetWorthDeletion(
+        id=item.id,
+        status="deleted",
+        affected_records=affected_records,
+        deleted_at=item.deleted_at.isoformat(),
+        recovery="Use Undo to restore this item and its quote history.",
+    )
+
+
+@router.post(
+    "/{item_id}/restore",
+    response_model=RecoverableNetWorthDeletion,
+    dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+)
+def restore_item(
+    item_id: str,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    item = db.query(NetWorthItem).filter(
+        NetWorthItem.id == item_id,
+        NetWorthItem.deleted_at.is_not(None),
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Deleted net-worth item not found.")
+    affected_records = 1 + len(item.quotes)
+    item.deleted_at = None
+    db.commit()
+    return RecoverableNetWorthDeletion(
+        id=item.id,
+        status="restored",
+        affected_records=affected_records,
+        deleted_at=None,
+        recovery="The item and its quote history are visible again.",
+    )
 
 
 @router.get(
@@ -363,6 +408,7 @@ def configure_market_data(
             db.query(NetWorthItem)
             .filter(
                 NetWorthItem.is_active.is_(True),
+                NetWorthItem.deleted_at.is_(None),
                 NetWorthItem.valuation_mode == "market",
             )
             .count()
@@ -390,7 +436,7 @@ def refresh_quote(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    item = db.query(NetWorthItem).filter_by(id=item_id).first()
+    item = db.query(NetWorthItem).filter_by(id=item_id, deleted_at=None).first()
     if not item:
         raise HTTPException(status_code=404, detail="Net-worth item not found.")
     _validate_item_payload(
