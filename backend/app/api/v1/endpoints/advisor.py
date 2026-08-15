@@ -42,6 +42,58 @@ class DigestSettingsUpdate(BaseModel):
     recipient: str | None = Field(default=None, max_length=254)
 
 
+class DigestPeriodResponse(BaseModel):
+    start: str
+    end: str
+
+
+class DigestAnomalyResponse(BaseModel):
+    transaction_id: str
+    merchant: str
+    amount: float
+    date: str
+    reason: str
+
+
+class DigestBudgetBreachResponse(BaseModel):
+    goal_id: str
+    name: str
+    current_saved: float
+    expected_saved: float
+    shortfall: float
+
+
+class DigestMerchantResponse(BaseModel):
+    name: str
+    category: str
+    first_seen: str
+
+
+class WeeklyDigestResponse(BaseModel):
+    period: DigestPeriodResponse
+    generated_at: str
+    current_spend: float
+    previous_spend: float
+    spending_velocity_percent: float | None
+    spending_velocity_message: str
+    anomalies: list[DigestAnomalyResponse]
+    budget_breaches: list[DigestBudgetBreachResponse]
+    new_merchants: list[DigestMerchantResponse]
+
+
+class DigestSettingsResponse(BaseModel):
+    enabled: bool
+    recipient: str | None
+    last_sent: str | None
+    gmail_connected: bool
+    gmail_send_supported: bool
+
+
+class DigestSendResponse(BaseModel):
+    sent: bool
+    recipient: str
+
+
 @router.post(
     "/chat",
     response_model=ChatResponse,
@@ -82,7 +134,11 @@ def _setting_value(db: Session, key: str, default: str = "") -> str:
     return setting.value if setting is not None else default
 
 
-@router.get("/digest", dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)])
+@router.get(
+    "/digest",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_model=WeeklyDigestResponse,
+)
 def advisor_weekly_digest(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -90,7 +146,7 @@ def advisor_weekly_digest(
     return build_weekly_digest(db)
 
 
-@router.get("/digest/settings")
+@router.get("/digest/settings", response_model=DigestSettingsResponse)
 def get_digest_settings(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -110,6 +166,7 @@ def get_digest_settings(
 @router.put(
     "/digest/settings",
     dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_model=DigestSettingsResponse,
 )
 def update_digest_settings(
     body: DigestSettingsUpdate,
@@ -133,6 +190,7 @@ def update_digest_settings(
 @router.post(
     "/digest/send",
     dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_model=DigestSendResponse,
 )
 def send_advisor_digest(
     db: Session = Depends(get_db),

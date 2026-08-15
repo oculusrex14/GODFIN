@@ -72,6 +72,189 @@ class TaxPackRequest(BaseModel):
         return value
 
 
+class ReportCategoryResponse(BaseModel):
+    category: str
+    amount: float
+
+
+class ReportHealthComponents(BaseModel):
+    savings_target_progress_percent: int | None = None
+    recorded_savings_rate_percent: float | None = None
+    target_savings_rate_percent: float | None = None
+
+
+class SummaryReportResponse(BaseModel):
+    month: str
+    period_status: str
+    period_start: str
+    period_end_exclusive: str
+    as_of_date: str
+    calculation_version: str
+    total_spend: float
+    total_income: float
+    savings_rate: float | None
+    transaction_count: int
+    avg_transaction: float
+    top_categories: list[ReportCategoryResponse]
+    all_categories: list[ReportCategoryResponse]
+    spending_by_elasticity: dict[str, float]
+    recurring_total: float
+    savings_target_percent: float
+    savings_target_assessment_available: bool
+    target_already_met: bool
+    required_spend_reduction_to_target: float | None
+    actionable_flexible_reduction: float | None
+    remaining_target_gap: float | None
+    financial_health_score: int | None
+    financial_health_label: str
+    financial_health_components: ReportHealthComponents | None
+    financial_health_version: str
+    financial_health_formula: str
+    financial_health_caveat: str
+
+
+class ReportMerchantResponse(BaseModel):
+    merchant: str | None
+    amount: float
+    count: int
+
+
+class ReportDailySpendingResponse(BaseModel):
+    date: str
+    amount: float
+
+
+class ReportCategoryComparisonResponse(BaseModel):
+    category: str
+    current: float
+    average: float
+    sample_months: int
+
+
+class ReportRecurringResponse(BaseModel):
+    merchant: str
+    amount: float
+    monthly_equivalent: float
+    frequency: str
+    category: str | None
+
+
+class ReportIncomeResponse(BaseModel):
+    source: str
+    amount: float
+
+
+class DetailedReportResponse(SummaryReportResponse):
+    top_merchants: list[ReportMerchantResponse]
+    daily_spending: list[ReportDailySpendingResponse]
+    category_comparison: list[ReportCategoryComparisonResponse]
+    category_comparison_sample_size: int
+    category_comparison_months: list[str]
+    category_comparison_caveat: str
+    recurring_list: list[ReportRecurringResponse]
+    income_breakdown: list[ReportIncomeResponse]
+
+
+class InsightSampleSizes(BaseModel):
+    category_comparison_months: int
+    trend_recorded_complete_months: int
+
+
+class InsightSectionResponse(BaseModel):
+    title: str
+    tone: str
+    icon: str
+    content: str
+
+
+class InsightHighlightResponse(BaseModel):
+    label: str
+    value: str
+    tone: str
+    delta: str | None
+
+
+class FinancialInsightsResponse(BaseModel):
+    available: bool
+    source: str
+    calculation_version: str
+    period_status: str
+    sample_sizes: InsightSampleSizes
+    caveat: str | None = None
+    executive_summary: str
+    sections: list[InsightSectionResponse]
+    highlights: list[InsightHighlightResponse]
+    recommendations: list[str]
+
+
+class AIProviderMetadata(BaseModel):
+    provider: str
+    model: str
+
+
+class AIConsentMetadata(BaseModel):
+    provided: bool
+    version: str
+    action: str
+
+
+class AIDataDisclosure(BaseModel):
+    processing: str
+    shared: list[str]
+    not_shared: list[str]
+
+
+class AIReportResponse(BaseModel):
+    month: str
+    insights: FinancialInsightsResponse
+    generated_at: str
+    llm: AIProviderMetadata
+    consent: AIConsentMetadata
+    data_disclosure: AIDataDisclosure
+
+
+class FinancialYearSummaryResponse(BaseModel):
+    transaction_count: int
+    total_spend: float
+    total_income: float
+    net: float
+
+
+class FinancialYearTransactionResponse(BaseModel):
+    id: str
+    date: str | None
+    time: str | None
+    merchant_raw: str | None
+    merchant: str | None
+    raw_text: str
+    amount: float
+    type: str
+    instrument: str
+    account: str
+    account_id: str
+    category: str | None
+    subcategory: str | None
+    confidence: float | None
+    classification_source: str | None
+    status: str
+    is_transfer: bool
+    is_recurring: bool
+    is_income: bool
+    semantic_type: str
+    source: str
+    tags: str | None
+    notes: str | None
+
+
+class FinancialYearExportResponse(BaseModel):
+    financial_year: str
+    start_date: str
+    end_date_exclusive: str
+    generated_at: str
+    summary: FinancialYearSummaryResponse
+    transactions: list[FinancialYearTransactionResponse]
+
+
 def _default_month(db: Session) -> str:
     """Latest month that contains non-deleted transactions, falling back to this month."""
     try:
@@ -127,7 +310,11 @@ def _transaction_export_row(
     }
 
 
-@router.get("/summary")
+@router.get(
+    "/summary",
+    response_model=SummaryReportResponse,
+    response_model_exclude_unset=True,
+)
 def report_summary(
     month: YearMonth | None = None,
     db: Session = Depends(get_db),
@@ -138,7 +325,11 @@ def report_summary(
     return prepare_summary_report(db, month)
 
 
-@router.get("/detailed")
+@router.get(
+    "/detailed",
+    response_model=DetailedReportResponse,
+    response_model_exclude_unset=True,
+)
 def report_detailed(
     month: YearMonth | None = None,
     db: Session = Depends(get_db),
@@ -209,6 +400,8 @@ def _ai_report_metadata(llm_config: LLMConfiguration) -> dict:
 @router.post(
     "/ai/insights",
     dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_model=AIReportResponse,
+    response_model_exclude_unset=True,
 )
 def report_ai_insights(
     body: AIReportRequest,
@@ -255,7 +448,18 @@ def report_ai_insights(
     }
 
 
-@router.get("/pdf/summary")
+@router.get(
+    "/pdf/summary",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Deterministic monthly summary PDF.",
+            "content": {
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}}
+            },
+        }
+    },
+)
 def report_pdf_summary(
     month: YearMonth | None = None,
     db: Session = Depends(get_db),
@@ -275,7 +479,16 @@ def report_pdf_summary(
     )
 
 
-@router.get("/csv")
+@router.get(
+    "/csv",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Spreadsheet-safe monthly transaction CSV.",
+            "content": {"text/csv": {"schema": {"type": "string"}}},
+        }
+    },
+)
 def report_csv(
     month: YearMonth | None = None,
     db: Session = Depends(get_db),
@@ -333,7 +546,17 @@ def report_csv(
     )
 
 
-@router.get("/fy", dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)])
+@router.get(
+    "/fy",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_model=FinancialYearExportResponse,
+    responses={
+        200: {
+            "description": "Financial-year JSON or spreadsheet-safe CSV.",
+            "content": {"text/csv": {"schema": {"type": "string"}}},
+        }
+    },
+)
 def report_financial_year(
     start_year: int = Query(ge=2000, le=2100),
     format: str = Query(default="csv", pattern=r"^(csv|json)$"),
@@ -409,6 +632,15 @@ def report_financial_year(
 @router.post(
     "/fy/pack",
     dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_class=Response,
+    responses={
+        200: {
+            "description": "AES-256 encrypted Indian financial-year tax pack.",
+            "content": {
+                "application/zip": {"schema": {"type": "string", "format": "binary"}}
+            },
+        }
+    },
 )
 def report_financial_year_pack(
     body: TaxPackRequest,
@@ -439,6 +671,15 @@ def report_financial_year_pack(
 @router.post(
     "/pdf/detailed",
     dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_class=Response,
+    responses={
+        200: {
+            "description": "User-requested detailed AI-assisted PDF report.",
+            "content": {
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}}
+            },
+        }
+    },
 )
 def report_pdf_detailed(
     body: AIReportRequest,
