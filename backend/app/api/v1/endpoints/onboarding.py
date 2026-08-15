@@ -107,7 +107,23 @@ class OnboardingUpdate(BaseModel):
     restart_tutorial: bool = False
 
 
-@router.get("")
+class OnboardingStatusResponse(BaseModel):
+    completed: bool
+    deferred: bool
+    step: int
+    step_count: int
+    tutorial_version: int
+    tutorial_step: int
+    tutorial_step_count: int
+    tutorial_completed: bool
+    tutorial_completed_version: int
+    tutorial_update_available: bool
+    transaction_count: int
+    reviewed_count: int
+    target_review_count: int
+
+
+@router.get("", response_model=OnboardingStatusResponse)
 def onboarding_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -115,7 +131,7 @@ def onboarding_status(
     return _status(db)
 
 
-@router.put("")
+@router.put("", response_model=OnboardingStatusResponse)
 def update_onboarding(
     body: OnboardingUpdate,
     db: Session = Depends(get_db),

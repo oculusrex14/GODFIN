@@ -22,7 +22,24 @@ class LicenseActivation(BaseModel):
     license_key: str = Field(min_length=20, max_length=120)
 
 
-@router.get("")
+class LicenseStatusResponse(BaseModel):
+    tier: str
+    licensed_tier: str | None
+    status: str
+    valid: bool
+    features: list[str]
+    verified_at: str | None
+    offline_grace_until: str | None
+    entitlement_integrity: str | None
+    monthly_credits: int
+    hosted_credits_included: int
+    topup_credits: int
+    masked_key: str | None
+    message: str
+    website_url: str
+
+
+@router.get("", response_model=LicenseStatusResponse)
 def get_license_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -30,7 +47,7 @@ def get_license_status(
     return license_status(db)
 
 
-@router.post("/activate")
+@router.post("/activate", response_model=LicenseStatusResponse)
 def activate(
     body: LicenseActivation,
     db: Session = Depends(get_db),
@@ -42,7 +59,7 @@ def activate(
         raise_license_error(exc)
 
 
-@router.post("/verify")
+@router.post("/verify", response_model=LicenseStatusResponse)
 def verify(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -53,7 +70,7 @@ def verify(
         raise_license_error(exc)
 
 
-@router.delete("")
+@router.delete("", response_model=LicenseStatusResponse)
 def deactivate(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),

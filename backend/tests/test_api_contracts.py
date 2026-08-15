@@ -396,8 +396,12 @@ def test_openapi_documents_one_error_envelope_and_success_status_per_operation()
             assert len(success_codes) == 1
             success = responses[success_codes[0]]
             if success_codes[0] != "204":
-                success_schema = success["content"]["application/json"]["schema"]
-                if success_schema == {}:
+                content = success.get("content", {})
+                assert content, operation["operationId"]
+                success_schemas = [
+                    media["schema"] for media in content.values()
+                ]
+                if any(success_schema == {} for success_schema in success_schemas):
                     untyped_success.append(operation["operationId"])
             assert STANDARD_ERROR_CODES <= responses.keys()
             for status in STANDARD_ERROR_CODES:
@@ -409,4 +413,4 @@ def test_openapi_documents_one_error_envelope_and_success_status_per_operation()
     # Freeze the audited legacy debt: a new route may not add another generic
     # success body. Precise success schemas are being reduced separately while
     # every error/status/auth contract is enforced now.
-    assert len(untyped_success) == 129
+    assert len(untyped_success) == 101

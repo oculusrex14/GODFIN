@@ -37,7 +37,107 @@ class BehaviorConfigUpdate(BaseModel):
     monthly_budget: PositiveMoney | None = None
 
 
-@router.get("", dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)])
+class BehaviorFxMetadata(BaseModel):
+    status: str
+    provider: str
+    source_url: str | None
+    as_of: str | None
+    age_days: int | None
+    stale: bool | None
+    rate_direction: str
+    rates_to_inr: dict[str, float]
+    rate_dates: dict[str, str]
+    requested_currencies: list[str]
+    privacy: str
+    unavailable_reason: str | None
+
+
+class BehaviorMetricResponse(BaseModel):
+    key: str
+    label: str
+    value: float | None
+    unit: str
+    meaning: str
+    formula: str
+    inputs: str
+    period: str
+    evidence: str
+    available: bool
+    unavailable_reason: str | None
+    sample_size: int
+    minimum_sample: int
+    confidence: str
+    confidence_explanation: str
+    provenance: str
+    caveat: str
+    difficulty: str
+    hidden: bool
+    correction_note: str | None
+    currency_conversion: BehaviorFxMetadata | None = None
+
+
+class BehaviorReflectionResponse(BaseModel):
+    key: str
+    title: str
+    observation: str
+    question: str
+    action: str
+    evidence: str
+    available: bool
+    unavailable_reason: str | None
+    confidence: str
+
+
+class BehaviorCoverageResponse(BaseModel):
+    period_start: str
+    period_end: str
+    calendar_months: int
+    calendar_month_keys: list[str]
+    observed_months: int
+    observed_month_keys: list[str]
+    income_months: int
+    spending_months: int
+    cash_flow_months: int
+    observed_full_weeks: int
+    included_transactions: int
+    current_month_excluded: bool
+    note: str
+
+
+class BehaviorInsightsResponse(BaseModel):
+    calculation_version: str
+    window_days: int
+    window_months: int
+    period: str
+    coverage: BehaviorCoverageResponse
+    metrics: list[BehaviorMetricResponse]
+    reflections: list[BehaviorReflectionResponse]
+    monthly_budget: float | None
+    policy: str
+
+
+class SponsorMessageResponse(BaseModel):
+    label: str
+    title: str
+    body: str
+    href: str | None
+
+
+class SponsorCardResponse(BaseModel):
+    visible: bool
+    placement: str
+    personalized: bool
+    third_party_scripts: bool
+    uses_financial_data: bool
+    sponsor: SponsorMessageResponse | None
+
+
+@router.get(
+    "",
+    dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)],
+    response_model=BehaviorInsightsResponse,
+    response_model_exclude_unset=True,
+)
 def insights(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -45,7 +145,12 @@ def insights(
     return compute_behavior_insights(db)
 
 
-@router.put("/config", dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)])
+@router.put(
+    "/config",
+    dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)],
+    response_model=BehaviorInsightsResponse,
+    response_model_exclude_unset=True,
+)
 def update_config(
     body: BehaviorConfigUpdate,
     db: Session = Depends(get_db),
@@ -64,6 +169,8 @@ def update_config(
 @router.put(
     "/{metric_key}",
     dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)],
+    response_model=BehaviorInsightsResponse,
+    response_model_exclude_unset=True,
 )
 def update_preference(
     metric_key: str,
@@ -90,7 +197,12 @@ def update_preference(
     return compute_behavior_insights(db)
 
 
-@router.post("/reset", dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)])
+@router.post(
+    "/reset",
+    dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)],
+    response_model=BehaviorInsightsResponse,
+    response_model_exclude_unset=True,
+)
 def reset_preferences(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -103,7 +215,17 @@ def reset_preferences(
     return compute_behavior_insights(db)
 
 
-@router.get("/export", dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)])
+@router.get(
+    "/export",
+    dependencies=[Depends(BEHAVIOR_INSIGHTS_ENTITLEMENT)],
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Spreadsheet-safe behavior-insight CSV export.",
+            "content": {"text/csv": {"schema": {"type": "string"}}},
+        }
+    },
+)
 def export_insights(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -117,7 +239,7 @@ def export_insights(
     )
 
 
-@router.get("/sponsor/card")
+@router.get("/sponsor/card", response_model=SponsorCardResponse)
 def sponsor_card(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),

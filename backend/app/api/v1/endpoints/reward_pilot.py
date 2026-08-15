@@ -26,6 +26,59 @@ class ConsentUpdate(BaseModel):
     consented: bool
 
 
+class PayoutPolicyResponse(BaseModel):
+    aggregate_bundle_inr: int
+    new_template_family_inr: int
+    template_family_limit: int
+    material_variant_inr: int
+    material_variant_limit: int
+    participant_cap_inr: int
+    pilot_cap_inr: int
+
+
+class RewardPilotStatusResponse(BaseModel):
+    enabled: bool
+    consented: bool
+    consent_version: str
+    off_by_default: bool
+    payout_policy: PayoutPolicyResponse
+    privacy: str
+
+
+class RewardAggregatePayload(BaseModel):
+    schema_version: int
+    window_days: int
+    transaction_count_band: str
+    debit_count_band: str
+    income_count_band: str
+    recurring_count_band: str
+    active_day_count_band: str
+    category_share_bands_percent: dict[str, int]
+    classification_coverage_band_percent: int
+    policy: str
+
+
+class RedactionChecksResponse(BaseModel):
+    passed: bool
+    forbidden_field_count: int
+    possible_identifier_count: int
+
+
+class RewardPreviewResponse(BaseModel):
+    payload: RewardAggregatePayload
+    digest: str
+    eligible: bool
+    redaction_checks: RedactionChecksResponse
+    payout_policy: PayoutPolicyResponse
+    notice: str
+
+
+class RewardSubmissionResponse(BaseModel):
+    status: str
+    receipt_id: str | None
+    digest: str
+
+
 def _consented(db: Session) -> bool:
     setting = db.query(AppSetting).filter_by(key=CONSENT_KEY).first()
     version = db.query(AppSetting).filter_by(key=CONSENT_VERSION_KEY).first()
@@ -45,7 +98,7 @@ def _set(db: Session, key: str, value: str) -> None:
         db.add(AppSetting(key=key, value=value))
 
 
-@router.get("/status")
+@router.get("/status", response_model=RewardPilotStatusResponse)
 def status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -63,7 +116,7 @@ def status(
     }
 
 
-@router.put("/consent")
+@router.put("/consent", response_model=RewardPilotStatusResponse)
 def update_consent(
     body: ConsentUpdate,
     db: Session = Depends(get_db),
@@ -75,7 +128,7 @@ def update_consent(
     return status(db, True)
 
 
-@router.get("/preview")
+@router.get("/preview", response_model=RewardPreviewResponse)
 def preview(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -89,7 +142,7 @@ def preview(
     return build_redacted_preview(db)
 
 
-@router.post("/submit")
+@router.post("/submit", response_model=RewardSubmissionResponse)
 def submit(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),

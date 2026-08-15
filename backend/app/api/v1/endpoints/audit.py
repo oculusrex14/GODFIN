@@ -24,6 +24,22 @@ class AuditStartRequest(BaseModel):
     month: int = Field(..., ge=1, le=12)
 
 
+class AuditSessionResponse(BaseModel):
+    id: str
+    period_year: int
+    period_month: int
+    status: str
+    change_summary: str | None
+    created_at: str | None
+    finalized_at: str | None
+
+
+class AuditMonthStatusResponse(BaseModel):
+    year: int
+    month: int
+    status: str
+
+
 def _session_to_dict(s: AuditSession) -> dict:
     return {
         'id': s.id,
@@ -36,7 +52,7 @@ def _session_to_dict(s: AuditSession) -> dict:
     }
 
 
-@router.post("/start", status_code=201)
+@router.post("/start", response_model=AuditSessionResponse, status_code=201)
 def audit_start(
     body: AuditStartRequest,
     db: Session = Depends(get_db),
@@ -54,7 +70,7 @@ def audit_start(
         ) from exc
 
 
-@router.get("/sessions")
+@router.get("/sessions", response_model=list[AuditSessionResponse])
 def list_sessions(
     year: int = None,
     month: int = None,
@@ -70,7 +86,7 @@ def list_sessions(
     return [_session_to_dict(s) for s in sessions]
 
 
-@router.get("/sessions/{session_id}")
+@router.get("/sessions/{session_id}", response_model=AuditSessionResponse)
 def get_session(
     session_id: str,
     db: Session = Depends(get_db),
@@ -82,7 +98,7 @@ def get_session(
     return _session_to_dict(session)
 
 
-@router.post("/{session_id}/finalize")
+@router.post("/{session_id}/finalize", response_model=AuditSessionResponse)
 def audit_finalize(
     session_id: str,
     db: Session = Depends(get_db),
@@ -108,7 +124,7 @@ def audit_finalize(
         ) from exc
 
 
-@router.post("/{session_id}/discard")
+@router.post("/{session_id}/discard", response_model=AuditSessionResponse)
 def audit_discard(
     session_id: str,
     db: Session = Depends(get_db),
@@ -133,7 +149,7 @@ def audit_discard(
         ) from exc
 
 
-@router.post("/{session_id}/reopen")
+@router.post("/{session_id}/reopen", response_model=AuditSessionResponse)
 def audit_reopen(
     session_id: str,
     db: Session = Depends(get_db),
@@ -158,7 +174,7 @@ def audit_reopen(
         ) from exc
 
 
-@router.get("/month-status")
+@router.get("/month-status", response_model=AuditMonthStatusResponse)
 def month_status(
     year: int,
     month: int,

@@ -26,7 +26,42 @@ class TransferDecision(BaseModel):
     note: str | None = Field(default=None, max_length=255)
 
 
-@router.get("", dependencies=[Depends(MULTI_BANK_ENTITLEMENT)])
+class TransferTransactionResponse(BaseModel):
+    id: str
+    date: str
+    merchant: str
+    amount: float
+    type: str
+    account: str
+
+
+class TransferMatchResponse(BaseModel):
+    id: str
+    amount: float
+    date_gap_days: int
+    confidence: float
+    status: str
+    snoozed_until: str | None
+    decision_note: str | None
+    debit: TransferTransactionResponse
+    credit: TransferTransactionResponse
+
+
+class TransferScanResponse(BaseModel):
+    created: int
+    candidates: list[TransferMatchResponse]
+
+
+class TransferDecisionResponse(BaseModel):
+    id: str
+    status: str
+
+
+@router.get(
+    "",
+    dependencies=[Depends(MULTI_BANK_ENTITLEMENT)],
+    response_model=list[TransferMatchResponse],
+)
 def get_transfer_matches(
     include_resolved: bool = False,
     db: Session = Depends(get_db),
@@ -35,7 +70,11 @@ def get_transfer_matches(
     return list_transfer_matches(db, include_resolved=include_resolved)
 
 
-@router.post("/scan", dependencies=[Depends(MULTI_BANK_ENTITLEMENT)])
+@router.post(
+    "/scan",
+    dependencies=[Depends(MULTI_BANK_ENTITLEMENT)],
+    response_model=TransferScanResponse,
+)
 def scan_transfers(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -48,6 +87,7 @@ def scan_transfers(
 @router.post(
     "/{match_id}/decision",
     dependencies=[Depends(MULTI_BANK_ENTITLEMENT)],
+    response_model=TransferDecisionResponse,
 )
 def update_transfer_match(
     match_id: str,
