@@ -38,7 +38,9 @@ class TransactionSplit(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     parent_transaction_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("transactions.id"), nullable=False
+        String(36),
+        ForeignKey("transactions.id", ondelete="CASCADE"),
+        nullable=False,
     )
     _legacy_amount: Mapped[float] = mapped_column("amount", Float, nullable=False)
     _exact_amount: Mapped[Decimal] = mapped_column(

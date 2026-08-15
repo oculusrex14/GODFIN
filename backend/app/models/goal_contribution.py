@@ -48,7 +48,10 @@ class GoalContribution(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     goal_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("goals.id"), nullable=False, index=True
+        String(36),
+        ForeignKey("goals.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     _legacy_amount: Mapped[float] = mapped_column("amount", Float, nullable=False)
     _exact_amount: Mapped[Decimal] = mapped_column(
@@ -61,7 +64,10 @@ class GoalContribution(Base):
         String(30), nullable=False, default="manual"
     )
     source_transaction_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("transactions.id"), nullable=True, index=True
+        String(36),
+        ForeignKey("transactions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     idempotency_key: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, index=True
@@ -91,13 +97,16 @@ class GoalContributionSuggestion(Base):
     )
     transaction_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("transactions.id"),
+        ForeignKey("transactions.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
         index=True,
     )
     goal_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("goals.id"), nullable=True, index=True
+        String(36),
+        ForeignKey("goals.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     _legacy_amount: Mapped[float] = mapped_column("amount", Float, nullable=False)
     _exact_amount: Mapped[Decimal] = mapped_column(

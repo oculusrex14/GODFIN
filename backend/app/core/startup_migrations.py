@@ -26,7 +26,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 18
+CURRENT_SCHEMA_REVISION = 19
 
 
 class SchemaMigrationError(RuntimeError):
@@ -1653,6 +1653,167 @@ def _validate_revision_18(connection: sqlite3.Connection) -> None:
             )
 
 
+_LEGACY_FK_ACTION_TRIGGERS = {
+    "trg_accounts_delete_derived_rows": (
+        "accounts",
+        {"id"},
+        (
+            ("monthly_aggregates", {"account_id"}),
+            ("recurring_patterns", {"account_id"}),
+        ),
+        """
+        DELETE FROM monthly_aggregates WHERE account_id = OLD.id;
+        DELETE FROM recurring_patterns WHERE account_id = OLD.id;
+        """,
+    ),
+    "trg_audit_sessions_delete_optional_links": (
+        "audit_sessions",
+        {"id"},
+        (
+            ("transactions", {"audit_session_id"}),
+            ("monthly_aggregates", {"audit_session_id"}),
+        ),
+        """
+        UPDATE transactions SET audit_session_id = NULL
+        WHERE audit_session_id = OLD.id;
+        UPDATE monthly_aggregates SET audit_session_id = NULL
+        WHERE audit_session_id = OLD.id;
+        """,
+    ),
+    "trg_goals_delete_owned_rows": (
+        "goals",
+        {"id"},
+        (
+            ("goal_contributions", {"goal_id"}),
+            ("goal_contribution_suggestions", {"goal_id"}),
+        ),
+        """
+        DELETE FROM goal_contributions WHERE goal_id = OLD.id;
+        UPDATE goal_contribution_suggestions SET goal_id = NULL
+        WHERE goal_id = OLD.id;
+        """,
+    ),
+    "trg_net_worth_items_delete_quotes": (
+        "net_worth_items",
+        {"id"},
+        (("net_worth_quotes", {"item_id"}),),
+        "DELETE FROM net_worth_quotes WHERE item_id = OLD.id;",
+    ),
+    "trg_recurring_patterns_delete_suggestions": (
+        "recurring_patterns",
+        {"id"},
+        (("subscription_suggestions", {"recurring_pattern_id"}),),
+        """
+        DELETE FROM subscription_suggestions
+        WHERE recurring_pattern_id = OLD.id;
+        """,
+    ),
+    "trg_subscriptions_delete_suggestion_links": (
+        "subscriptions",
+        {"id"},
+        (("subscription_suggestions", {"confirmed_subscription_id"}),),
+        """
+        UPDATE subscription_suggestions SET confirmed_subscription_id = NULL
+        WHERE confirmed_subscription_id = OLD.id;
+        """,
+    ),
+    "trg_transactions_delete_dependents": (
+        "transactions",
+        {"id"},
+        (
+            ("audit_log", {"transaction_id"}),
+            ("classification_corrections", {"transaction_id"}),
+            ("goal_contributions", {"source_transaction_id"}),
+            ("goal_contribution_suggestions", {"transaction_id"}),
+            ("transaction_splits", {"parent_transaction_id"}),
+            (
+                "transfer_matches",
+                {"debit_transaction_id", "credit_transaction_id"},
+            ),
+        ),
+        """
+        UPDATE audit_log SET transaction_id = NULL
+        WHERE transaction_id = OLD.id;
+        DELETE FROM classification_corrections
+        WHERE transaction_id = OLD.id;
+        UPDATE goal_contributions SET source_transaction_id = NULL
+        WHERE source_transaction_id = OLD.id;
+        DELETE FROM goal_contribution_suggestions
+        WHERE transaction_id = OLD.id;
+        DELETE FROM transaction_splits
+        WHERE parent_transaction_id = OLD.id;
+        DELETE FROM transfer_matches
+        WHERE debit_transaction_id = OLD.id OR credit_transaction_id = OLD.id;
+        """,
+    ),
+}
+
+
+def _legacy_fk_trigger_is_supported(
+    connection: sqlite3.Connection,
+    parent_table: str,
+    parent_columns: set[str],
+    child_tables: tuple[tuple[str, set[str]], ...],
+) -> bool:
+    if not parent_columns.issubset(_table_columns(connection, parent_table)):
+        return False
+    return all(
+        columns.issubset(_table_columns(connection, table))
+        for table, columns in child_tables
+    )
+
+
+def _apply_revision_19(connection: sqlite3.Connection) -> None:
+    """Apply reviewed FK delete actions to databases created by old builds.
+
+    SQLite cannot add or replace a foreign-key action without rebuilding the
+    table. Equivalent parent-delete triggers preserve the existing financial
+    rows while giving historical databases the same behavior as fresh ones.
+    """
+    for name, (
+        parent_table,
+        parent_columns,
+        child_tables,
+        statements,
+    ) in _LEGACY_FK_ACTION_TRIGGERS.items():
+        if not _legacy_fk_trigger_is_supported(
+            connection,
+            parent_table,
+            parent_columns,
+            child_tables,
+        ):
+            continue
+        connection.execute(
+            f'CREATE TRIGGER IF NOT EXISTS "{name}" '
+            f'AFTER DELETE ON "{parent_table}" FOR EACH ROW BEGIN '
+            f"{statements} END"
+        )
+
+
+def _validate_revision_19(connection: sqlite3.Connection) -> None:
+    for name, (
+        parent_table,
+        parent_columns,
+        child_tables,
+        _statements,
+    ) in _LEGACY_FK_ACTION_TRIGGERS.items():
+        if not _legacy_fk_trigger_is_supported(
+            connection,
+            parent_table,
+            parent_columns,
+            child_tables,
+        ):
+            continue
+        installed = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+            (name,),
+        ).fetchone()
+        if not installed:
+            raise SchemaMigrationError(
+                f"The legacy relationship action {name} was not installed."
+            )
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -1701,6 +1862,12 @@ MIGRATION_REGISTRY = (
         name="add_recoverable_record_deletion",
         apply=_apply_revision_18,
         validate=_validate_revision_18,
+    ),
+    SchemaMigration(
+        revision=19,
+        name="apply_legacy_foreign_key_delete_actions",
+        apply=_apply_revision_19,
+        validate=_validate_revision_19,
     ),
 )
 

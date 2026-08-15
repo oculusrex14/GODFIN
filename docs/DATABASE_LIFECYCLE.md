@@ -73,6 +73,15 @@ version that interpreted them. Existing patterns receive an empty evidence
 array and are repopulated by the next scan. SQLite JSON/version guards reject
 malformed provenance on both fresh and upgraded databases.
 
+Revision 17 adds the durable background-job ledger, including lease ownership,
+bounded attempts, cancellation state, and race-safe active-job identities.
+Revision 18 adds indexed soft-deletion markers for recoverable subscription and
+net-worth removal. Revision 19 brings historical databases up to the reviewed
+foreign-key delete policy without rebuilding authoritative financial tables.
+Restart-safe parent-delete triggers provide the same cascade and set-null
+semantics declared by current ORM metadata; account-to-ledger relationships
+remain restricted by the existing foreign key.
+
 This strategy is intentional for a packaged, single-user, local-only
 application. A schema change must remain safe to run repeatedly against both an
 empty database and every supported prior local revision.
@@ -113,10 +122,13 @@ fingerprint, and statement text can contain repeated identical rows. These
 checksums are review/deduplication signals, not safe ledger primary keys.
 
 Fresh databases receive reviewed `CHECK` and foreign-key actions from the ORM
-metadata. Older private databases receive equivalent restart-safe write guards
-and the revision-12 identity indexes. Remaining historical foreign-key action
-normalization requires a later reviewed table-rebuild migration; application
-deletion continues to use the centralized dependency order until then.
+metadata. Older private databases receive equivalent restart-safe write guards,
+revision-12 identity indexes, and revision-19 compatibility triggers for every
+reviewed cascade or set-null action. The trigger approach avoids a destructive
+SQLite table rebuild while preserving database-level behavior. Application
+deletion continues to use the centralized dependency order so privacy-reset
+flows can explicitly void goal entries and report per-table effects before the
+database fallback runs.
 
 The retired `backend/alembic` files were removed because production never ran
 them and their chain could not bootstrap the current schema. Running Alembic is

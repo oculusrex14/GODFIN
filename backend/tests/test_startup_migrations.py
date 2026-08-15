@@ -264,6 +264,189 @@ def test_revision_18_adds_recoverable_deletion_markers_idempotently(tmp_path):
         connection.close()
 
 
+def test_revision_19_applies_transaction_and_goal_actions_to_legacy_schema(
+    tmp_path,
+):
+    db_path = tmp_path / "revision-19-ledger.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(
+            """
+            CREATE TABLE transactions (id TEXT PRIMARY KEY);
+            CREATE TABLE goals (id TEXT PRIMARY KEY);
+            CREATE TABLE audit_log (
+                id TEXT PRIMARY KEY,
+                transaction_id TEXT REFERENCES transactions(id)
+            );
+            CREATE TABLE classification_corrections (
+                id TEXT PRIMARY KEY,
+                transaction_id TEXT NOT NULL REFERENCES transactions(id)
+            );
+            CREATE TABLE goal_contributions (
+                id TEXT PRIMARY KEY,
+                goal_id TEXT NOT NULL REFERENCES goals(id),
+                source_transaction_id TEXT REFERENCES transactions(id)
+            );
+            CREATE TABLE goal_contribution_suggestions (
+                id TEXT PRIMARY KEY,
+                transaction_id TEXT NOT NULL REFERENCES transactions(id),
+                goal_id TEXT REFERENCES goals(id)
+            );
+            CREATE TABLE transaction_splits (
+                id TEXT PRIMARY KEY,
+                parent_transaction_id TEXT NOT NULL REFERENCES transactions(id)
+            );
+            CREATE TABLE transfer_matches (
+                id TEXT PRIMARY KEY,
+                debit_transaction_id TEXT NOT NULL REFERENCES transactions(id),
+                credit_transaction_id TEXT NOT NULL REFERENCES transactions(id)
+            );
+
+            INSERT INTO transactions VALUES ('tx-delete'), ('tx-peer');
+            INSERT INTO goals VALUES ('goal-delete');
+            INSERT INTO audit_log VALUES ('audit', 'tx-delete');
+            INSERT INTO classification_corrections VALUES ('correction', 'tx-delete');
+            INSERT INTO goal_contributions
+            VALUES ('contribution', 'goal-delete', 'tx-delete');
+            INSERT INTO goal_contribution_suggestions
+            VALUES ('suggestion', 'tx-delete', 'goal-delete');
+            INSERT INTO transaction_splits VALUES ('split', 'tx-delete');
+            INSERT INTO transfer_matches
+            VALUES ('transfer', 'tx-delete', 'tx-peer');
+            """
+        )
+
+        startup_migrations._apply_revision_19(connection)
+        startup_migrations._apply_revision_19(connection)
+        startup_migrations._validate_revision_19(connection)
+
+        connection.execute("DELETE FROM transactions WHERE id = 'tx-delete'")
+        assert connection.execute(
+            "SELECT transaction_id FROM audit_log WHERE id = 'audit'"
+        ).fetchone() == (None,)
+        assert connection.execute(
+            "SELECT source_transaction_id FROM goal_contributions "
+            "WHERE id = 'contribution'"
+        ).fetchone() == (None,)
+        for table in (
+            "classification_corrections",
+            "goal_contribution_suggestions",
+            "transaction_splits",
+            "transfer_matches",
+        ):
+            assert connection.execute(
+                f'SELECT COUNT(*) FROM "{table}"'
+            ).fetchone() == (0,)
+
+        connection.execute(
+            "INSERT INTO goal_contribution_suggestions "
+            "VALUES ('remaining-suggestion', 'tx-peer', 'goal-delete')"
+        )
+        connection.execute("DELETE FROM goals WHERE id = 'goal-delete'")
+        assert connection.execute(
+            "SELECT COUNT(*) FROM goal_contributions"
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT goal_id FROM goal_contribution_suggestions "
+            "WHERE id = 'remaining-suggestion'"
+        ).fetchone() == (None,)
+        assert connection.execute("PRAGMA foreign_key_check").fetchone() is None
+    finally:
+        connection.close()
+
+
+def test_revision_19_applies_projection_actions_to_legacy_schema(tmp_path):
+    db_path = tmp_path / "revision-19-projections.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(
+            """
+            CREATE TABLE accounts (id TEXT PRIMARY KEY);
+            CREATE TABLE audit_sessions (id TEXT PRIMARY KEY);
+            CREATE TABLE subscriptions (id TEXT PRIMARY KEY);
+            CREATE TABLE net_worth_items (id TEXT PRIMARY KEY);
+            CREATE TABLE monthly_aggregates (
+                id TEXT PRIMARY KEY,
+                account_id TEXT REFERENCES accounts(id),
+                audit_session_id TEXT REFERENCES audit_sessions(id)
+            );
+            CREATE TABLE recurring_patterns (
+                id TEXT PRIMARY KEY,
+                account_id TEXT REFERENCES accounts(id)
+            );
+            CREATE TABLE transactions (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(id),
+                audit_session_id TEXT REFERENCES audit_sessions(id)
+            );
+            CREATE TABLE subscription_suggestions (
+                id TEXT PRIMARY KEY,
+                recurring_pattern_id TEXT NOT NULL REFERENCES recurring_patterns(id),
+                confirmed_subscription_id TEXT REFERENCES subscriptions(id)
+            );
+            CREATE TABLE net_worth_quotes (
+                id TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL REFERENCES net_worth_items(id)
+            );
+
+            INSERT INTO accounts VALUES ('account');
+            INSERT INTO audit_sessions VALUES ('audit');
+            INSERT INTO subscriptions VALUES ('subscription');
+            INSERT INTO net_worth_items VALUES ('item');
+            INSERT INTO monthly_aggregates VALUES ('aggregate', 'account', 'audit');
+            INSERT INTO recurring_patterns VALUES ('pattern', 'account');
+            INSERT INTO transactions VALUES ('tx', 'account', 'audit');
+            INSERT INTO subscription_suggestions
+            VALUES ('suggestion', 'pattern', 'subscription');
+            INSERT INTO net_worth_quotes VALUES ('quote', 'item');
+            """
+        )
+
+        startup_migrations._apply_revision_19(connection)
+        startup_migrations._validate_revision_19(connection)
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("DELETE FROM accounts WHERE id = 'account'")
+        assert connection.execute(
+            "SELECT COUNT(*) FROM monthly_aggregates"
+        ).fetchone() == (1,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM recurring_patterns"
+        ).fetchone() == (1,)
+
+        connection.execute("DELETE FROM audit_sessions WHERE id = 'audit'")
+        assert connection.execute(
+            "SELECT audit_session_id FROM transactions WHERE id = 'tx'"
+        ).fetchone() == (None,)
+        assert connection.execute(
+            "SELECT audit_session_id FROM monthly_aggregates WHERE id = 'aggregate'"
+        ).fetchone() == (None,)
+
+        connection.execute("DELETE FROM subscriptions WHERE id = 'subscription'")
+        assert connection.execute(
+            "SELECT confirmed_subscription_id FROM subscription_suggestions"
+        ).fetchone() == (None,)
+        connection.execute("DELETE FROM recurring_patterns WHERE id = 'pattern'")
+        assert connection.execute(
+            "SELECT COUNT(*) FROM subscription_suggestions"
+        ).fetchone() == (0,)
+        connection.execute("DELETE FROM net_worth_items WHERE id = 'item'")
+        assert connection.execute(
+            "SELECT COUNT(*) FROM net_worth_quotes"
+        ).fetchone() == (0,)
+
+        connection.execute("DELETE FROM transactions WHERE id = 'tx'")
+        connection.execute("DELETE FROM accounts WHERE id = 'account'")
+        assert connection.execute(
+            "SELECT COUNT(*) FROM monthly_aggregates"
+        ).fetchone() == (0,)
+        assert connection.execute("PRAGMA foreign_key_check").fetchone() is None
+    finally:
+        connection.close()
+
+
 def _create_legacy_database(path: Path) -> None:
     connection = sqlite3.connect(path)
     try:

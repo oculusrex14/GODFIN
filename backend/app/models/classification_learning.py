@@ -53,7 +53,7 @@ class ClassificationCorrection(Base):
     )
     transaction_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("transactions.id"),
+        ForeignKey("transactions.id", ondelete="CASCADE"),
         nullable=False,
     )
     merchant_normalized: Mapped[str] = mapped_column(String(255), nullable=False)

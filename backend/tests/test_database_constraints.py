@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
 from app.models.account import Account
@@ -270,3 +271,29 @@ def test_recurring_delete_cascades_suggestion_and_subscription_delete_unlinks(db
     db_session.delete(pattern)
     db_session.commit()
     assert db_session.get(SubscriptionSuggestion, suggestion_id) is None
+
+
+def test_fresh_schema_declares_reviewed_foreign_key_delete_actions(db_session):
+    inspector = inspect(db_session.bind)
+
+    expected = {
+        ("audit_log", "transaction_id"): "SET NULL",
+        ("classification_corrections", "transaction_id"): "CASCADE",
+        ("goal_contributions", "goal_id"): "CASCADE",
+        ("goal_contributions", "source_transaction_id"): "SET NULL",
+        ("goal_contribution_suggestions", "transaction_id"): "CASCADE",
+        ("goal_contribution_suggestions", "goal_id"): "SET NULL",
+        ("transaction_splits", "parent_transaction_id"): "CASCADE",
+        ("transfer_matches", "debit_transaction_id"): "CASCADE",
+        ("transfer_matches", "credit_transaction_id"): "CASCADE",
+    }
+    actual = {}
+    for table, column in expected:
+        for foreign_key in inspector.get_foreign_keys(table):
+            if foreign_key["constrained_columns"] == [column]:
+                actual[(table, column)] = foreign_key.get("options", {}).get(
+                    "ondelete"
+                )
+                break
+
+    assert actual == expected
