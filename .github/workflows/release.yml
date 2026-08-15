@@ -11,8 +11,7 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: release-${{ github.ref }}
@@ -47,16 +46,21 @@ jobs:
             require_signing: "false"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
             backend/requirements-lock.txt
             backend/requirements-build-lock.txt
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "22"
           cache: npm
@@ -64,6 +68,16 @@ jobs:
             frontend/package-lock.json
             desktop/package-lock.json
       - run: python -m pip install --require-hashes -r backend/requirements-build-lock.txt
+      - name: Bind the build to the exact versioned tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "${RELEASE_TAG#v}" = "$(node -p "require('./desktop/package.json').version")"
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "$RELEASE_TAG")"
+      - run: python scripts/verify_dependency_boundaries.py
+      - run: python scripts/verify_supply_chain_artifacts.py
       - run: npm ci
         working-directory: frontend
       - run: npm ci
@@ -105,7 +119,7 @@ jobs:
         working-directory: desktop
         env:
           GODFIN_REQUIRE_SIGNING: ${{ matrix.require_signing }}
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.artifact }}
           path: |
@@ -123,18 +137,35 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
-      - uses: actions/download-artifact@v8
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
       - name: Stage uniquely named release assets
         run: node packaging/stage-release-assets.mjs --input artifacts --output release-assets
+      - name: Add exact license and supply-chain evidence
+        shell: bash
+        run: |
+          cp LICENSE release-assets/LICENSE
+          cp THIRD_PARTY_NOTICES.md release-assets/THIRD_PARTY_NOTICES.md
+          cp sbom/godfin.cdx.json release-assets/godfin.cdx.json
+          cp supply-chain/legal-clearance.json release-assets/legal-clearance.json
+          python scripts/verify_supply_chain_artifacts.py --artifact-dir release-assets
       - name: Bind release to database compatibility and its immediate predecessor
         shell: bash
         run: |
@@ -156,6 +187,23 @@ jobs:
             --arm "$arm_dmg" \
             --intel "$intel_dmg" \
             --output release-assets/godfin.rb
+      - name: Bind every candidate byte to the workflow and source commit
+        shell: bash
+        run: |
+          node packaging/create-release-provenance.mjs \
+            --input release-assets \
+            --output release-assets/release-provenance.intoto.json \
+            --version "${RELEASE_TAG#v}" \
+            --repository "${{ github.repository }}" \
+            --commit "$(git rev-parse HEAD)" \
+            --ref "refs/tags/${RELEASE_TAG}" \
+            --workflow ".github/workflows/release.yml" \
+            --run-id "${{ github.run_id }}" \
+            --run-attempt "${{ github.run_attempt }}" \
+            --generated-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node packaging/verify-release-provenance.mjs \
+            --input release-assets \
+            --provenance release-assets/release-provenance.intoto.json
       - name: Generate SHA-256 checksums
         shell: bash
         run: |
@@ -166,11 +214,25 @@ jobs:
               | xargs -0 sha256sum \
               > SHA256SUMS.txt
           )
+      - name: Attest provenance in GitHub Enterprise Cloud when enabled
+        if: vars.GODFIN_ENABLE_GITHUB_ATTESTATIONS == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: release-assets/SHA256SUMS.txt
+      - name: Attest the CycloneDX SBOM when enabled
+        if: vars.GODFIN_ENABLE_GITHUB_ATTESTATIONS == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: release-assets/SHA256SUMS.txt
+          sbom-path: release-assets/godfin.cdx.json
       - name: Create private draft release with all assets
         shell: bash
         run: |
           mapfile -d '' files < <(find release-assets -maxdepth 1 -type f -print0)
-          gh release delete "$RELEASE_TAG" --yes --cleanup-tag=false 2>/dev/null || true
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; immutable candidates are never rebuilt in place."
+            exit 1
+          fi
           gh release create "$RELEASE_TAG" \
             --draft \
             --verify-tag \

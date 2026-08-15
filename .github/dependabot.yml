@@ -1,0 +1,37 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      official-actions:
+        patterns: ["actions/*"]
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    groups:
+      frontend-dependencies:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/website"
+    schedule:
+      interval: weekly
+    groups:
+      website-dependencies:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/desktop"
+    schedule:
+      interval: weekly
+    groups:
+      desktop-dependencies:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/playwright-tests"
+    schedule:
+      interval: weekly
+    groups:
+      browser-test-dependencies:
+        patterns: ["*"]

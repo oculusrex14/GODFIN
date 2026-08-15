@@ -38,7 +38,13 @@ jobs:
       R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
       R2_BUCKET: ${{ secrets.R2_RELEASE_BUCKET }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
       - name: Enforce the staged-rollout stop condition
         shell: bash
         run: |
@@ -52,6 +58,24 @@ jobs:
       - name: Verify release checksums
         shell: bash
         run: (cd artifacts && sha256sum --check SHA256SUMS.txt)
+      - name: Verify exact provenance, SBOM, notices, and legal clearance
+        run: |
+          node packaging/verify-release-provenance.mjs \
+            --input artifacts \
+            --provenance artifacts/release-provenance.intoto.json
+          python scripts/verify_supply_chain_artifacts.py \
+            --artifact-dir artifacts \
+            --promotion
+      - name: Verify GitHub attestations when enabled
+        if: vars.GODFIN_ENABLE_GITHUB_ATTESTATIONS == 'true'
+        shell: bash
+        run: |
+          while read -r _ asset; do
+            asset="${asset#\*}"
+            asset="${asset#./}"
+            gh attestation verify "artifacts/${asset}" \
+              --repo "${{ github.repository }}"
+          done < artifacts/SHA256SUMS.txt
       - name: Reject unsigned or incomplete release sets
         shell: bash
         run: |
@@ -63,6 +87,10 @@ jobs:
           test -f artifacts/windows-x64-latest.yml
           test -f artifacts/linux-x64-latest-linux.yml
           test -f artifacts/release-compatibility.json
+          test -f artifacts/release-provenance.intoto.json
+          test -f artifacts/godfin.cdx.json
+          test -f artifacts/THIRD_PARTY_NOTICES.md
+          test -f artifacts/legal-clearance.json
       - name: Require the same staged tag before advancing its rollout
         if: inputs.rollout_percentage != '5'
         shell: bash

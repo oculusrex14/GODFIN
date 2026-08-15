@@ -12,6 +12,12 @@ const REQUIRED_SHARED_ASSETS = [
   "model-registry.json.sig",
   "model-registry-public-key.txt",
 ];
+const REQUIRED_LEGAL_ASSETS = new Map([
+  ["LICENSE", "LICENSE"],
+  ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
+  ["godfin.cdx.json", "sbom/godfin.cdx.json"],
+  ["legal-clearance.json", "supply-chain/legal-clearance.json"],
+]);
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
@@ -22,6 +28,11 @@ function normalizedPath(value) {
 function packagedCandidates(files, name) {
   const suffix = `/_internal/shared/${name}`;
   return files.filter((file) => normalizedPath(file).endsWith(suffix));
+}
+
+function packagedLegalCandidates(files, name) {
+  const suffix = `/resources/legal/${name}`.toLowerCase();
+  return files.filter((file) => normalizedPath(file).toLowerCase().endsWith(suffix));
 }
 
 async function assertByteIdentical(source, packaged, name) {
@@ -55,6 +66,20 @@ export async function assertPackageIntegrity(
       );
     }
     packaged.set(name, candidates[0]);
+  }
+
+  for (const [name, sourcePath] of REQUIRED_LEGAL_ASSETS) {
+    const candidates = packagedLegalCandidates(files, name);
+    if (candidates.length !== 1) {
+      throw new Error(
+        `Package must contain exactly one reviewed legal asset: ${name}`,
+      );
+    }
+    await assertByteIdentical(
+      path.join(projectRoot, sourcePath),
+      candidates[0],
+      name,
+    );
   }
 
   const payload = await readFile(packaged.get("model-registry.json"));
@@ -102,5 +127,6 @@ export async function assertPackageIntegrity(
     registryVersion: registry.registry_version,
     pinnedModels: models.length,
     packageCopies: packagedCandidates(files, "model-registry.json").length,
+    legalAssets: REQUIRED_LEGAL_ASSETS.size,
   };
 }

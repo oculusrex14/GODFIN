@@ -24,7 +24,7 @@ non-authoritative.
 Use the repository-managed Python 3.12 environment and locked Node installs:
 
 ```bash
-backend/venv/bin/python -m pip install --require-hashes -r backend/requirements-lock.txt
+backend/venv/bin/python -m pip install --require-hashes -r backend/requirements-test-lock.txt
 npm ci --prefix frontend
 npm ci --prefix website
 npm ci --prefix desktop

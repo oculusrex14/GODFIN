@@ -86,7 +86,7 @@ git clone <private-repository-url> GODFIN
 cd GODFIN
 python3.12 -m venv backend/venv
 backend/venv/bin/python -m pip install --upgrade pip
-backend/venv/bin/python -m pip install --require-hashes -r backend/requirements-lock.txt
+backend/venv/bin/python -m pip install --require-hashes -r backend/requirements-test-lock.txt
 npm ci --prefix frontend
 npm ci --prefix website
 npm ci --prefix desktop

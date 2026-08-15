@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "policy_note": "Engineering policy only. Qualified counsel must approve the exact SBOM before any public promotion.",
+  "permissive_license_ids": [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BlueOak-1.0.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MIT-CMU",
+    "PSF-2.0",
+    "Python-2.0",
+    "Unlicense",
+    "WTFPL",
+    "Zlib"
+  ],
+  "conditional_license_ids": {
+    "CC-BY-4.0": "Preserve attribution and indicate changes where applicable.",
+    "GPL-2.0-or-later": "Build-tool or redistribution terms require an exact-scope legal review.",
+    "LGPL-3.0-only": "Desktop redistribution requires license text, relinking/source-obligation review, and counsel approval.",
+    "LGPL-3.0-or-later": "Binary redistribution requires license text, relinking/source-obligation review, and counsel approval.",
+    "MPL-2.0": "Preserve notices and make modified covered files available when the license requires it."
+  },
+  "allowed_exception_ids": ["Bootloader-exception"],
+  "prohibited_license_ids": [
+    "AGPL-3.0-only",
+    "AGPL-3.0-or-later",
+    "Commons-Clause",
+    "SSPL-1.0"
+  ]
+}

@@ -17,7 +17,7 @@
     "dist:linux": "npm run build:assets && electron-builder --linux --publish never",
     "verify:package": "node scripts/verify-package.mjs",
     "test:privacy": "node --test scripts/package-*.test.mjs",
-    "test:update": "node --test ../packaging/update-feed.test.mjs",
+    "test:update": "node --test ../packaging/update-feed.test.mjs ../packaging/release-provenance.test.mjs ../packaging/release-workflow-contract.test.mjs",
     "audit:prod": "npm audit --omit=dev"
   },
   "dependencies": {
@@ -51,6 +51,22 @@
       {
         "from": "../backend/dist/godfin-backend",
         "to": "backend/godfin-backend"
+      },
+      {
+        "from": "../LICENSE",
+        "to": "legal/LICENSE"
+      },
+      {
+        "from": "../THIRD_PARTY_NOTICES.md",
+        "to": "legal/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "../sbom/godfin.cdx.json",
+        "to": "legal/godfin.cdx.json"
+      },
+      {
+        "from": "../supply-chain/legal-clearance.json",
+        "to": "legal/legal-clearance.json"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",

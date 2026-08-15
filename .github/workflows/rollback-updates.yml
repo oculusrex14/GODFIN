@@ -33,7 +33,7 @@ jobs:
       R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
       R2_BUCKET: ${{ secrets.R2_RELEASE_BUCKET }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Download current and predecessor signed assets
         run: |
           gh release download "${{ inputs.current_tag }}" --dir current-artifacts
@@ -43,6 +43,12 @@ jobs:
         run: |
           (cd current-artifacts && sha256sum --check SHA256SUMS.txt)
           (cd target-artifacts && sha256sum --check SHA256SUMS.txt)
+          node packaging/verify-release-provenance.mjs \
+            --input current-artifacts \
+            --provenance current-artifacts/release-provenance.intoto.json
+          node packaging/verify-release-provenance.mjs \
+            --input target-artifacts \
+            --provenance target-artifacts/release-provenance.intoto.json
       - name: Require the declared immediate predecessor transition
         run: |
           node packaging/verify-rollback-transition.mjs \
