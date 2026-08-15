@@ -85,9 +85,157 @@ class GoalSuggestionDecision(BaseModel):
     goal_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
 
 
+class GoalResponse(BaseModel):
+    id: str
+    name: str
+    target_amount: float
+    current_saved: float
+    deadline_date: str
+    pressure_level: str
+    annual_return_rate: float
+    minimum_flexible_floor: float
+    is_active: bool
+    contribution_count: int
+    pending_suggestion_count: int
+
+
+class GoalCreatedResponse(BaseModel):
+    id: str
+    name: str
+    target_amount: float
+    current_saved: float
+    deadline_date: str
+
+
+class GoalUpdatedResponse(BaseModel):
+    id: str
+    status: str
+
+
+class GoalContributionResponse(BaseModel):
+    id: str
+    goal_id: str
+    amount: float
+    contribution_date: str
+    entry_type: str
+    source_type: str
+    source_transaction_id: str | None
+    note: str | None
+    is_voided: bool
+    voided_at: str | None
+    void_reason: str | None
+    created_at: str
+
+
+class GoalBalanceUpdateResponse(BaseModel):
+    contribution: GoalContributionResponse
+    current_saved: float
+
+
+class GoalSuggestionResponse(BaseModel):
+    id: str
+    transaction_id: str
+    goal_id: str | None
+    amount: float
+    deposit_type: str
+    evidence: str
+    confidence: float
+    status: str
+    decision_note: str | None
+    transaction_date: str | None
+    merchant: str | None
+
+
+class GoalSuggestionListResponse(BaseModel):
+    enabled: bool
+    items: list[GoalSuggestionResponse]
+
+
+class GoalSuggestionDecisionResponse(BaseModel):
+    suggestion: GoalSuggestionResponse
+    contribution: GoalContributionResponse | None
+    current_saved: float | None
+
+
+class SimulationAssumptionsResponse(BaseModel):
+    contribution_timing: str
+    schedule_basis: str
+    first_contribution_date: str | None
+    last_contribution_date: str | None
+    scheduled_contribution_count: int
+    amount_due_before_first_month_end: bool
+    annual_return_rate: float
+    monthly_return_rate: float
+    minimum_flexible_floor: float
+    history_window_months: int
+    minimum_complete_months: int
+    existing_savings_compounded_separately: bool
+
+
+class GoalSimulationResponse(BaseModel):
+    required_monthly: float
+    flexible_spend: float
+    max_saveable: float
+    is_feasible: bool | None
+    months_remaining: int
+    extended_deadline_months: int | None
+    pressure_savings: dict[str, float]
+    baseline_surplus: float
+    reducible_flexible_spend: float
+    coverage_months: int
+    coverage_start: str | None
+    coverage_end: str | None
+    capacity_status: str
+    calculation_version: str
+    assumptions: SimulationAssumptionsResponse
+    caveat: str
+
+
+class RecurringPatternResponse(BaseModel):
+    id: str
+    merchant: str
+    avg_amount: float
+    frequency: str
+    category: str | None
+    last_occurrence: str | None
+    next_expected: str | None
+    times_detected: int
+    confidence: float
+    evidence_count: int
+    detection_status: str
+    review_required: bool
+
+
+class RecurringDetectionResponse(BaseModel):
+    detected: int
+    created: int
+    updated: int
+    deactivated: int
+    scanned: int
+    subscription_suggestions_created: int
+
+
+class FinancialProfileResponse(BaseModel):
+    impulse_index: float | None
+    lifestyle_inflation: float | None
+    fixed_expense_ratio: float | None
+    recurring_burden: float | None
+    subscription_dependency: float | None
+    savings_rate: float | None
+    data_status: str
+    period_start: str | None
+    period_end: str | None
+    comparison_start: str | None
+    comparison_end: str | None
+    transaction_count: int
+    comparison_transaction_count: int
+    calculation_version: str
+    caveat: str
+
+
 # --- Goals ---
 
-@router.get("/goals")
+@router.get("/goals", response_model=list[GoalResponse])
 def list_goals(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -120,7 +268,7 @@ def list_goals(
     return response
 
 
-@router.post("/goals", status_code=201)
+@router.post("/goals", response_model=GoalCreatedResponse, status_code=201)
 def create_goal(
     body: GoalCreate,
     db: Session = Depends(get_db),
@@ -164,7 +312,7 @@ def create_goal(
     }
 
 
-@router.put("/goals/{goal_id}")
+@router.put("/goals/{goal_id}", response_model=GoalUpdatedResponse)
 def update_goal(
     goal_id: str,
     body: GoalUpdate,
@@ -216,7 +364,10 @@ def update_goal(
     return {"id": goal.id, "status": "updated"}
 
 
-@router.get("/goals/{goal_id}/contributions")
+@router.get(
+    "/goals/{goal_id}/contributions",
+    response_model=list[GoalContributionResponse],
+)
 def list_goal_contributions(
     goal_id: str,
     include_voided: bool = False,
@@ -236,7 +387,11 @@ def list_goal_contributions(
     return [contribution_to_dict(entry) for entry in entries]
 
 
-@router.post("/goals/{goal_id}/contributions", status_code=201)
+@router.post(
+    "/goals/{goal_id}/contributions",
+    response_model=GoalBalanceUpdateResponse,
+    status_code=201,
+)
 def create_goal_contribution(
     goal_id: str,
     body: GoalContributionCreate,
@@ -271,7 +426,8 @@ def create_goal_contribution(
 
 
 @router.post(
-    "/goals/{goal_id}/contributions/{contribution_id}/void"
+    "/goals/{goal_id}/contributions/{contribution_id}/void",
+    response_model=GoalBalanceUpdateResponse,
 )
 def void_contribution(
     goal_id: str,
@@ -302,7 +458,10 @@ def void_contribution(
     }
 
 
-@router.get("/goal-contribution-suggestions")
+@router.get(
+    "/goal-contribution-suggestions",
+    response_model=GoalSuggestionListResponse,
+)
 def list_goal_contribution_suggestions(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -338,7 +497,10 @@ def list_goal_contribution_suggestions(
     }
 
 
-@router.post("/goal-contribution-suggestions/{suggestion_id}/decision")
+@router.post(
+    "/goal-contribution-suggestions/{suggestion_id}/decision",
+    response_model=GoalSuggestionDecisionResponse,
+)
 def decide_goal_contribution_suggestion(
     suggestion_id: str,
     body: GoalSuggestionDecision,
@@ -398,7 +560,7 @@ def delete_goal(
     db.commit()
 
 
-@router.post("/goals/{goal_id}/simulate")
+@router.post("/goals/{goal_id}/simulate", response_model=GoalSimulationResponse)
 def simulate(
     goal_id: str,
     db: Session = Depends(get_db),
@@ -439,7 +601,7 @@ def simulate(
 
 # --- Recurring ---
 
-@router.get("/recurring")
+@router.get("/recurring", response_model=list[RecurringPatternResponse])
 def list_recurring(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -470,7 +632,7 @@ def list_recurring(
     ]
 
 
-@router.post("/recurring/detect")
+@router.post("/recurring/detect", response_model=RecurringDetectionResponse)
 def trigger_detection(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -488,7 +650,7 @@ def trigger_detection(
 
 # --- Financial Profile ---
 
-@router.get("/profile")
+@router.get("/profile", response_model=FinancialProfileResponse)
 def financial_profile(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -515,7 +677,7 @@ def financial_profile(
 
 # --- Elasticity ---
 
-@router.get("/elasticity")
+@router.get("/elasticity", response_model=dict[str, str])
 def get_elasticity(
     _user: bool = Depends(get_current_user),
 ):
