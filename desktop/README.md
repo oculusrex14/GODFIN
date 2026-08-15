@@ -10,9 +10,11 @@ Electron is a hardened shell around two bundled, local artifacts:
 - `backend/dist/godfin-backend` is a native PyInstaller bundle listening only
   on `127.0.0.1:5100`.
 
-The renderer has no Node.js integration or preload bridge. Context isolation,
-Chromium sandboxing, navigation restrictions, denied permissions, CSP, a
-single-instance lock, and Electron fuse hardening are enabled.
+The renderer has no Node.js integration. A context-isolated, one-method preload
+bridge can only ask the main process to complete a short-lived, PIN-authorized
+backup restore. Context isolation, Chromium sandboxing, navigation restrictions,
+denied permissions, CSP, a single-instance lock, and Electron fuse hardening are
+enabled.
 
 ## Local packaging
 

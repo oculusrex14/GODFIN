@@ -725,6 +725,13 @@ export function fetchBackups() {
   return apiFetch('/settings/backups');
 }
 
+export function prepareBackupRestore(filename, pin) {
+  return apiFetch(`/settings/backups/${encodeURIComponent(filename)}/prepare-restore`, {
+    method: 'POST',
+    body: JSON.stringify({ pin, confirmation: 'RESTORE' }),
+  });
+}
+
 export function fetchDeveloperMode() {
   return apiFetch('/settings/developer');
 }

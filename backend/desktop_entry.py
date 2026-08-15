@@ -14,6 +14,8 @@ import uvicorn
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="GODFIN local desktop backend")
     parser.add_argument("--prepare-update-transition", action="store_true")
+    parser.add_argument("--complete-backup-restore", action="store_true")
+    parser.add_argument("--restore-token")
     parser.add_argument("--current-version")
     parser.add_argument("--target-version")
     return parser.parse_args()
@@ -47,6 +49,24 @@ def main() -> None:
     )
 
     paths = _recovery_paths()
+    if arguments.complete_backup_restore:
+        if not arguments.restore_token:
+            raise RuntimeError("The one-use restore token is required.")
+        from app.core.restore_request import (
+            complete_restore_request,
+            default_restore_request_path,
+        )
+        from app.core.startup_migrations import CURRENT_SCHEMA_REVISION
+
+        result = complete_restore_request(
+            backup_dir=paths["backup_dir"],
+            database_path=paths["db_path"],
+            request_path=default_restore_request_path(paths["db_path"]),
+            restore_token=arguments.restore_token,
+            maximum_schema_revision=CURRENT_SCHEMA_REVISION,
+        )
+        print(json.dumps(result, sort_keys=True))
+        return
     if arguments.prepare_update_transition:
         if not arguments.current_version or not arguments.target_version:
             raise RuntimeError("Both update versions are required.")

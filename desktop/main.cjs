@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, dialog, net, protocol, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { existsSync, readFileSync } = require("node:fs");
 const { randomBytes } = require("node:crypto");
@@ -55,7 +55,7 @@ protocol.registerSchemesAsPrivileged([
 
 let backendProcess = null;
 let mainWindow = null;
-let quittingForUpdate = false;
+let backendMaintenanceInProgress = false;
 
 function frontendRoot() {
   return app.isPackaged
@@ -154,17 +154,10 @@ function backendEnvironment() {
   };
 }
 
-function backendMaintenanceCommand(currentVersion, targetVersion) {
-  const argumentsForTransition = [
-    "--prepare-update-transition",
-    "--current-version",
-    currentVersion,
-    "--target-version",
-    targetVersion,
-  ];
+function backendMaintenanceCommand(maintenanceArguments) {
   if (app.isPackaged) {
     const launch = backendCommand();
-    return { ...launch, args: argumentsForTransition };
+    return { ...launch, args: maintenanceArguments };
   }
   const projectRoot = path.join(__dirname, "..");
   const python = process.platform === "win32"
@@ -172,7 +165,7 @@ function backendMaintenanceCommand(currentVersion, targetVersion) {
     : path.join(projectRoot, "backend", "venv", "bin", "python");
   return {
     command: python,
-    args: [path.join(projectRoot, "backend", "desktop_entry.py"), ...argumentsForTransition],
+    args: [path.join(projectRoot, "backend", "desktop_entry.py"), ...maintenanceArguments],
     cwd: path.join(projectRoot, "backend"),
   };
 }
@@ -192,7 +185,7 @@ function startBackend() {
   });
   backendProcess.once("exit", (code, signal) => {
     backendProcess = null;
-    if (!quittingForUpdate && !app.isQuitting && code !== 0) {
+    if (!backendMaintenanceInProgress && !app.isQuitting && code !== 0) {
       dialog.showErrorBox(
         "GODFIN backend stopped",
         `The local finance service exited (${signal || code}). Restart GODFIN to continue.`,
@@ -271,6 +264,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      preload: path.join(__dirname, "preload.cjs"),
       devTools: !app.isPackaged,
       spellcheck: false,
     },
@@ -348,7 +342,7 @@ function configureUpdater() {
   }, 10_000);
 }
 
-function stopBackendForUpdate(timeoutMs = 10_000) {
+function stopBackendForMaintenance(timeoutMs = 10_000) {
   if (!backendProcess) return Promise.resolve();
   const child = backendProcess;
   return new Promise((resolve, reject) => {
@@ -370,7 +364,13 @@ function stopBackendForUpdate(timeoutMs = 10_000) {
 }
 
 function runUpdateMaintenance(currentVersion, targetVersion, timeoutMs = 120_000) {
-  const launch = backendMaintenanceCommand(currentVersion, targetVersion);
+  const launch = backendMaintenanceCommand([
+    "--prepare-update-transition",
+    "--current-version",
+    currentVersion,
+    "--target-version",
+    targetVersion,
+  ]);
   return new Promise((resolve, reject) => {
     const child = spawn(launch.command, launch.args, {
       cwd: launch.cwd,
@@ -418,13 +418,13 @@ function runUpdateMaintenance(currentVersion, targetVersion, timeoutMs = 120_000
 }
 
 async function installDownloadedUpdate(currentVersion, targetVersion) {
-  quittingForUpdate = true;
+  backendMaintenanceInProgress = true;
   try {
-    await stopBackendForUpdate();
+    await stopBackendForMaintenance();
     await runUpdateMaintenance(currentVersion, targetVersion);
     autoUpdater.quitAndInstall();
   } catch (error) {
-    quittingForUpdate = false;
+    backendMaintenanceInProgress = false;
     try {
       startBackend();
       await waitForBackend();
@@ -439,6 +439,94 @@ async function installDownloadedUpdate(currentVersion, targetVersion) {
       buttons: ["OK"],
     });
   }
+}
+
+function runRestoreMaintenance(restoreToken, timeoutMs = 120_000) {
+  const launch = backendMaintenanceCommand([
+    "--complete-backup-restore",
+    "--restore-token",
+    restoreToken,
+  ]);
+  return new Promise((resolve, reject) => {
+    const child = spawn(launch.command, launch.args, {
+      cwd: launch.cwd,
+      env: backendEnvironment(),
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    child.stdout.on("data", (chunk) => {
+      stdout = `${stdout}${chunk}`.slice(-16_384);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-16_384);
+    });
+    const timeout = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    child.once("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error("The local restore tool could not start."));
+    });
+    child.once("exit", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (code !== 0) {
+        console.error("Backup restore failed", stderr);
+        reject(new Error("GODFIN could not restore the selected backup safely."));
+        return;
+      }
+      try {
+        const result = JSON.parse(stdout.trim());
+        if (result?.status !== "restored") throw new Error("unknown restore result");
+        resolve(result);
+      } catch {
+        reject(new Error("The local restore tool returned an invalid result."));
+      }
+    });
+  });
+}
+
+function configureDesktopBridge() {
+  ipcMain.handle("godfin:restore-backup", async (event, restoreToken) => {
+    const senderUrl = event.senderFrame?.url || "";
+    const trustedDevelopmentRenderer = !app.isPackaged
+      && senderUrl.startsWith("http://127.0.0.1:5200");
+    if (
+      event.sender !== mainWindow?.webContents
+      || (!senderUrl.startsWith(APP_ORIGIN) && !trustedDevelopmentRenderer)
+      || typeof restoreToken !== "string"
+      || !/^[A-Za-z0-9_-]{40,128}$/.test(restoreToken)
+    ) {
+      throw new Error("Restore request rejected.");
+    }
+
+    backendMaintenanceInProgress = true;
+    try {
+      await stopBackendForMaintenance();
+      const result = await runRestoreMaintenance(restoreToken);
+      startBackend();
+      await waitForBackend();
+      backendMaintenanceInProgress = false;
+      mainWindow?.webContents.reload();
+      return result;
+    } catch (error) {
+      try {
+        if (!backendProcess) {
+          startBackend();
+          await waitForBackend();
+        }
+      } catch (restartError) {
+        console.error("Backend restart after restore failure failed", restartError);
+      }
+      backendMaintenanceInProgress = false;
+      throw new Error(error?.message || "The backup was not restored.");
+    }
+  });
 }
 
 function stopBackend() {
@@ -463,6 +551,7 @@ if (!app.requestSingleInstanceLock()) {
       callback(false);
     });
     configureBackendRequestTrust();
+    configureDesktopBridge();
     registerAppProtocol();
     try {
       startBackend();

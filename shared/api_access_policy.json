@@ -207,6 +207,9 @@
     "GET /api/v1/settings/backups": {
       "access": "authenticated_free"
     },
+    "POST /api/v1/settings/backups/{filename}/prepare-restore": {
+      "access": "authenticated_free"
+    },
     "GET /api/v1/settings/classification-memory": {
       "access": "authenticated_free"
     },

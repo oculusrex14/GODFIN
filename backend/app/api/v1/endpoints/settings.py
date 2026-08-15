@@ -19,6 +19,11 @@ from app.core.errors import LocalOperationError
 from app.core.encryption import SecretDecryptionError, decrypt, get_encryption_health
 from app.core.license import license_status
 from app.core.pin_security import client_ip_from_request, require_current_pin
+from app.core.restore_request import (
+    default_restore_request_path,
+    prepare_restore_request,
+)
+from app.core.startup_migrations import CURRENT_SCHEMA_REVISION
 from app.models.app_setting import AppSetting
 from app.models.classification_rule import ClassificationRule
 from app.models.classification_learning import ClassificationCorrection
@@ -336,6 +341,53 @@ def get_backups(
 ):
     backup_dir = _get_backup_dir(db)
     return list_backups(backup_dir)
+
+
+class RestoreBackupRequest(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=8, pattern=r"^\d+$")
+    confirmation: Literal["RESTORE"]
+
+
+class RestoreBackupPrepared(BaseModel):
+    restore_token: str
+    backup_filename: str
+    expires_at: str
+
+
+@router.post(
+    "/backups/{filename}/prepare-restore",
+    response_model=RestoreBackupPrepared,
+)
+def prepare_backup_restore(
+    filename: str,
+    body: RestoreBackupRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Authorize one desktop-controlled restore after PIN reauthentication."""
+    require_current_pin(
+        db,
+        body.pin,
+        client_ip_from_request(request),
+        action="restore_backup",
+    )
+    try:
+        return prepare_restore_request(
+            backup_dir=_get_backup_dir(db),
+            filename=filename,
+            request_path=default_restore_request_path(DB_PATH),
+            maximum_schema_revision=CURRENT_SCHEMA_REVISION,
+        )
+    except Exception as exc:
+        raise LocalOperationError(
+            code="BACKUP_RESTORE_PREPARATION_FAILED",
+            message="GODFIN could not prepare that backup for restore.",
+            hint=(
+                "Choose a verified GODFIN backup from this installation, "
+                "then try again."
+            ),
+        ) from exc
 
 
 # --- Developer Mode ---

@@ -13,6 +13,7 @@ import {
   createRule, deleteRule, resetData,
   fetchEmbeddingStatus, enableEmbeddings, disableEmbeddings,
   fetchOnboardingStatus, updateOnboardingStatus,
+  prepareBackupRestore,
 } from '../api/client';
 import { GlassSection } from '../components/GlassSection';
 import { GlassButton } from '../components/GlassButton';
@@ -117,6 +118,9 @@ export default function Settings() {
   const [showResetPin, setShowResetPin] = useState(false);
   const [resetPin, setResetPin] = useState('');
   const [resetPinError, setResetPinError] = useState('');
+  const [restoreTarget, setRestoreTarget] = useState(null);
+  const [restorePin, setRestorePin] = useState('');
+  const [restoreError, setRestoreError] = useState('');
   const { confirm, ConfirmDialog: ConfirmDialogComponent } = useConfirm();
 
   const { data: settings } = useQuery({
@@ -258,6 +262,25 @@ export default function Settings() {
     },
   });
 
+  const restoreMutation = useMutation({
+    mutationFn: async ({ backup, pin }) => {
+      if (typeof window.godfinDesktop?.restoreBackup !== 'function') {
+        throw new Error('Backup restore is available in the GODFIN desktop app.');
+      }
+      const prepared = await prepareBackupRestore(backup.filename, pin);
+      return window.godfinDesktop.restoreBackup(prepared.restore_token);
+    },
+    onSuccess: () => {
+      setRestoreTarget(null);
+      setRestorePin('');
+      setRestoreError('');
+      showToast('Backup restored. GODFIN is refreshing your local data.', 'success');
+    },
+    onError: (error) => {
+      setRestoreError(error?.message || 'The backup could not be restored.');
+    },
+  });
+
   const devEnabled = settings?.developer_mode === 'true';
 
   const handleDevToggle = async (enable) => {
@@ -327,6 +350,28 @@ export default function Settings() {
       return;
     }
     resetDataMutation.mutate({ pin: resetPin });
+  };
+
+  const handleRestoreClick = async (backup) => {
+    const confirmed = await confirm({
+      title: 'Restore this backup?',
+      message: `Restore ${formatBackupDate(backup.created_at)}? GODFIN will first preserve the database you have now. Changes made after this backup will not appear after restore, but the safety copy can be recovered.`,
+      confirmLabel: 'Continue to PIN',
+      cancelLabel: 'Keep current data',
+      danger: true,
+    });
+    if (!confirmed) return;
+    setRestoreTarget(backup);
+    setRestorePin('');
+    setRestoreError('');
+  };
+
+  const handleRestorePinVerified = () => {
+    if (restorePin.length < 4) {
+      setRestoreError('Enter your current PIN.');
+      return;
+    }
+    restoreMutation.mutate({ backup: restoreTarget, pin: restorePin });
   };
 
   return (
@@ -554,7 +599,20 @@ export default function Settings() {
                   {backups.slice(0, 5).map((b) => (
                     <div key={b.filename} className="flex flex-wrap items-center justify-between gap-2 text-[0.75rem] py-1">
                       <span className="text-white/40">{formatBackupDate(b.created_at)}</span>
-                      <span className="text-white/20">{formatBytes(b.size_bytes)} · <span className="font-mono">{b.filename}</span></span>
+                      <span className="flex flex-wrap items-center justify-end gap-2 text-white/20">
+                        <span>{formatBytes(b.size_bytes)} · <span className="font-mono">{b.filename}</span></span>
+                        {typeof window.godfinDesktop?.restoreBackup === 'function' && (
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreClick(b)}
+                            disabled={!b.restore_ready || restoreMutation.isPending}
+                            className="min-h-9 rounded-lg border border-amber-300/15 bg-amber-400/[0.06] px-2.5 text-[0.68rem] text-amber-100/65 transition-colors hover:bg-amber-400/[0.12] disabled:cursor-not-allowed disabled:opacity-35"
+                            title={b.restore_ready ? 'Restore this verified backup' : 'This older backup has no verification record'}
+                          >
+                            Restore
+                          </button>
+                        )}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -896,6 +954,51 @@ export default function Settings() {
                   className="min-h-11 px-4 rounded-xl bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 disabled:opacity-40 text-sm"
                 >
                   {updateMutation.isPending || enableEmbeddingsMutation.isPending ? 'Checking…' : 'Continue'}
+                </button>
+              </div>
+            </DialogSurface>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* PIN Prompt Modal for Backup Restore */}
+      <AnimatePresence>
+        {restoreTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!restoreMutation.isPending) { setRestoreTarget(null); setRestorePin(''); } }} role="presentation">
+            <DialogSurface
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              labelledBy="restore-backup-pin-title"
+              onClose={() => { if (!restoreMutation.isPending) { setRestoreTarget(null); setRestorePin(''); } }}
+              onClick={(event) => event.stopPropagation()}
+              className="relative overflow-hidden rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-sm mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
+            >
+              <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <h3 id="restore-backup-pin-title" className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>Enter PIN to Restore Backup</h3>
+                  <p className="mt-1 text-[0.7rem] leading-relaxed text-white/35">GODFIN will close its local service, verify and restore this backup, then reopen it automatically.</p>
+                </div>
+                <button type="button" disabled={restoreMutation.isPending} onClick={() => { setRestoreTarget(null); setRestorePin(''); }} className="text-white/30 hover:text-white/60 disabled:opacity-40" aria-label="Close restore backup dialog"><X size={18} /></button>
+              </div>
+              <div className="flex justify-center">
+                <PinInput
+                  minLength={4}
+                  maxLength={pinLength || 8}
+                  displayLength={pinLength}
+                  value={restorePin}
+                  onChange={setRestorePin}
+                  autoSubmit={false}
+                  disabled={restoreMutation.isPending}
+                  label="Current PIN"
+                />
+              </div>
+              {restoreError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3" role="alert">{restoreError}</p>}
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" disabled={restoreMutation.isPending} onClick={() => { setRestoreTarget(null); setRestorePin(''); }} className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] disabled:opacity-40 text-sm">Cancel</button>
+                <button type="button" onClick={handleRestorePinVerified} disabled={restorePin.length < 4 || restoreMutation.isPending} className="min-h-11 px-4 rounded-xl bg-amber-400/15 border border-amber-300/20 text-amber-100/80 disabled:opacity-40 text-sm">
+                  {restoreMutation.isPending ? 'Restoring…' : 'Restore backup'}
                 </button>
               </div>
             </DialogSurface>

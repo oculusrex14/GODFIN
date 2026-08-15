@@ -355,5 +355,6 @@ def test_every_sensitive_pin_call_is_action_labelled():
         "enable_network_access",
         "reset_all_data",
         "reset_classification_memory",
+        "restore_backup",
         "unlock",
     }
