@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, Request, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -16,7 +17,38 @@ from app.models.app_setting import AppSetting
 router = APIRouter()
 
 
-@router.get("/health")
+class HealthResponse(BaseModel):
+    status: Literal["alive"]
+    liveness: bool
+    database: Literal["not_checked"]
+    version: str
+
+
+class ReadinessDependencies(BaseModel):
+    database: str
+    schema_status: str = Field(alias="schema")
+    schema_revision: Optional[int] = None
+    expected_schema_revision: int
+    lifecycle: str
+    scheduler: str
+    background_worker: str
+
+
+class ReadinessJobs(BaseModel):
+    active: int
+    capacity: int
+    worker_running: bool
+
+
+class ReadinessResponse(BaseModel):
+    status: Literal["ready", "degraded", "unavailable"]
+    ready: bool
+    version: str
+    dependencies: ReadinessDependencies
+    background_jobs: ReadinessJobs
+
+
+@router.get("/health", response_model=HealthResponse)
 def health_check():
     """Process liveness only; dependencies are assessed by /ready."""
     return {
@@ -88,7 +120,7 @@ def readiness_snapshot(request: Request, db: Session) -> dict[str, Any]:
     }
 
 
-@router.get("/ready")
+@router.get("/ready", response_model=ReadinessResponse)
 def readiness_check(
     request: Request,
     response: Response,

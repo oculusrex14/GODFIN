@@ -16,7 +16,12 @@ from app.core.transaction_semantics import (
     verified_income_clause,
 )
 from app.models.transaction import Transaction
-from app.schemas.dashboard import DashboardStats
+from app.schemas.dashboard import (
+    CategoryBreakdownItem,
+    DashboardMonthsResponse,
+    DashboardStats,
+    SpendingTrendItem,
+)
 from app.schemas.financial import YearMonth
 
 router = APIRouter()
@@ -27,7 +32,7 @@ def _shift_month(year: int, month: int, offset: int) -> tuple[int, int]:
     return absolute // 12, absolute % 12 + 1
 
 
-@router.get("/months")
+@router.get("/months", response_model=DashboardMonthsResponse)
 def dashboard_months(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -130,7 +135,7 @@ def dashboard_stats(
     )
 
 
-@router.get("/category-breakdown")
+@router.get("/category-breakdown", response_model=list[CategoryBreakdownItem])
 def category_breakdown(
     month: YearMonth,
     period: str = Query("full", pattern=r"^(full|week_1|week_2|week_3|week_4|first_half|second_half)$"),
@@ -190,7 +195,7 @@ def _get_period_dates(month_start: date, month_end: date, period: str) -> tuple[
     return month_start, month_end
 
 
-@router.get("/spending-trend")
+@router.get("/spending-trend", response_model=list[SpendingTrendItem])
 def spending_trend(
     months: int = Query(6, ge=1, le=12),
     month: Optional[YearMonth] = None,

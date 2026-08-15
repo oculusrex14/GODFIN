@@ -63,6 +63,23 @@ class SenderMappingsUpdate(BaseModel):
     mappings: list[SenderMapping] = Field(max_length=100)
 
 
+class AccountResponse(BaseModel):
+    id: str
+    bank: str
+    account_type: str
+    last_4_digits: str
+    nickname: Optional[str] = None
+    is_active: bool
+
+
+class ParserProfileResponse(BaseModel):
+    profile: str
+    bank: str
+    account_type: str
+    statement_type: str
+    formats: list[str]
+
+
 def _account_dict(account: Account) -> dict:
     return {
         "id": account.id,
@@ -115,7 +132,7 @@ def _apply_account_routing(
     save_sender_mappings(db, mappings)
 
 
-@router.get("")
+@router.get("", response_model=list[AccountResponse])
 def list_accounts(
     include_inactive: bool = False,
     db: Session = Depends(get_db),
@@ -127,12 +144,12 @@ def list_accounts(
     return [_account_dict(account) for account in query.order_by(Account.created_at).all()]
 
 
-@router.get("/parser-profiles")
+@router.get("/parser-profiles", response_model=list[ParserProfileResponse])
 def list_parser_profiles(_user: bool = Depends(get_current_user)):
     return supported_parser_profiles()
 
 
-@router.get("/sender-mappings")
+@router.get("/sender-mappings", response_model=list[SenderMapping])
 def list_account_sender_mappings(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -140,7 +157,7 @@ def list_account_sender_mappings(
     return load_sender_mappings(db)
 
 
-@router.put("/sender-mappings")
+@router.put("/sender-mappings", response_model=list[SenderMapping])
 def replace_account_sender_mappings(
     body: SenderMappingsUpdate,
     db: Session = Depends(get_db),
@@ -161,7 +178,7 @@ def replace_account_sender_mappings(
     return mappings
 
 
-@router.post("", status_code=201)
+@router.post("", response_model=AccountResponse, status_code=201)
 @conditional_entitlement("multi_bank")
 def create_account(
     body: AccountCreate,
@@ -208,7 +225,7 @@ def create_account(
     return _account_dict(account)
 
 
-@router.patch("/{account_id}")
+@router.patch("/{account_id}", response_model=AccountResponse)
 @conditional_entitlement("multi_bank")
 def update_account(
     account_id: str,

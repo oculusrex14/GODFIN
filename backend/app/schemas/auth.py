@@ -28,3 +28,7 @@ class PinChange(BaseModel):
 class AuthResponse(BaseModel):
     authenticated: bool
     token: Optional[str] = None
+
+
+class LogoutResponse(BaseModel):
+    status: str

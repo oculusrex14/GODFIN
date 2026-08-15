@@ -17,7 +17,14 @@ from app.core.database import get_db
 from app.core.local_api_trust import RuntimeMode, runtime_mode
 from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
-from app.schemas.auth import AuthResponse, AuthStatusResponse, PinChange, PinSet, PinVerify
+from app.schemas.auth import (
+    AuthResponse,
+    AuthStatusResponse,
+    LogoutResponse,
+    PinChange,
+    PinSet,
+    PinVerify,
+)
 
 router = APIRouter()
 
@@ -232,7 +239,7 @@ def verify_pin(body: PinVerify, request: Request, db: Session = Depends(get_db))
     return AuthResponse(authenticated=True, token=token)
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=LogoutResponse)
 def logout(
     authorization: str = Header(default=""),
     db: Session = Depends(get_db),
