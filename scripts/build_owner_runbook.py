@@ -449,8 +449,8 @@ def build_document() -> Document:
     metadata.paragraph_format.space_after = Pt(42)
     set_run_font(
         metadata.add_run(
-            "Version 2.2  •  30 July 2026  •  oculusrex14/GODFIN (private)\n"
-            "Production branch: codex/godfin-production-v4"
+            "Version 2.3  •  16 August 2026  •  oculusrex14/GODFIN (private)\n"
+            "Production branch: codex/godfin-production-v5"
         ),
         size=10,
         color=MUTED,
@@ -486,7 +486,7 @@ def build_document() -> Document:
     add_callout(
         document,
         "ENGINEERING BASELINE",
-        "Production remediation through accounts, reporting, and the website product tour is implemented on the private v4 branch. The local baseline is 324 passing backend tests; frontend and website production builds pass; focused desktop and website Playwright checks pass; package privacy inspection finds no local database, statement, Gmail credential, backup, or personal account artifact.",
+        "Production remediation is tracked on the private v5 branch. The clean Python 3.12 baseline is 859 passing backend tests. Frontend lint, accessibility, authentication, and production builds pass; website contract and production builds pass; desktop release/update tests pass 12/12; and package privacy checks pass 7/7.",
         tone="good",
     )
     for item in (
@@ -500,7 +500,12 @@ def build_document() -> Document:
         "Vercel already contains the Supabase public/server variables and LICENSE_SIGNING_SECRET. Values are encrypted and are intentionally not reproduced here.",
         "Google OAuth is active. The owner-controlled GODFIN Website project uses the rotated web client named GODFIN Website Rotated; the provider requests only openid/email/profile, the original client is revoked, and production sign-in returned successfully to /account twice on 30 July 2026.",
         "A non-revenue Max owner_test license is active for the owner account. The server stores only its hash, purchase history remains empty, and one macOS arm64 installation is verified through the normal three-device flow. The full key is retained only in macOS Keychain and encrypted local app storage.",
-        "Stripe KYC/prices, Resend/DNS, custom domain, Apple/Windows certificates, R2, clean-VM evidence, and public-launch authorization are not yet complete.",
+        "Dependency surfaces are separated into runtime, test, and build locks. The Gmail API client is an explicit runtime dependency. All four JavaScript workspaces and both Python lock surfaces audit with no unaccepted known vulnerability; the qualified cryptography finding is documented in the signed evidence.",
+        "The deterministic CycloneDX 1.6 SBOM contains 1,008 unique components with zero unresolved license identifiers. Third-party notices list all conditional licenses. Final human legal clearance is intentionally fail-closed and remains pending in supply-chain/legal-clearance.json.",
+        "A fresh local macOS arm64 package was built from the locked toolchain. It starts in 2.916 seconds on first launch and 0.926 seconds on restart, preserves its database, enforces the local trust boundary, and remains below the 700 MB idle-memory budget at 605.6 MB. This is an ad-hoc local test signature, not an Apple-notarized customer release.",
+        "Release workflows require exact tag, commit, and package-version agreement; refuse an existing GitHub Release; publish deterministic SBOM, notices, checksums, and provenance; use immutable action SHAs; and require staged promotion plus a reviewed rollback path.",
+        "Repository evidence is current through commit 59c146a on codex/godfin-production-v5.",
+        "Desktop Gmail OAuth configuration, final browser-family verification, Stripe KYC/prices, Resend/DNS, custom domain, Apple/Windows certificates, R2, cross-platform clean-system evidence, dependency-license approval, and public-launch authorization are not yet complete.",
         "Reward pilot, sponsor card, PPP checkout, and OpenDataLoader shipping remain safely feature-gated where applicable.",
         "Nothing in this document authorizes a public release. Phase 6 starts only after explicit written public-launch authorization.",
     ):
@@ -512,12 +517,15 @@ def build_document() -> Document:
         document,
         ["Blocker", "Why blocked", "Your intervention", "Completion evidence"],
         [
+            ["Desktop Gmail OAuth", "No owner desktop OAuth client is installed outside the repository.", "Create the separate read-only Gmail desktop client and store its JSON privately.", "Connect, callback, status, sync, disconnect, and reauthorization pass."],
+            ["Dependency legal review", "Automated license inventory is complete; human approval is not.", "Review conditional licenses and sign legal-clearance.json without changing evidence hashes.", "Release gate reports approved and the signed record is archived."],
             ["Stripe India", "Keys, one-time Price IDs, and webhook are absent.", "Complete KYC; create test/live products and webhook.", "Replay-safe purchase provisions once."],
             ["Resend + DNS", "No sending key/domain verification.", "Verify godfin.dev and add the production key.", "SPF, DKIM, DMARC and two inbox tests pass."],
             ["Custom domain", "No Vercel domain is attached.", "Register/control godfin.dev and connect DNS.", "HTTPS apex and redirect pass."],
             ["Signing", "No GitHub signing secrets are configured.", "Complete Apple and Windows signing enrollment.", "Notarized/signed installers verify."],
             ["R2 updates", "No release bucket or releases.godfin.dev.", "Create R2, DNS, and least-privilege secrets.", "Immutable assets and updater metadata resolve."],
-            ["Clean systems", "Only local macOS packaging is evidenced.", "Provide clean supported VMs/hardware.", "Install/upgrade/recovery matrix is signed."],
+            ["Clean systems", "Only local macOS arm64 packaging is evidenced.", "Provide clean supported VMs/hardware.", "Install/upgrade/recovery matrix is signed."],
+            ["Browser matrix", "Provider-backed browser checks are deferred to the final tranche.", "Run supported Chrome, Safari, Firefox, and Edge acceptance flows.", "Screenshots, traces, accessibility, and isolation evidence are archived."],
             ["Public launch", "Owner authorization has not been issued.", "Complete final gate and sign Section 16.", "Written authorization and release IDs."],
         ],
         [1500, 2100, 3000, 2760],
@@ -574,6 +582,37 @@ def build_document() -> Document:
         tone="good",
     )
     add_owner_fields(document, ["Google OAuth client name", "Test accounts used", "Completed by / date"])
+
+    document.add_page_break()
+    document.add_heading("1.3 Desktop Gmail OAuth for local ingestion", level=2)
+    add_callout(
+        document,
+        "SEPARATE CLIENT AND SCOPE",
+        "This is not the website Google login. Create a dedicated OAuth client of type Desktop app and request only https://www.googleapis.com/auth/gmail.readonly. GODFIN cannot send, edit, or delete email through this integration.",
+        tone="warn",
+    )
+    for item in (
+        "In a business-owned Google Cloud project dedicated to GODFIN Desktop Gmail, enable the Gmail API and configure the OAuth consent screen. Keep its client, scopes, and consent records separate from the GODFIN Website web client.",
+        "Create an OAuth 2.0 Client ID of type Desktop app. Download the JSON and confirm its top-level object is installed and contains client_id and client_secret. Do not use a Web application JSON file.",
+        "The local callback is http://127.0.0.1:5100/api/v1/auth/gmail/callback. GODFIN binds the backend to localhost by default; do not expose this callback or backend to the public internet.",
+        "Move the downloaded JSON outside the repository into an owner-controlled Application Support location. Point GODFIN_GMAIL_CLIENT_SECRETS_FILE to that absolute file. For development only, backend/data/client_secret.json is supported but must remain ignored and must never be committed, attached, or shared.",
+        "Alternatively set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the private local process environment. Never put either value in source files, screenshots, this runbook, terminal history, or chat.",
+        "Start GODFIN, open Settings, choose Connect Gmail, and review the Google consent screen. It must show read-only Gmail access and no send, modify, delete, contacts, Drive, calendar, or broad Google account scope.",
+        "Complete the localhost callback. Verify Settings changes to connected, run the initial sync against a test mailbox, and confirm imports are assigned only to configured active account routes.",
+        "Disconnect Gmail, confirm the local token is removed, then reconnect and verify reauthorization. Tokens are encrypted in local SQLite using GODFIN's stable local key; OAuth state is hashed, installation-bound, expiring, PKCE-protected, and single-use.",
+        "If Google keeps the app in Testing, add each intended test mailbox as a test user and record the expiry/re-consent implications. Complete Google verification before inviting general customers if the provider requires it for the read-only scope.",
+    ):
+        add_list_item(document, item, decimal_num)
+    for item in (
+        "Dedicated Desktop app client exists; the website client is not reused.",
+        "Only gmail.readonly appears on the consent screen.",
+        "The downloaded client JSON is outside the repository and protected by owner-only permissions.",
+        "Connect, localhost callback, connected status, initial sync, disconnect, and reauthorization pass.",
+        "No client secret or token appears in Git, logs, screenshots, chat, or the packaged application.",
+    ):
+        add_list_item(document, item, check_num)
+    add_source(document, "Google Gmail API Python quickstart", "https://developers.google.com/workspace/gmail/api/quickstart/python")
+    add_owner_fields(document, ["Google Cloud project name", "Desktop OAuth client name", "Test mailbox", "Completed by / date"])
 
     document.add_heading("2. Stripe India: one-time payments only", level=1)
     add_callout(
@@ -756,8 +795,8 @@ def build_document() -> Document:
         "Create a least-privilege R2 API token for release automation. Add GitHub secrets R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ACCOUNT_ID, and R2_RELEASE_BUCKET.",
         "Keep release binaries under immutable versioned paths such as /v0.1.0/<artifact>. Never overwrite a released binary.",
         "Verify Content-Type, Content-Disposition, range requests, checksums, blockmaps, and architecture-specific latest metadata.",
-        "The promote-updates workflow requires the exact typed confirmation PUBLISH_SIGNED_RELEASE and the release-production environment. Do not run it before explicit public-launch authorization.",
-        "Test rollback with a previously reviewed signed release using the separate rollback workflow and its exact confirmation.",
+        "For the first 5% update cohort, the promote-updates workflow requires PUBLISH_STAGED_RELEASE. Advancing to 25%, 50%, or 100% requires ADVANCE_AFTER_HEALTH_REVIEW. Both use the protected release-production environment and must not run before explicit public-launch authorization.",
+        "Test rollback with a previously reviewed signed release using the separate rollback workflow and the exact confirmation ROLLBACK_SIGNED_RELEASE.",
     ):
         add_list_item(document, item, decimal_num)
     for item in (
@@ -873,10 +912,13 @@ def build_document() -> Document:
     document.add_page_break()
     document.add_heading("13. Security, privacy, payment, and recovery evidence", level=1)
     for item in (
-        "Backend: at least 324 tests pass, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, goal ledgers and FD/RD suggestions, simulation reference vectors, recurring detection, atomic accounts, package privacy, CA tax pack, classification memory, performance, net worth, behavior insights, and reward-pilot redaction.",
-        "Frontend: lint and production build pass. Focused Playwright covers PIN entry, portal calculation help, goals, recurring re-detection, external pricing, settings disclosure, and CA tax-pack controls.",
+        "Backend: 859 tests pass under clean Python 3.12, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, goal ledgers and FD/RD suggestions, simulation reference vectors, recurring detection, atomic accounts, package privacy, CA tax pack, classification memory, performance, net worth, behavior insights, reward-pilot redaction, and UTC finance-fetch regressions.",
+        "Frontend: lint, accessibility checks, authentication checks, and production build pass. Focused Playwright covers PIN entry, portal calculation help, goals, recurring re-detection, external pricing, settings disclosure, and CA tax-pack controls.",
         "Website: entitlement/payment contract verification, production build, real-app product chapters, reduced-motion fallbacks, mobile overflow, lifetime/no-bundled-credit pricing, security headers, checkout safe-disable behavior, and dependency audit pass. The final production URL scores Lighthouse performance 99, accessibility 100, and SEO 100, with LCP 1.73 seconds and CLS 0.",
-        "Dependencies: Python lock, frontend, website, and desktop shipped dependencies report no known vulnerabilities.",
+        "Dependencies: runtime, test, and build Python locks are separated and hash-locked; frontend, website, desktop, and Playwright workspaces use npm ci. Audits report zero unaccepted known vulnerabilities. The Gmail API client is explicit in runtime requirements.",
+        "Supply chain: deterministic CycloneDX 1.6 SBOM and third-party notices cover 1,008 unique components with zero unresolved license identifiers. Human review of conditional licenses remains a required fail-closed release gate.",
+        "Release engineering: 12/12 desktop update/release workflow tests and 7/7 package privacy checks pass. All GitHub Actions are pinned to verified 40-character commit SHAs, and release provenance binds the exact commit, tag, package version, SBOM, notices, and checksums.",
+        "Local packaging: a fresh macOS arm64 candidate passed strict codesign verification, first start 2.916 seconds, restart 0.926 seconds, idle memory 605.6 MB, database preservation, local trust boundary, and maintenance-boundary checks. Gatekeeper correctly rejects it because it is not yet Apple-notarized.",
         "Secrets: gitleaks scans the complete cleaned history; no real statements, databases, tokens, keys, or customer screenshots are tracked.",
         "Recovery: empty database bootstrap, schema-revision backup, retained daily/weekly backups, restore-on-copy, upgrade, rollback, and license offline-grace tests pass.",
         "Payment: test-mode replay, amount/currency mismatch, invalid signature, unauthenticated checkout, device limit, deactivation, and resend behavior pass after provider credentials are available.",
@@ -893,10 +935,11 @@ def build_document() -> Document:
 
     document.add_heading("14. Prepare the private draft release", level=1)
     for item in (
-        "Choose an internal release-candidate version such as v0.1.0-rc.1. Confirm desktop/package.json and website version variables agree before tagging.",
+        "Choose an immutable semantic candidate tag that matches the desktop package version exactly, such as v0.1.0. The release workflow intentionally accepts only vX.Y.Z tags; do not use an -rc suffix unless the validated workflow contract is deliberately changed first.",
         "Push the exact candidate commit to the private repository and wait for every CI job to pass.",
         "Confirm all required Apple, Windows, and R2 secrets exist in GitHub Actions without revealing values.",
-        "Create and push the annotated tag. The release workflow builds native macOS arm64/x64, Windows x64, and Linux x64 artifacts; verifies packages; generates Homebrew metadata and SHA-256 checksums; and creates a private draft GitHub Release.",
+        "Create and push the annotated tag. The release workflow verifies exact tag/commit/version agreement, refuses an existing release for that tag, builds native macOS arm64/x64, Windows x64, and Linux x64 artifacts, verifies packages, generates SHA-256 checksums, SBOM, notices, and provenance, and creates a private draft GitHub Release.",
+        "Confirm supply-chain/legal-clearance.json is approved. The workflow must remain fail-closed while legal status is pending or the recorded evidence hashes do not match.",
         "Review the draft only. Do not publish it. Download every artifact, verify checksums/signatures, and complete Section 12.",
         "Attach the final privacy-safe screenshots and private demo to internal review, not to a public release, until the owner approves.",
         "Record known limitations honestly: HDFC launch parser scope where applicable, live-market provider coverage, no recurring AI allowance, optional local/BYO AI, and external-service dependencies.",
@@ -954,13 +997,17 @@ def build_document() -> Document:
         [
             ["Google OAuth callback", "Codex", "☒", "Production callback passed twice on 30 Jul 2026; rotated client active; original client revoked."],
             ["Second-account isolation", "", "☐", "Repeat with a distinct Google test account before public launch."],
+            ["Desktop Gmail OAuth + sync", "", "☐", "Separate Desktop client; read-only consent; connect/sync/disconnect/reconnect evidence."],
+            ["Dependency license clearance", "", "☐", "Human approval of conditional licenses with unchanged SBOM/notices hashes."],
             ["Stripe + webhook + refund/tax", "", "☐", ""],
             ["Resend + DNS + support inboxes", "", "☐", ""],
             ["Custom domain + security headers", "", "☐", ""],
             ["License custody + three devices", "", "☐", ""],
             ["macOS/Windows signing", "", "☐", ""],
             ["R2 updates + rollback", "", "☐", ""],
-            ["Clean-system matrix", "", "☐", ""],
+            ["Local macOS arm64 package proof", "Codex", "☒", "Locked local candidate meets startup, memory, privacy, persistence, and trust-boundary budgets; not notarized."],
+            ["Cross-platform clean-system matrix", "", "☐", "macOS x64, Windows 10/11 x64, and Ubuntu 22.04 x64 remain external gates."],
+            ["Browser-family matrix", "", "☐", "Chrome, Safari, Firefox, and Edge acceptance evidence remains deferred."],
             ["Security/privacy/recovery matrix", "", "☐", ""],
             ["Legal/tax/privacy review", "", "☐", ""],
             ["Private draft + screenshots + demo", "", "☐", ""],
@@ -968,7 +1015,6 @@ def build_document() -> Document:
         ],
         [3500, 1450, 900, 3510],
     )
-    document.add_page_break()
     add_owner_fields(
         document,
         [
