@@ -26,7 +26,14 @@ from app.core.merchant_memory_service import upsert_merchant_memory
 from app.core.taxonomy import TAXONOMY
 from app.models.audit_log import AuditLog
 from app.models.transaction import Transaction
-from app.schemas.review import BatchResolveRequest, ReviewResolve, ReviewStats
+from app.schemas.review import (
+    BatchResolveRequest,
+    BatchResolveResponse,
+    ReviewQueueResponse,
+    ReviewResolve,
+    ReviewResolveResponse,
+    ReviewStats,
+)
 from app.schemas.financial import ChatRole, FiniteUnitInterval
 
 logger = logging.getLogger(__name__)
@@ -132,7 +139,7 @@ def _parse_classification_options(text: str) -> list[dict]:
     return []
 
 
-@router.get("/review/categories")
+@router.get("/review/categories", response_model=dict[str, list[str]])
 def get_categories(
     _user: bool = Depends(get_current_user),
 ):
@@ -144,7 +151,7 @@ def get_categories(
     }
 
 
-@router.get("/review")
+@router.get("/review", response_model=ReviewQueueResponse)
 def list_review_queue(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -190,7 +197,10 @@ def list_review_queue(
     }
 
 
-@router.post("/review/{transaction_id}/resolve")
+@router.post(
+    "/review/{transaction_id}/resolve",
+    response_model=ReviewResolveResponse,
+)
 def resolve_review(
     transaction_id: str,
     body: ReviewResolve,
@@ -271,7 +281,7 @@ def resolve_review(
         ) from exc
 
 
-@router.post("/review/batch-resolve")
+@router.post("/review/batch-resolve", response_model=BatchResolveResponse)
 def batch_resolve(
     body: BatchResolveRequest,
     db: Session = Depends(get_db),

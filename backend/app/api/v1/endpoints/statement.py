@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.entitlements import conditional_entitlement, enforce_feature
 from app.core.auth import get_current_user
+from app.core.api_errors import APIErrorResponse
 from app.core.audit import FinalizedPeriodError
 from app.core.classifier import classify_transaction
 from app.core.database import get_db
@@ -36,7 +37,16 @@ from app.core.transaction_semantics import (
 from app.models.account import Account
 from app.models.income_source import IncomeSource
 from app.models.transaction import Transaction
-from app.schemas.statement import IncomeSourceCreate, IncomeSourceUpdate
+from app.schemas.statement import (
+    IncomeSourceCreate,
+    IncomeSourceCreatedResponse,
+    IncomeSourceResponse,
+    IncomeSourceUpdate,
+    IncomeSourceUpdatedResponse,
+    StatementImportResponse,
+    StatementPreviewResponse,
+    StatementReconcileResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +322,10 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
 
 # --- Statement Upload (3-step flow) ---
 
-@router.post("/ingest/upload/preview")
+@router.post(
+    "/ingest/upload/preview",
+    response_model=StatementPreviewResponse,
+)
 async def preview_statement(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
@@ -359,7 +372,10 @@ async def preview_statement(
     }
 
 
-@router.post("/ingest/upload/reconcile")
+@router.post(
+    "/ingest/upload/reconcile",
+    response_model=StatementReconcileResponse,
+)
 @conditional_entitlement("multi_bank")
 async def reconcile_statement_preview(
     file: UploadFile = File(...),
@@ -469,7 +485,10 @@ async def reconcile_statement_preview(
     }
 
 
-@router.post("/ingest/upload/import")
+@router.post(
+    "/ingest/upload/import",
+    response_model=StatementImportResponse,
+)
 @conditional_entitlement("multi_bank")
 async def import_statement(
     file: UploadFile = File(...),
@@ -679,7 +698,11 @@ async def import_statement(
         ) from exc
 
 
-@router.post("/ingest/upload")
+@router.post(
+    "/ingest/upload",
+    status_code=410,
+    response_model=APIErrorResponse,
+)
 async def upload_statement_legacy(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
@@ -695,7 +718,7 @@ async def upload_statement_legacy(
 
 # --- Income Sources ---
 
-@router.get("/income-sources")
+@router.get("/income-sources", response_model=list[IncomeSourceResponse])
 def list_income_sources(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -715,7 +738,11 @@ def list_income_sources(
     ]
 
 
-@router.post("/income-sources", status_code=201)
+@router.post(
+    "/income-sources",
+    response_model=IncomeSourceCreatedResponse,
+    status_code=201,
+)
 def create_income_source(
     body: IncomeSourceCreate,
     db: Session = Depends(get_db),
@@ -737,7 +764,10 @@ def create_income_source(
     }
 
 
-@router.put("/income-sources/{source_id}")
+@router.put(
+    "/income-sources/{source_id}",
+    response_model=IncomeSourceUpdatedResponse,
+)
 def update_income_source(
     source_id: str,
     body: IncomeSourceUpdate,

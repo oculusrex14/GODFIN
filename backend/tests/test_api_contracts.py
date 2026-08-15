@@ -40,6 +40,9 @@ PUBLIC_ROUTES = {
     ("health.py", "health_check"),
     ("health.py", "readiness_check"),
 }
+TERMINAL_OPERATIONS = {
+    "upload_statement_legacy_api_v1_ingest_upload_post",
+}
 
 
 def _activate_max(db) -> None:
@@ -393,16 +396,22 @@ def test_openapi_documents_one_error_envelope_and_success_status_per_operation()
             operation_ids.add(operation["operationId"])
             responses = operation["responses"]
             success_codes = [status for status in responses if status.startswith("2")]
-            assert len(success_codes) == 1
-            success = responses[success_codes[0]]
-            if success_codes[0] != "204":
-                content = success.get("content", {})
-                assert content, operation["operationId"]
-                success_schemas = [
-                    media["schema"] for media in content.values()
-                ]
-                if any(success_schema == {} for success_schema in success_schemas):
-                    untyped_success.append(operation["operationId"])
+            if operation["operationId"] in TERMINAL_OPERATIONS:
+                assert success_codes == []
+            else:
+                assert len(success_codes) == 1
+                success = responses[success_codes[0]]
+                if success_codes[0] != "204":
+                    content = success.get("content", {})
+                    assert content, operation["operationId"]
+                    success_schemas = [
+                        media["schema"] for media in content.values()
+                    ]
+                    if any(
+                        success_schema == {}
+                        for success_schema in success_schemas
+                    ):
+                        untyped_success.append(operation["operationId"])
             assert STANDARD_ERROR_CODES <= responses.keys()
             for status in STANDARD_ERROR_CODES:
                 error_schema = responses[status]["content"]["application/json"]["schema"]
@@ -413,4 +422,4 @@ def test_openapi_documents_one_error_envelope_and_success_status_per_operation()
     # Freeze the audited legacy debt: a new route may not add another generic
     # success body. Precise success schemas are being reduced separately while
     # every error/status/auth contract is enforced now.
-    assert len(untyped_success) == 88
+    assert len(untyped_success) == 77
