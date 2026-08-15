@@ -319,9 +319,12 @@ def saved_subscription_snapshot(
         ):
             continue
         fetched_age_days = (reference_day - fetched_at.date()).days
+        # fetched_at is stored as naive UTC while reference_day/as_of are user-facing
+        # calendar dates. Around local midnight a valid fetch can therefore carry
+        # the prior UTC date; freshness and future as_of checks below remain the
+        # authoritative safety bounds.
         if (
-            fetched_at.date() < as_of
-            or fetched_age_days < 0
+            fetched_age_days < 0
             or fetched_age_days > MAX_RATE_AGE_DAYS
         ):
             continue

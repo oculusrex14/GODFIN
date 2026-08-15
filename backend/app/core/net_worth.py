@@ -246,7 +246,6 @@ def _stored_rate(
         or source_url != FRANKFURTER_RATES_URL
         or not isinstance(as_of, date)
         or not isinstance(fetched_at, datetime)
-        or fetched_at.date() < as_of
     ):
         return None
     age_days = (today - as_of).days

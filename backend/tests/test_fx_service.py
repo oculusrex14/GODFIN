@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -333,6 +334,53 @@ def test_subscription_write_persists_rate_source_and_offline_reads_reuse_it(
     assert stats.json()["total_monthly_cost"] == 8000
     assert stats.json()["fx"]["status"] == "stored"
     assert stats.json()["fx"]["as_of"] == date.today().isoformat()
+
+
+def test_saved_rate_accepts_utc_fetch_from_previous_local_calendar_day():
+    from app.core.fx import (
+        FRANKFURTER_RATES_URL,
+        FX_PROVIDER,
+        saved_subscription_snapshot,
+    )
+
+    local_day = date(2026, 8, 16)
+    subscription = SimpleNamespace(
+        currency="USD",
+        fx_rate_to_inr=80,
+        fx_rate_as_of=local_day,
+        fx_rate_source=FX_PROVIDER,
+        fx_rate_source_url=FRANKFURTER_RATES_URL,
+        # 01:30 in India is still the prior UTC calendar day.
+        fx_rate_fetched_at=datetime(2026, 8, 15, 20, 0),
+    )
+
+    snapshot = saved_subscription_snapshot([subscription], today=local_day)
+
+    assert snapshot is not None
+    assert snapshot.rate_to_inr("USD") == 80
+    assert snapshot.age_days == 0
+
+
+def test_saved_rate_still_rejects_a_future_as_of_date():
+    from app.core.fx import (
+        FRANKFURTER_RATES_URL,
+        FX_PROVIDER,
+        saved_subscription_snapshot,
+    )
+
+    subscription = SimpleNamespace(
+        currency="USD",
+        fx_rate_to_inr=80,
+        fx_rate_as_of=date(2026, 8, 17),
+        fx_rate_source=FX_PROVIDER,
+        fx_rate_source_url=FRANKFURTER_RATES_URL,
+        fx_rate_fetched_at=datetime(2026, 8, 16, 20, 0),
+    )
+
+    assert (
+        saved_subscription_snapshot([subscription], today=date(2026, 8, 16))
+        is None
+    )
 
 
 def test_expired_persisted_rate_is_not_used_as_a_fallback(

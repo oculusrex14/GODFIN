@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import event, text
@@ -258,6 +259,31 @@ def test_offline_summary_uses_only_recent_matching_saved_manual_rate(
     assert item["value_base"] == 8000
     assert item["conversion"]["status"] == "stored"
     assert response.json()["net_worth"] == 8000
+
+
+def test_stored_net_worth_rate_accepts_utc_fetch_from_previous_local_day():
+    from app.core.net_worth import _stored_rate
+
+    local_day = date(2026, 8, 16)
+    record = SimpleNamespace(
+        exchange_rate_to_base=80,
+        fx_rate_as_of=local_day,
+        fx_rate_source=FX_PROVIDER,
+        fx_rate_source_url=FRANKFURTER_RATES_URL,
+        fx_rate_fetched_at=datetime(2026, 8, 15, 20, 0),
+    )
+
+    saved = _stored_rate(
+        record,
+        source_currency="USD",
+        base_currency="INR",
+        stored_source_currency="USD",
+        stored_base_currency="INR",
+        today=local_day,
+    )
+
+    assert saved is not None
+    assert saved[0] == 80
 
 
 def test_expired_saved_manual_rate_is_rejected_offline(
