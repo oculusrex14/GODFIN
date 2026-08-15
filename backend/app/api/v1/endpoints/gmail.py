@@ -5,7 +5,7 @@ import json
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
@@ -42,9 +42,134 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+class GmailAuthURLResponse(BaseModel):
+    auth_url: str
+    flow: str
+    expires_in_seconds: int
+
+
+class GmailStatusResponse(BaseModel):
+    connected: bool
+    email: str | None = None
+    digest_email_supported: bool
+    status: str
+    message: str
+    retryable: bool
+    action_required: str | None
+
+
+class IngestionResultResponse(BaseModel):
+    processed: int
+    created: int
+    skipped_blacklist: int
+    skipped_no_match: int
+    skipped_duplicate: int
+    skipped_finalized_period: int
+    errors: int
+    error_details: list[str]
+    source_status: str
+    retryable: bool
+    full_resync: bool
+
+
+class IngestionHistoryResponse(BaseModel):
+    last_ingestion_run: str | None
+    last_manual_ingestion_date: str | None
+    last_manual_ingestion_range: str | None
+    initial_sync_date_range: str | None
+    initial_sync_completed: str | None
+
+
+class IngestionStatusResponse(BaseModel):
+    gmail_connected: bool
+    last_run: str | None
+    history_id: str | None
+    history: IngestionHistoryResponse
+
+
+class GmailDisconnectResponse(BaseModel):
+    success: bool
+    message: str
+    deleted_transactions: int
+    backup_filename: str | None
+
+
+class InitialSyncResponse(BaseModel):
+    success: bool
+    result: IngestionResultResponse | None = None
+    message: str
+    already_completed: bool | None = None
+
+
+class BackgroundIngestionStartResponse(BaseModel):
+    success: bool
+    message: str
+    job_id: str | None = None
+    started: bool | None = None
+    already_running: bool | None = None
+    already_completed: bool | None = None
+
+
+class IngestionProgressResponse(BaseModel):
+    status: str
+    processed: int
+    total: int
+    percent: float
+    result: IngestionResultResponse | None
+    error: str | None
+    job_id: str | None = None
+    attempt: int | None = None
+    retry_at: str | None = None
+
+
+class RangeIngestionProgressResponse(IngestionProgressResponse):
+    batch_current: int
+    batch_total: int
+
+
+class BackgroundCancelResponse(BaseModel):
+    cancel_requested: bool
+    job_id: str | None
+
+
+class DateRangeIngestionResponse(BaseModel):
+    success: bool
+    result: IngestionResultResponse
+    date_range: str
+    message: str
+
+
+class SchedulerStatusResponse(BaseModel):
+    gmail_connected: bool
+    history: IngestionHistoryResponse
+
+
+class LastAutoIngestionResponse(BaseModel):
+    timestamp: str
+    status: str | None
+    new_transactions: int
+    error: str | None
+
+
+class IngestSettingsResponse(BaseModel):
+    auto_ingestion_enabled: bool
+    frequency_minutes: int
+    last_auto_ingestion: LastAutoIngestionResponse | None
+    next_auto_ingestion: str | None
+    monthly_transaction_count: int
+
+
+class IngestSettingsUpdateResponse(BaseModel):
+    success: bool
+    auto_ingestion_enabled: bool
+    frequency_minutes: int
+    rescheduled: bool
+    message: str
+
+
 # --- Gmail OAuth ---
 
-@router.get("/auth/gmail/url")
+@router.get("/auth/gmail/url", response_model=GmailAuthURLResponse)
 def get_gmail_auth_url(
     request: Request,
     db: Session = Depends(get_db),
@@ -92,7 +217,16 @@ def get_gmail_auth_url(
         ) from exc
 
 
-@router.get("/auth/gmail/callback")
+@router.get(
+    "/auth/gmail/callback",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Browser-safe Gmail connection result.",
+            "content": {"text/html": {"schema": {"type": "string"}}},
+        }
+    },
+)
 def gmail_oauth_callback(
     code: str | None = Query(default=None, min_length=1, max_length=4096),
     state: str | None = Query(default=None, min_length=16, max_length=512),
@@ -174,7 +308,11 @@ def gmail_oauth_callback(
         )
 
 
-@router.get("/auth/gmail/status")
+@router.get(
+    "/auth/gmail/status",
+    response_model=GmailStatusResponse,
+    response_model_exclude_unset=True,
+)
 def get_gmail_status(
     _user: bool = Depends(get_current_user),
 ):
@@ -197,7 +335,7 @@ def get_gmail_status(
 
 # --- Ingestion ---
 
-@router.post("/ingest/gmail")
+@router.post("/ingest/gmail", response_model=IngestionResultResponse)
 def trigger_ingestion(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -219,7 +357,7 @@ def trigger_ingestion(
         _set_manual_ingestion_running(db, False)
 
 
-@router.get("/ingest/status")
+@router.get("/ingest/status", response_model=IngestionStatusResponse)
 def ingestion_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -260,7 +398,7 @@ def _delete_gmail_transactions(db: Session) -> int:
         void_reason="Gmail source data was deleted by the user.",
     )
 
-@router.post("/auth/gmail/disconnect")
+@router.post("/auth/gmail/disconnect", response_model=GmailDisconnectResponse)
 def gmail_disconnect(
     request: Request,
     body: GmailDisconnectRequest = Body(default=GmailDisconnectRequest()),
@@ -340,7 +478,11 @@ def gmail_disconnect(
 
 # --- Initial Sync ---
 
-@router.post("/ingest/gmail/initial")
+@router.post(
+    "/ingest/gmail/initial",
+    response_model=InitialSyncResponse,
+    response_model_exclude_unset=True,
+)
 def trigger_initial_sync(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -375,7 +517,11 @@ def trigger_initial_sync(
         ) from exc
 
 
-@router.post("/ingest/gmail/initial/start")
+@router.post(
+    "/ingest/gmail/initial/start",
+    response_model=BackgroundIngestionStartResponse,
+    response_model_exclude_unset=True,
+)
 def start_initial_sync_background(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -423,7 +569,11 @@ def start_initial_sync_background(
     }
 
 
-@router.get("/ingest/gmail/sync-status")
+@router.get(
+    "/ingest/gmail/sync-status",
+    response_model=IngestionProgressResponse,
+    response_model_exclude_unset=True,
+)
 def get_sync_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -490,7 +640,10 @@ def get_sync_status(
     return payload
 
 
-@router.post("/ingest/gmail/sync/cancel")
+@router.post(
+    "/ingest/gmail/sync/cancel",
+    response_model=BackgroundCancelResponse,
+)
 def cancel_initial_sync_background(
     _user: bool = Depends(get_current_user),
 ):
@@ -514,7 +667,10 @@ class DateRangeRequest(BaseModel):
         return self
 
 
-@router.post("/ingest/gmail/range")
+@router.post(
+    "/ingest/gmail/range",
+    response_model=DateRangeIngestionResponse,
+)
 def trigger_ingestion_range(
     request: DateRangeRequest,
     db: Session = Depends(get_db),
@@ -556,7 +712,10 @@ def trigger_ingestion_range(
 
 # --- Background Date Range Ingestion ---
 
-@router.post("/ingest/gmail/range/start")
+@router.post(
+    "/ingest/gmail/range/start",
+    response_model=BackgroundIngestionStartResponse,
+)
 def start_ingestion_range_background(
     request: DateRangeRequest,
     db: Session = Depends(get_db),
@@ -606,7 +765,11 @@ def start_ingestion_range_background(
     }
 
 
-@router.get("/ingest/gmail/range/status")
+@router.get(
+    "/ingest/gmail/range/status",
+    response_model=RangeIngestionProgressResponse,
+    response_model_exclude_unset=True,
+)
 def get_ingestion_range_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -670,7 +833,10 @@ def get_ingestion_range_status(
     return payload
 
 
-@router.post("/ingest/gmail/range/cancel")
+@router.post(
+    "/ingest/gmail/range/cancel",
+    response_model=BackgroundCancelResponse,
+)
 def cancel_ingestion_range_background(
     _user: bool = Depends(get_current_user),
 ):
@@ -681,7 +847,7 @@ def cancel_ingestion_range_background(
 
 # --- Scheduler/History Status ---
 
-@router.get("/ingest/scheduler/status")
+@router.get("/ingest/scheduler/status", response_model=SchedulerStatusResponse)
 def scheduler_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -697,7 +863,7 @@ def scheduler_status(
 
 # --- Auto-Ingestion Settings ---
 
-@router.get("/ingest/settings")
+@router.get("/ingest/settings", response_model=IngestSettingsResponse)
 def get_ingest_settings(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -773,7 +939,7 @@ class IngestSettingsRequest(BaseModel):
     frequency_minutes: int = 15
 
 
-@router.post("/ingest/settings")
+@router.post("/ingest/settings", response_model=IngestSettingsUpdateResponse)
 def update_ingest_settings(
     request: IngestSettingsRequest,
     db: Session = Depends(get_db),
