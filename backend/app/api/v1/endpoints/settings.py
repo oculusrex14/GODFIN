@@ -61,7 +61,7 @@ def _safe_nonnegative_int(value: str | None) -> int:
 
 # --- App Settings ---
 
-@router.get("")
+@router.get("", response_model=dict[str, str])
 def get_settings(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -84,6 +84,81 @@ class SensitiveToggleUpdate(BaseModel):
     )
 
 
+class PreferenceUpdateResponse(BaseModel):
+    key: str
+    value: str
+    restart_required: bool
+
+
+class EncryptionHealthResponse(BaseModel):
+    status: str
+    source: str | None
+    message: str
+
+
+class GmailHealthResponse(BaseModel):
+    status: str
+    connected: bool
+    message: str
+    retryable: bool
+    action_required: str | None
+
+
+class LLMHealthResponse(BaseModel):
+    status: str
+    provider: str | None
+    model: str | None
+    message: str
+
+
+class BackupFileResponse(BaseModel):
+    filename: str
+    size_bytes: int
+    created_at: str
+    restore_ready: bool
+
+
+class BackupHealthResponse(BaseModel):
+    status: str
+    scheduler_status: str
+    job_status: str
+    directory: str
+    count: int
+    last_backup: BackupFileResponse | None
+    last_success_at: str | None
+    last_failure_at: str | None
+    next_retry_at: str | None
+    failure_code: str | None
+    failure_count: int
+    message: str
+
+
+class IngestionHealthResponse(BaseModel):
+    status: str
+    last_run: str | None
+
+
+class NetworkHealthResponse(BaseModel):
+    allow_network_access: bool
+    message: str
+
+
+class LicenseHealthResponse(BaseModel):
+    status: str
+    tier: str
+    message: str
+
+
+class SettingsHealthResponse(BaseModel):
+    encryption: EncryptionHealthResponse
+    gmail: GmailHealthResponse
+    llm: LLMHealthResponse
+    backup: BackupHealthResponse
+    ingestion: IngestionHealthResponse
+    network: NetworkHealthResponse
+    license: LicenseHealthResponse
+
+
 def _set_existing_setting(db: Session, key: str, value: str) -> None:
     setting = db.query(AppSetting).filter_by(key=key).first()
     if setting is None:
@@ -91,7 +166,7 @@ def _set_existing_setting(db: Session, key: str, value: str) -> None:
     setting.value = value
 
 
-@router.get("/health")
+@router.get("/health", response_model=SettingsHealthResponse)
 def settings_health(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -240,7 +315,10 @@ def settings_health(
     }
 
 
-@router.put("/preferences/timezone")
+@router.put(
+    "/preferences/timezone",
+    response_model=PreferenceUpdateResponse,
+)
 def update_timezone(
     body: TimezoneUpdate,
     db: Session = Depends(get_db),
@@ -256,7 +334,10 @@ def update_timezone(
     return {"key": "user_timezone", "value": body.timezone, "restart_required": False}
 
 
-@router.put("/preferences/network-access")
+@router.put(
+    "/preferences/network-access",
+    response_model=PreferenceUpdateResponse,
+)
 def update_network_access(
     body: SensitiveToggleUpdate,
     request: Request,
@@ -281,7 +362,10 @@ def update_network_access(
     }
 
 
-@router.put("/preferences/developer-mode")
+@router.put(
+    "/preferences/developer-mode",
+    response_model=PreferenceUpdateResponse,
+)
 def update_developer_mode(
     body: SensitiveToggleUpdate,
     request: Request,
@@ -317,7 +401,12 @@ def reject_generic_setting_mutation(
 
 # --- Backup ---
 
-@router.post("/backup")
+class BackupCreatedResponse(BaseModel):
+    filename: str
+    status: Literal["success"]
+
+
+@router.post("/backup", response_model=BackupCreatedResponse)
 def trigger_backup(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -334,7 +423,7 @@ def trigger_backup(
         ) from exc
 
 
-@router.get("/backups")
+@router.get("/backups", response_model=list[BackupFileResponse])
 def get_backups(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -392,7 +481,32 @@ def prepare_backup_restore(
 
 # --- Developer Mode ---
 
-@router.get("/developer")
+
+class DeveloperRuleResponse(BaseModel):
+    id: str
+    rule_type: str
+    pattern: str
+    category: str
+    subcategory: str | None
+    priority: int
+    is_system: bool
+
+
+class ClassificationHealthResponse(BaseModel):
+    source_counts: dict[str, int]
+    avg_confidence: dict[str, float]
+    unclassified_count: int
+    merchant_memory_count: int
+    active_rules_count: int
+
+
+class DeveloperStatusResponse(BaseModel):
+    developer_mode: bool
+    rules: list[DeveloperRuleResponse]
+    classification_health: ClassificationHealthResponse
+
+
+@router.get("/developer", response_model=DeveloperStatusResponse)
 def developer_mode_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -471,7 +585,16 @@ class RuleUpdate(BaseModel):
     priority: int | None = Field(default=None, ge=0, le=10_000)
 
 
-@router.post("/developer/rules", status_code=201)
+class RuleUpdateResponse(BaseModel):
+    id: str
+    status: Literal["updated"]
+
+
+@router.post(
+    "/developer/rules",
+    status_code=201,
+    response_model=DeveloperRuleResponse,
+)
 def create_rule(
     body: RuleCreate,
     db: Session = Depends(get_db),
@@ -514,7 +637,10 @@ def create_rule(
     }
 
 
-@router.put("/developer/rules/{rule_id}")
+@router.put(
+    "/developer/rules/{rule_id}",
+    response_model=RuleUpdateResponse,
+)
 def update_rule(
     rule_id: str,
     body: RuleUpdate,
@@ -588,7 +714,81 @@ class PersonalClassifierUpdate(BaseModel):
     enabled: bool
 
 
-@router.get("/classification-memory")
+class PersonalClassifierEligibilityResponse(BaseModel):
+    eligible: bool
+    enabled: bool
+    confirmed_corrections: int
+    required_corrections: int
+    category_count: int
+    required_categories: int
+
+
+class LearnedPatternResponse(BaseModel):
+    id: str
+    pattern: str
+    instrument: str | None
+    category: str
+    subcategory: str | None
+    confirmations: int
+    confidence: float
+    active: bool
+    updated_at: str
+
+
+class ClassificationCorrectionResponse(BaseModel):
+    id: str
+    transaction_id: str
+    merchant: str
+    old_category: str | None
+    new_category: str
+    new_subcategory: str | None
+    undone: bool
+    created_at: str
+
+
+class MerchantMemoryResponse(BaseModel):
+    id: str
+    merchant: str
+    category: str
+    subcategory: str | None
+    times_seen: int
+    confidence: float
+
+
+class ClassificationMemoryResponse(BaseModel):
+    eligibility: PersonalClassifierEligibilityResponse
+    patterns: list[LearnedPatternResponse]
+    corrections: list[ClassificationCorrectionResponse]
+    merchants: list[MerchantMemoryResponse]
+
+
+class ClassificationUndoResponse(BaseModel):
+    status: Literal["undone"]
+    correction_id: str
+    transaction_id: str
+
+
+class ClassificationMemoryResetResponse(BaseModel):
+    patterns_removed: int
+    corrections_removed: int
+    merchant_memories_removed: int
+    backup_filename: str
+    message: str
+
+
+class ResetDataResponse(BaseModel):
+    success: Literal[True]
+    backup_created: Literal[True]
+    backup_filename: str
+    deleted_records: int
+    deletion_counts: dict[str, int]
+    message: str
+
+
+@router.get(
+    "/classification-memory",
+    response_model=ClassificationMemoryResponse,
+)
 def classification_memory(
     limit: int = 100,
     db: Session = Depends(get_db),
@@ -599,7 +799,16 @@ def classification_memory(
     return list_learning_memory(db, limit=min(max(limit, 1), 500))
 
 
-@router.get("/classification-memory/export")
+@router.get(
+    "/classification-memory/export",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Spreadsheet-safe classification-memory CSV.",
+            "content": {"text/csv": {"schema": {"type": "string"}}},
+        }
+    },
+)
 def export_classification_memory(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -615,7 +824,10 @@ def export_classification_memory(
     )
 
 
-@router.post("/classification-memory/{correction_id}/undo")
+@router.post(
+    "/classification-memory/{correction_id}/undo",
+    response_model=ClassificationUndoResponse,
+)
 def undo_classification_memory(
     correction_id: str,
     db: Session = Depends(get_db),
@@ -642,7 +854,10 @@ def undo_classification_memory(
         ) from exc
 
 
-@router.put("/classification-memory/personal")
+@router.put(
+    "/classification-memory/personal",
+    response_model=PersonalClassifierEligibilityResponse,
+)
 def update_personal_classifier(
     body: PersonalClassifierUpdate,
     db: Session = Depends(get_db),
@@ -680,7 +895,10 @@ def update_personal_classifier(
     return personal_classifier_eligibility(db)
 
 
-@router.post("/classification-memory/reset")
+@router.post(
+    "/classification-memory/reset",
+    response_model=ClassificationMemoryResetResponse,
+)
 def reset_classification_memory(
     body: ClassificationMemoryReset,
     request: Request,
@@ -705,7 +923,11 @@ def reset_classification_memory(
     }
 
 
-@router.post("/reset-data", status_code=200)
+@router.post(
+    "/reset-data",
+    status_code=200,
+    response_model=ResetDataResponse,
+)
 def reset_all_data(
     body: ResetDataRequest,
     request: Request,
