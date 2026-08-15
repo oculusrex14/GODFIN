@@ -146,6 +146,68 @@ class RecoverableDeletionResponse(BaseModel):
     recovery: str
 
 
+class FxMetadataResponse(BaseModel):
+    status: str
+    provider: str
+    source_url: str | None
+    as_of: str | None
+    age_days: int | None
+    stale: bool | None
+    rate_direction: str
+    rates_to_inr: dict[str, float]
+    rate_dates: dict[str, str]
+    requested_currencies: list[str]
+    privacy: str
+    unavailable_reason: str | None
+
+
+class ExchangeRatesResponse(BaseModel):
+    rates: dict[str, float]
+    fx: FxMetadataResponse
+
+
+class ExchangeRateRefreshResponse(BaseModel):
+    updated: int
+    fx: FxMetadataResponse
+
+
+class SubscriptionSuggestionResponse(BaseModel):
+    id: str
+    recurring_pattern_id: str
+    merchant: str
+    avg_amount: float
+    frequency: str
+    category: str | None
+    next_expected: str | None
+    status: str
+    snoozed_until: str | None
+    confirmed_subscription_id: str | None
+
+
+class SubscriptionSuggestionScanResponse(BaseModel):
+    created: int
+
+
+class SubscriptionSuggestionDecisionResponse(BaseModel):
+    suggestion: SubscriptionSuggestionResponse
+    subscription_id: str | None
+
+
+class SubscriptionReminderResponse(BaseModel):
+    id: str
+    name: str
+    amount: float
+    currency: str
+    frequency: str
+    due_date: str
+    days_until: int
+
+
+class SubscriptionRemindersResponse(BaseModel):
+    days: int
+    reminders: list[SubscriptionReminderResponse]
+
+
 def _suggestion_response(suggestion: SubscriptionSuggestion) -> dict:
     return {
         "id": suggestion.id,
@@ -316,7 +378,7 @@ async def get_subscription_stats(
     )
 
 
-@router.get("/exchange-rates")
+@router.get("/exchange-rates", response_model=ExchangeRatesResponse)
 async def get_exchange_rates(
     _user: bool = Depends(get_current_user),
 ):
@@ -335,7 +397,10 @@ async def get_exchange_rates(
     }
 
 
-@router.post("/exchange-rates/refresh")
+@router.post(
+    "/exchange-rates/refresh",
+    response_model=ExchangeRateRefreshResponse,
+)
 async def refresh_exchange_rates(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -369,7 +434,7 @@ async def refresh_exchange_rates(
     }
 
 
-@router.post("/suggestions/scan")
+@router.post("/suggestions/scan", response_model=SubscriptionSuggestionScanResponse)
 def scan_subscription_suggestions(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -379,7 +444,7 @@ def scan_subscription_suggestions(
     return {"created": created}
 
 
-@router.get("/suggestions")
+@router.get("/suggestions", response_model=list[SubscriptionSuggestionResponse])
 def list_subscription_suggestions(
     include_resolved: bool = False,
     db: Session = Depends(get_db),
@@ -400,7 +465,10 @@ def list_subscription_suggestions(
     ]
 
 
-@router.post("/suggestions/{suggestion_id}/decision")
+@router.post(
+    "/suggestions/{suggestion_id}/decision",
+    response_model=SubscriptionSuggestionDecisionResponse,
+)
 def update_subscription_suggestion(
     suggestion_id: str,
     body: SubscriptionSuggestionDecision,
@@ -423,7 +491,7 @@ def update_subscription_suggestion(
     }
 
 
-@router.get("/reminders")
+@router.get("/reminders", response_model=SubscriptionRemindersResponse)
 def get_subscription_reminders(
     days: int = 7,
     db: Session = Depends(get_db),

@@ -101,11 +101,25 @@ class TestConnectionResponse(BaseModel):
     message: str
 
 
+class LLMProviderResponse(BaseModel):
+    name: str
+    is_local: bool
+    auth_methods: list[str]
+    requires_auth: bool
+    models: dict[str, object] | list[str]
+    description: str
+
+
+class LLMActionResponse(BaseModel):
+    success: bool
+    message: str
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
 
-@router.get("/providers")
+@router.get("/providers", response_model=dict[str, LLMProviderResponse])
 def list_providers(_user: bool = Depends(get_current_user)):
     """List all available LLM providers with their supported models."""
     return get_available_providers()
@@ -277,7 +291,7 @@ def update_llm_config(
     }
 
 
-@router.delete("/config/{config_id}")
+@router.delete("/config/{config_id}", response_model=LLMActionResponse)
 def delete_llm_config(
     config_id: str,
     db: Session = Depends(get_db),
@@ -346,6 +360,7 @@ def test_llm_connection(
 @router.post(
     "/config/activate/{config_id}",
     dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+    response_model=LLMActionResponse,
 )
 def activate_llm_config(
     config_id: str,

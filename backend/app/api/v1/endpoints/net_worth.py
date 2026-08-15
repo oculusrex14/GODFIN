@@ -126,6 +126,126 @@ class MarketDataConfig(BaseModel):
     base_currency: SupportedSubscriptionCurrency = "INR"
 
 
+class ItemConversionResponse(BaseModel):
+    status: str
+    provider: str
+    source_url: str | None
+    as_of: str | None
+    age_days: int | None
+    stale: bool | None
+    rate: float | None
+    source_currency: str
+    base_currency: str
+    unavailable_reason: str | None
+    privacy: str
+
+
+class NetWorthQuoteResponse(BaseModel):
+    id: str
+    unit_price: float
+    quote_currency: str
+    exchange_rate_to_base: float
+    total_value_base: float
+    base_currency: str
+    source: str
+    source_url: str | None
+    quoted_at: str
+    expires_at: str
+    fx_rate_source: str | None
+    fx_rate_source_url: str | None
+    fx_rate_as_of: str | None
+    matches_current_base: bool
+    expired: bool
+
+
+class NetWorthItemResponse(BaseModel):
+    id: str
+    name: str
+    item_type: str
+    asset_class: str
+    valuation_mode: str
+    symbol: str | None
+    quantity: float
+    currency: str
+    manual_value: float | None
+    valuation_source: str | None
+    source_url: str | None
+    valued_at: str | None
+    expires_on: str | None
+    notes: str | None
+    is_active: bool
+    value_base: float | None
+    native_value: float | None
+    exchange_rate_to_base: float | None
+    base_currency: str
+    source: str
+    stale: bool
+    available: bool
+    unavailable_reason: str | None
+    provenance: str
+    conversion: ItemConversionResponse | None
+    calculation_version: str
+    quote_history: list[NetWorthQuoteResponse] | None = None
+
+
+class FxSummaryResponse(BaseModel):
+    status: str
+    provider: str
+    source_url: str | None
+    as_of: str | None
+    age_days: int | None
+    stale: bool | None
+    rate_direction: str
+    rates_to_inr: dict[str, float]
+    rate_dates: dict[str, str]
+    requested_currencies: list[str]
+    privacy: str
+    unavailable_reason: str | None
+
+
+class NetWorthSummaryResponse(BaseModel):
+    base_currency: str
+    valuation_status: str
+    total_assets: float | None
+    total_liabilities: float | None
+    net_worth: float | None
+    stale_count: int
+    unavailable_item_count: int
+    valued_item_count: int
+    item_count: int
+    items: list[NetWorthItemResponse]
+    fx: FxSummaryResponse
+    calculation_version: str
+    provenance: str
+
+
+class MarketDataStatusResponse(BaseModel):
+    provider: str
+    configured: bool
+    base_currency: str
+    supported_base_currencies: list[str]
+    currency_rate_provider: str
+    key_storage: str
+    privacy: str
+
+
+class ManualRateRefreshResponse(BaseModel):
+    updated_items: int
+    total_manual_items: int
+    fx: FxSummaryResponse
+
+
+class MarketDataUpdateResponse(BaseModel):
+    provider: str
+    configured: bool
+    base_currency: str
+    supported_base_currencies: list[str]
+    key_storage: str
+    base_currency_changed: bool
+    quotes_requiring_refresh: int
+    conversion_refresh: ManualRateRefreshResponse
+
+
 def _validate_item_payload(
     *,
     valuation_mode: str,
@@ -205,7 +325,11 @@ def _prepare_item_conversion(
     return context
 
 
-@router.get("", dependencies=[Depends(NET_WORTH_ENTITLEMENT)])
+@router.get(
+    "",
+    dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+    response_model=NetWorthSummaryResponse,
+)
 def summary(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -217,6 +341,8 @@ def summary(
     "",
     status_code=201,
     dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+    response_model=NetWorthItemResponse,
+    response_model_exclude_unset=True,
 )
 def create_item(
     body: NetWorthItemCreate,
@@ -248,7 +374,12 @@ def create_item(
     return serialize_item(item, db=db, context=context)
 
 
-@router.get("/{item_id}", dependencies=[Depends(NET_WORTH_ENTITLEMENT)])
+@router.get(
+    "/{item_id}",
+    dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+    response_model=NetWorthItemResponse,
+    response_model_exclude_unset=True,
+)
 def get_item(
     item_id: str,
     db: Session = Depends(get_db),
@@ -264,7 +395,12 @@ def get_item(
     return serialize_item(item, db=db, context=context, include_history=True)
 
 
-@router.put("/{item_id}", dependencies=[Depends(NET_WORTH_ENTITLEMENT)])
+@router.put(
+    "/{item_id}",
+    dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+    response_model=NetWorthItemResponse,
+    response_model_exclude_unset=True,
+)
 def update_item(
     item_id: str,
     body: NetWorthItemUpdate,
@@ -361,6 +497,7 @@ def restore_item(
 @router.get(
     "/market-data/config/status",
     dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+    response_model=MarketDataStatusResponse,
 )
 def market_data_status(
     db: Session = Depends(get_db),
@@ -384,6 +521,7 @@ def market_data_status(
 @router.put(
     "/market-data/config",
     dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+    response_model=MarketDataUpdateResponse,
 )
 def configure_market_data(
     body: MarketDataConfig,
@@ -430,6 +568,8 @@ def configure_market_data(
 @router.post(
     "/{item_id}/refresh",
     dependencies=[Depends(NET_WORTH_ENTITLEMENT)],
+    response_model=NetWorthItemResponse,
+    response_model_exclude_unset=True,
 )
 def refresh_quote(
     item_id: str,
