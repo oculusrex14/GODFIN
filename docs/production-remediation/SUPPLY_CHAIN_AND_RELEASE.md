@@ -78,7 +78,9 @@ The frontend passed ESLint, the accessibility contract scanner, the
 memory-only auth test, and a Vite production build. The website passed payment,
 entitlement, privacy-claim, licensing, migration-hash contracts, type checking,
 and a Next.js production build. Desktop privacy and update/provenance suites
-passed seven tests each.
+passed 7 and 12 tests respectively. The 16 August 2026 remediation candidate at
+code commit `25fd5f7` passed all 876 backend tests and published explicit,
+non-empty success schemas for all 182 API operations.
 
 ## macOS arm64 private candidate
 
@@ -89,17 +91,17 @@ binaries.
 
 | Artifact | Size | SHA-256 |
 | --- | ---: | --- |
-| `GODFIN-0.1.0-mac-arm64.dmg` | 205 MiB | `bff8b7e161d87c4048c61801ffb4f9f4e46521ef252c61a97eda298b89a947c4` |
-| `GODFIN-0.1.0-mac-arm64.zip` | 205 MiB | `c9037e0e770cc7559adba09e26ad08413406dc4b00fa866903f5174c24dbdf33` |
+| `GODFIN-0.1.0-mac-arm64.dmg` | 216,583,868 bytes | `5b3fd15ae40e9ab59ea2b344f6de9e15f37e6ad2030b1d2f330253f2ed4c98c5` |
+| `GODFIN-0.1.0-mac-arm64.zip` | 216,486,747 bytes | `8bd9d5b59e11e3bdbb5edfb5f882ed953a5341a178a2d77cd0a7190154ce5b91` |
 
 The package verifier started the exact app twice in isolated user-data
 directories and recorded:
 
 | Check | Result |
 | --- | ---: |
-| Cold start | 2,916 ms |
-| Restart | 926 ms |
-| Maximum idle memory | 605.6 MiB across 5 processes |
+| Cold start | 3,000 ms |
+| Restart | 1,033 ms |
+| Maximum idle memory | 604.5 MiB across 5 processes |
 | Database preservation | Passed |
 | Local trust boundary | Passed |
 | Maintenance authorization boundary | Passed |

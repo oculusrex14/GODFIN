@@ -449,7 +449,7 @@ def build_document() -> Document:
     metadata.paragraph_format.space_after = Pt(42)
     set_run_font(
         metadata.add_run(
-            "Version 2.3  •  16 August 2026  •  oculusrex14/GODFIN (private)\n"
+            "Version 2.4  •  16 August 2026  •  oculusrex14/GODFIN (private)\n"
             "Production branch: codex/godfin-production-v5"
         ),
         size=10,
@@ -486,7 +486,7 @@ def build_document() -> Document:
     add_callout(
         document,
         "ENGINEERING BASELINE",
-        "Production remediation is tracked on the private v5 branch. The clean Python 3.12 baseline is 859 passing backend tests. Frontend lint, accessibility, authentication, and production builds pass; website contract and production builds pass; desktop release/update tests pass 12/12; and package privacy checks pass 7/7.",
+        "Production remediation is tracked on the private v5 branch. The clean Python 3.12 baseline is 876 passing backend tests. All 182 API operations publish an explicit success or intentional terminal status, a non-empty media-specific success schema, and the shared error contract. Frontend lint, accessibility, authentication, and production builds pass; website contract and production builds pass; desktop release/update tests pass 12/12; and package privacy checks pass 7/7.",
         tone="good",
     )
     for item in (
@@ -500,11 +500,11 @@ def build_document() -> Document:
         "Vercel already contains the Supabase public/server variables and LICENSE_SIGNING_SECRET. Values are encrypted and are intentionally not reproduced here.",
         "Google OAuth is active. The owner-controlled GODFIN Website project uses the rotated web client named GODFIN Website Rotated; the provider requests only openid/email/profile, the original client is revoked, and production sign-in returned successfully to /account twice on 30 July 2026.",
         "A non-revenue Max owner_test license is active for the owner account. The server stores only its hash, purchase history remains empty, and one macOS arm64 installation is verified through the normal three-device flow. The full key is retained only in macOS Keychain and encrypted local app storage.",
-        "Dependency surfaces are separated into runtime, test, and build locks. The Gmail API client is an explicit runtime dependency. All four JavaScript workspaces and both Python lock surfaces audit with no unaccepted known vulnerability; the qualified cryptography finding is documented in the signed evidence.",
+        "Dependency surfaces are separated into runtime, test, and frozen-build locks. The Gmail API client is an explicit runtime dependency. All four JavaScript workspaces and all three Python lock surfaces audit with no unaccepted known vulnerability; the qualified cryptography finding is documented in the signed evidence.",
         "The deterministic CycloneDX 1.6 SBOM contains 1,008 unique components with zero unresolved license identifiers. Third-party notices list all conditional licenses. Final human legal clearance is intentionally fail-closed and remains pending in supply-chain/legal-clearance.json.",
-        "A fresh local macOS arm64 package was built from the locked toolchain. It starts in 2.916 seconds on first launch and 0.926 seconds on restart, preserves its database, enforces the local trust boundary, and remains below the 700 MB idle-memory budget at 605.6 MB. This is an ad-hoc local test signature, not an Apple-notarized customer release.",
+        "A fresh local macOS arm64 package was built from code commit 25fd5f7 using the locked toolchain. It starts in 3.000 seconds on first launch and 1.033 seconds on restart, preserves its database, enforces the local trust and maintenance boundaries, and remains below the 700 MB idle-memory budget at 604.5 MB across five processes. The private DMG SHA-256 is 5b3fd15ae40e9ab59ea2b344f6de9e15f37e6ad2030b1d2f330253f2ed4c98c5 and the ZIP SHA-256 is 8bd9d5b59e11e3bdbb5edfb5f882ed953a5341a178a2d77cd0a7190154ce5b91. This is an ad-hoc local test signature, not an Apple-notarized customer release.",
         "Release workflows require exact tag, commit, and package-version agreement; refuse an existing GitHub Release; publish deterministic SBOM, notices, checksums, and provenance; use immutable action SHAs; and require staged promotion plus a reviewed rollback path.",
-        "Repository evidence is current through commit 59c146a on codex/godfin-production-v5.",
+        "Repository code evidence is current through commit 25fd5f7 on codex/godfin-production-v5; this v2.4 runbook and its refreshed package evidence are the next documentation-only commit.",
         "Desktop Gmail OAuth configuration, final browser-family verification, Stripe KYC/prices, Resend/DNS, custom domain, Apple/Windows certificates, R2, cross-platform clean-system evidence, dependency-license approval, and public-launch authorization are not yet complete.",
         "Reward pilot, sponsor card, PPP checkout, and OpenDataLoader shipping remain safely feature-gated where applicable.",
         "Nothing in this document authorizes a public release. Phase 6 starts only after explicit written public-launch authorization.",
@@ -642,7 +642,7 @@ def build_document() -> Document:
             ["STRIPE_PRICE_CREDITS_REGULAR", "1,200 hosted credits", "INR", "₹499"],
             ["STRIPE_PRICE_CREDITS_POWER", "3,000 hosted credits", "INR", "₹999"],
         ],
-        [2600, 3100, 1100, 2560],
+        [3260, 2500, 1000, 2600],
     )
     for item in (
         "Create every Price as one-time. Keep Test and Live Price IDs separate.",
@@ -912,13 +912,13 @@ def build_document() -> Document:
     document.add_page_break()
     document.add_heading("13. Security, privacy, payment, and recovery evidence", level=1)
     for item in (
-        "Backend: 859 tests pass under clean Python 3.12, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, goal ledgers and FD/RD suggestions, simulation reference vectors, recurring detection, atomic accounts, package privacy, CA tax pack, classification memory, performance, net worth, behavior insights, reward-pilot redaction, and UTC finance-fetch regressions.",
+        "Backend: 876 tests pass under clean Python 3.12, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, exact response contracts for all 182 API operations, goal ledgers and FD/RD suggestions, simulation reference vectors, recurring detection, atomic accounts, package privacy, CA tax pack, classification memory, performance, net worth, behavior insights, reward-pilot redaction, and UTC finance-fetch regressions.",
         "Frontend: lint, accessibility checks, authentication checks, and production build pass. Focused Playwright covers PIN entry, portal calculation help, goals, recurring re-detection, external pricing, settings disclosure, and CA tax-pack controls.",
         "Website: entitlement/payment contract verification, production build, real-app product chapters, reduced-motion fallbacks, mobile overflow, lifetime/no-bundled-credit pricing, security headers, checkout safe-disable behavior, and dependency audit pass. The final production URL scores Lighthouse performance 99, accessibility 100, and SEO 100, with LCP 1.73 seconds and CLS 0.",
         "Dependencies: runtime, test, and build Python locks are separated and hash-locked; frontend, website, desktop, and Playwright workspaces use npm ci. Audits report zero unaccepted known vulnerabilities. The Gmail API client is explicit in runtime requirements.",
         "Supply chain: deterministic CycloneDX 1.6 SBOM and third-party notices cover 1,008 unique components with zero unresolved license identifiers. Human review of conditional licenses remains a required fail-closed release gate.",
         "Release engineering: 12/12 desktop update/release workflow tests and 7/7 package privacy checks pass. All GitHub Actions are pinned to verified 40-character commit SHAs, and release provenance binds the exact commit, tag, package version, SBOM, notices, and checksums.",
-        "Local packaging: a fresh macOS arm64 candidate passed strict codesign verification, first start 2.916 seconds, restart 0.926 seconds, idle memory 605.6 MB, database preservation, local trust boundary, and maintenance-boundary checks. Gatekeeper correctly rejects it because it is not yet Apple-notarized.",
+        "Local packaging: the fresh commit-25fd5f7 macOS arm64 candidate passed strict codesign verification, first start 3.000 seconds, restart 1.033 seconds, idle memory 604.5 MB across five processes, database preservation, local trust boundary, and maintenance-boundary checks. The DMG and ZIP exact SHA-256 values are recorded in the current package evidence. Gatekeeper correctly rejects the candidate because it is not yet Apple-notarized.",
         "Secrets: gitleaks scans the complete cleaned history; no real statements, databases, tokens, keys, or customer screenshots are tracked.",
         "Recovery: empty database bootstrap, schema-revision backup, retained daily/weekly backups, restore-on-copy, upgrade, rollback, and license offline-grace tests pass.",
         "Payment: test-mode replay, amount/currency mismatch, invalid signature, unauthenticated checkout, device limit, deactivation, and resend behavior pass after provider credentials are available.",
@@ -955,7 +955,6 @@ def build_document() -> Document:
         add_list_item(document, item, check_num)
     add_owner_fields(document, ["Candidate tag", "Draft release URL", "Release reviewer", "Completed by / date"])
 
-    document.add_page_break()
     document.add_heading("15. Final website and support acceptance", level=1)
     add_callout(
         document,
@@ -1013,7 +1012,7 @@ def build_document() -> Document:
             ["Private draft + screenshots + demo", "", "☐", ""],
             ["Final public-launch authorization", "", "☐", ""],
         ],
-        [3500, 1450, 900, 3510],
+        [3300, 1300, 1100, 3660],
     )
     add_owner_fields(
         document,
