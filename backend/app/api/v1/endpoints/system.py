@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.api.v1.entitlements import require_entitlement
@@ -79,6 +79,208 @@ class MaintenanceApproval(BaseModel):
 
 class LocalAIChoice(BaseModel):
     choice: Literal["local", "provider", "none"]
+
+
+class EmbeddingStatusResponse(BaseModel):
+    enabled: bool
+    status: str
+    progress: int
+    message: str
+    updated: int
+    total: int
+    job_id: str | None = None
+    attempt: int | None = None
+    retry_at: str | None = None
+    failure_code: str | None = None
+
+
+class EmbeddingEnableResponse(EmbeddingStatusResponse):
+    started: bool
+
+
+class EmbeddingDisableResponse(BaseModel):
+    enabled: Literal[False]
+    cancel_requested: bool
+    status: Literal["disabled"]
+    message: str
+
+
+class LocalAIProfileResponse(BaseModel):
+    os: str
+    os_version: str
+    architecture: str
+    processor: str
+    total_ram_gb: float
+    available_ram_gb: float
+    memory_measurement: str
+    memory_measured_at: str
+    disk_free_gb: float
+    acceleration: str
+    ollama: dict
+    recommendation: dict
+    installed_model_metadata: dict | None
+    readiness: dict | None
+    registry: dict
+    privacy: str
+    installer_url: str
+    context_tokens: int
+    context_policy: str
+    choice: str | None
+
+
+class LocalAIChoiceResponse(BaseModel):
+    choice: Literal["local", "provider", "none"]
+
+
+class LocalAIDownloadResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    model: str | None
+    progress: int
+    message: str
+    digest: str | None
+    expected_digest: str | None
+    signature_verified: bool
+    digest_verified: bool
+    registry_version: str | None
+    registry_source: str | None
+    ollama_version: str | None
+    approved_at: str | None
+    accepted_at: str | None
+    job_id: str | None
+    pid: int | None
+    started_at: str | None
+    updated_at: str | None
+    finished_at: str | None
+    retryable: bool
+
+
+class LocalAIBenchmarkResponse(BaseModel):
+    success: bool
+    model: str
+    tokens_per_second: float
+    elapsed_seconds: float
+    response_preview: str
+    prompt_kind: str
+    authoritative_totals: Literal[False]
+    activation_ready: bool
+    context_tokens: int
+    digest: str
+    completed_at: str
+    memory_measurement: str
+    available_ram_gb: float
+    disk_free_gb: float
+    required_available_ram_gb: float
+    required_disk_free_gb: float
+    os_headroom_gb: float
+
+
+class StaleMerchantResponse(BaseModel):
+    id: str
+    normalized_name: str
+    category: str
+    confidence: float
+    last_updated: str | None
+    times_seen: int
+
+
+class StaleMerchantsResponse(BaseModel):
+    merchants: list[StaleMerchantResponse]
+    count: int
+
+
+class SuggestedRuleResponse(BaseModel):
+    pattern: str
+    rule_type: str
+    category: str
+    subcategory: str | None
+    confidence: float
+    occurrences: int
+    examples: list[str]
+
+
+class SuggestedRulesResponse(BaseModel):
+    suggestions: list[SuggestedRuleResponse]
+    count: int
+
+
+class GeneratedRuleResponse(BaseModel):
+    pattern: str
+    type: str
+    category: str
+    confidence: float
+
+
+class AutoGenerateRulesResponse(BaseModel):
+    success: Literal[True]
+    created: int
+    analyzed: int
+    rules: list[GeneratedRuleResponse]
+
+
+class MerchantMergeSuggestionResponse(BaseModel):
+    primary_id: str
+    primary_name: str
+    primary_category: str
+    primary_times_seen: int
+    duplicate_id: str
+    duplicate_name: str
+    duplicate_category: str
+    duplicate_times_seen: int
+    similarity: int
+    category_match: bool
+
+
+class MerchantMergeSuggestionsResponse(BaseModel):
+    suggestions: list[MerchantMergeSuggestionResponse]
+    count: int
+
+
+class DuplicateMerchantResponse(BaseModel):
+    id: str
+    name: str
+    category: str
+    similarity: int
+    times_seen: int
+
+
+class PrimaryMerchantResponse(BaseModel):
+    id: str
+    name: str
+    category: str
+    times_seen: int
+
+
+class DuplicateGroupResponse(BaseModel):
+    primary: PrimaryMerchantResponse
+    duplicates: list[DuplicateMerchantResponse]
+
+
+class DuplicateGroupsResponse(BaseModel):
+    groups: list[DuplicateGroupResponse]
+    count: int
+
+
+class MerchantMergeResponse(BaseModel):
+    success: Literal[True]
+    primary: str
+    duplicate: str
+    transactions_updated: int
+
+
+class SimilarMerchantResponse(BaseModel):
+    id: str
+    name: str
+    category: str
+    similarity: int
+    confidence: float
+
+
+class SimilarMerchantsResponse(BaseModel):
+    merchant_id: str
+    similar: list[SimilarMerchantResponse]
+    count: int
 
 
 @router.get("/status", response_model=SystemStatus)
@@ -175,7 +377,11 @@ def download_support_diagnostics(
     return SupportDiagnostics(**payload)
 
 
-@router.get("/embeddings/status")
+@router.get(
+    "/embeddings/status",
+    response_model=EmbeddingStatusResponse,
+    response_model_exclude_unset=True,
+)
 def embedding_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -208,6 +414,8 @@ def embedding_status(
     "/embeddings/enable",
     status_code=202,
     dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+    response_model=EmbeddingEnableResponse,
+    response_model_exclude_unset=True,
 )
 def enable_embeddings(
     request: Request,
@@ -245,7 +453,7 @@ def enable_embeddings(
     }
 
 
-@router.post("/embeddings/disable")
+@router.post("/embeddings/disable", response_model=EmbeddingDisableResponse)
 def disable_embeddings(
     request: Request,
     body: MaintenanceApproval = Body(default=MaintenanceApproval()),
@@ -278,7 +486,7 @@ def disable_embeddings(
     }
 
 
-@router.get("/local-ai/profile")
+@router.get("/local-ai/profile", response_model=LocalAIProfileResponse)
 def local_ai_profile(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -291,7 +499,7 @@ def local_ai_profile(
     return profile
 
 
-@router.put("/local-ai/choice")
+@router.put("/local-ai/choice", response_model=LocalAIChoiceResponse)
 def choose_local_ai(
     body: LocalAIChoice,
     db: Session = Depends(get_db),
@@ -307,7 +515,7 @@ def choose_local_ai(
     return {"choice": body.choice}
 
 
-@router.get("/local-ai/download")
+@router.get("/local-ai/download", response_model=LocalAIDownloadResponse)
 def local_ai_download_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -317,7 +525,11 @@ def local_ai_download_status(
     return restore_download_status(db)
 
 
-@router.post("/local-ai/download", status_code=202)
+@router.post(
+    "/local-ai/download",
+    status_code=202,
+    response_model=LocalAIDownloadResponse,
+)
 def local_ai_download(
     body: LocalModelAction,
     request: Request,
@@ -370,7 +582,10 @@ def local_ai_download(
         ) from exc
 
 
-@router.post("/local-ai/download/cancel")
+@router.post(
+    "/local-ai/download/cancel",
+    response_model=LocalAIDownloadResponse,
+)
 def cancel_local_ai_download(
     _user: bool = Depends(get_current_user),
 ):
@@ -379,7 +594,7 @@ def cancel_local_ai_download(
     return cancel_model_pull()
 
 
-@router.post("/local-ai/benchmark")
+@router.post("/local-ai/benchmark", response_model=LocalAIBenchmarkResponse)
 def local_ai_benchmark(
     body: LocalModelAction,
     request: Request,
@@ -426,7 +641,7 @@ def local_ai_benchmark(
         ) from exc
 
 
-@router.get("/stale-merchants")
+@router.get("/stale-merchants", response_model=StaleMerchantsResponse)
 def get_stale_merchants_endpoint(
     days: int = 180,
     limit: int = 50,
@@ -454,7 +669,7 @@ def get_stale_merchants_endpoint(
     }
 
 
-@router.get("/suggested-rules")
+@router.get("/suggested-rules", response_model=SuggestedRulesResponse)
 def get_suggested_rules_endpoint(
     min_occurrences: int = 3,
     limit: int = 20,
@@ -472,7 +687,7 @@ def get_suggested_rules_endpoint(
     }
 
 
-@router.post("/auto-generate-rules")
+@router.post("/auto-generate-rules", response_model=AutoGenerateRulesResponse)
 def trigger_auto_generate_rules(
     min_occurrences: int = 3,
     max_rules: int = 10,
@@ -496,7 +711,10 @@ def trigger_auto_generate_rules(
     }
 
 
-@router.get("/merchant-merge-suggestions")
+@router.get(
+    "/merchant-merge-suggestions",
+    response_model=MerchantMergeSuggestionsResponse,
+)
 def get_merchant_merge_suggestions(
     threshold: int = 80,
     limit: int = 20,
@@ -528,7 +746,7 @@ def get_merchant_merge_suggestions(
     }
 
 
-@router.get("/duplicate-groups")
+@router.get("/duplicate-groups", response_model=DuplicateGroupsResponse)
 def get_duplicate_groups_endpoint(
     threshold: int = 85,
     db: Session = Depends(get_db),
@@ -545,7 +763,7 @@ def get_duplicate_groups_endpoint(
     }
 
 
-@router.post("/merge-merchants")
+@router.post("/merge-merchants", response_model=MerchantMergeResponse)
 def merge_merchants_endpoint(
     primary_id: str,
     duplicate_id: str,
@@ -568,7 +786,10 @@ def merge_merchants_endpoint(
     return result
 
 
-@router.get("/merchants/{merchant_id}/similar")
+@router.get(
+    "/merchants/{merchant_id}/similar",
+    response_model=SimilarMerchantsResponse,
+)
 def get_similar_merchants(
     merchant_id: str,
     db: Session = Depends(get_db),
