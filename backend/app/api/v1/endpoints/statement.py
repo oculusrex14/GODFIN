@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import multiprocessing
 import secrets
+import sys
 import threading
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -70,7 +73,155 @@ def _resolve_account_id(db: Session, statement_type: str, account_id: str = None
 SUPPORTED_EXTENSIONS = ('.pdf', '.xls', '.xlsx')
 MAX_STATEMENT_BYTES = 10 * 1024 * 1024
 STATEMENT_READ_CHUNK_BYTES = 1024 * 1024
+MAX_PARSED_TRANSACTIONS = 10_000
+PARSER_TIMEOUT_SECONDS = 45.0
+PARSER_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024
 _PARSER_SLOTS = threading.BoundedSemaphore(value=2)
+
+
+class StatementParserTimeout(RuntimeError):
+    """A statement parser worker exceeded its interactive safety budget."""
+
+
+class StatementParserWorkerError(RuntimeError):
+    """A statement parser worker crashed or returned an invalid result."""
+
+
+def _apply_parser_memory_limit() -> None:
+    """Bound parser address space on Linux without weakening portability."""
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import resource
+
+        resource.setrlimit(
+            resource.RLIMIT_AS,
+            (PARSER_MEMORY_LIMIT_BYTES, PARSER_MEMORY_LIMIT_BYTES),
+        )
+    except (ImportError, OSError, ValueError):
+        # Windows and macOS use the same process/timeout isolation, but do not
+        # expose a dependable per-child address-space limit through stdlib.
+        return
+
+
+def _statement_parser_worker(
+    send_connection,
+    contents: bytes,
+    file_format: str,
+    password: Optional[str],
+) -> None:
+    """Parse one untrusted statement in a disposable child process."""
+    try:
+        _apply_parser_memory_limit()
+        result = parse_registered_statement(contents, file_format, password)
+        if len(result.transactions) > MAX_PARSED_TRANSACTIONS:
+            result.transactions.clear()
+            result.reconciliation_status = "failed"
+            result.errors.append(
+                f"Statement exceeds the {MAX_PARSED_TRANSACTIONS:,}-row review limit"
+            )
+        send_connection.send(("ok", result))
+    except BaseException:
+        # Deliberately do not send exception text or a traceback across the
+        # trust boundary; parser/library errors may contain private file data.
+        try:
+            send_connection.send(("error", None))
+        except (BrokenPipeError, EOFError, OSError):
+            pass
+    finally:
+        send_connection.close()
+
+
+def _terminate_parser_process(process: multiprocessing.Process) -> None:
+    if not process.is_alive():
+        process.join(timeout=0.2)
+        return
+    process.terminate()
+    process.join(timeout=2.0)
+    if process.is_alive() and hasattr(process, "kill"):
+        process.kill()
+        process.join(timeout=1.0)
+
+
+def _run_parser_process(
+    contents: bytes,
+    file_format: str,
+    password: Optional[str],
+    cancel_event: threading.Event,
+    *,
+    timeout_seconds: float = PARSER_TIMEOUT_SECONDS,
+):
+    """Run and supervise one parser process with timeout and cancellation."""
+    context = multiprocessing.get_context("spawn")
+    receive_connection, send_connection = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_statement_parser_worker,
+        args=(send_connection, contents, file_format, password),
+        daemon=True,
+        name="godfin-statement-parser",
+    )
+    started_at = time.monotonic()
+    process_started = False
+    try:
+        process.start()
+        process_started = True
+        send_connection.close()
+        while True:
+            if cancel_event.is_set():
+                raise asyncio.CancelledError
+            if receive_connection.poll(0.05):
+                try:
+                    status, payload = receive_connection.recv()
+                except EOFError as exc:
+                    raise StatementParserWorkerError(
+                        "The statement parser stopped unexpectedly."
+                    ) from exc
+                process.join(timeout=1.0)
+                if status != "ok" or payload is None:
+                    raise StatementParserWorkerError(
+                        "The statement parser could not inspect this file safely."
+                    )
+                return payload
+            if not process.is_alive():
+                process.join(timeout=0.2)
+                raise StatementParserWorkerError(
+                    "The statement parser stopped unexpectedly."
+                )
+            if time.monotonic() - started_at >= timeout_seconds:
+                raise StatementParserTimeout(
+                    "Statement inspection exceeded the safe time limit."
+                )
+    finally:
+        receive_connection.close()
+        send_connection.close()
+        if process_started:
+            _terminate_parser_process(process)
+
+
+async def _parse_in_isolated_process(
+    contents: bytes,
+    file_format: str,
+    password: Optional[str],
+):
+    cancel_event = threading.Event()
+    task = asyncio.create_task(
+        asyncio.to_thread(
+            _run_parser_process,
+            contents,
+            file_format,
+            password,
+            cancel_event,
+        )
+    )
+    try:
+        return await task
+    except asyncio.CancelledError:
+        cancel_event.set()
+        try:
+            await asyncio.shield(task)
+        except (asyncio.CancelledError, StatementParserTimeout, StatementParserWorkerError):
+            pass
+        raise
 
 
 def _detect_file_format(filename: str, contents: bytes) -> str:
@@ -122,12 +273,18 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
             headers={"Retry-After": "3"},
         )
     try:
-        parse_result = await asyncio.to_thread(
-            parse_registered_statement,
-            contents,
-            fmt,
-            password,
-        )
+        try:
+            parse_result = await _parse_in_isolated_process(contents, fmt, password)
+        except StatementParserTimeout as exc:
+            raise HTTPException(
+                status_code=408,
+                detail="Statement inspection timed out. Try a smaller statement.",
+            ) from exc
+        except StatementParserWorkerError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="The statement could not be inspected safely.",
+            ) from exc
     finally:
         _PARSER_SLOTS.release()
     parse_result.source_digest = hashlib.sha256(contents).hexdigest()

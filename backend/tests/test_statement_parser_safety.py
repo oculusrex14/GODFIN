@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import io
+import threading
 from datetime import date
 
+import pytest
 from openpyxl import Workbook
 
 from app.core.parsers import parse_registered_statement
@@ -292,13 +295,13 @@ def test_upload_limit_is_enforced_while_streaming(auth_client):
 def test_parser_work_is_dispatched_through_the_worker_boundary(auth_client, monkeypatch):
     from app.api.v1.endpoints import statement
 
-    calls: list[tuple[object, tuple[object, ...]]] = []
+    calls: list[tuple[bytes, str, object]] = []
 
-    async def recording_to_thread(function, *args):
-        calls.append((function, args))
-        return function(*args)
+    async def recording_process(contents, file_format, password):
+        calls.append((contents, file_format, password))
+        return parse_registered_statement(contents, file_format, password)
 
-    monkeypatch.setattr(statement.asyncio, "to_thread", recording_to_thread)
+    monkeypatch.setattr(statement, "_parse_in_isolated_process", recording_process)
     response = auth_client.post(
         "/api/v1/ingest/upload/preview",
         files={"file": ("statement.xlsx", _xlsx(_valid_rows()))},
@@ -306,7 +309,125 @@ def test_parser_work_is_dispatched_through_the_worker_boundary(auth_client, monk
 
     assert response.status_code == 200
     assert calls
-    assert calls[0][0] is statement.parse_registered_statement
+    assert calls[0][1] == "xlsx"
+
+
+def test_real_parser_process_returns_a_reconciled_statement():
+    from app.api.v1.endpoints import statement
+
+    result = statement._run_parser_process(
+        _xlsx(_valid_rows()),
+        "xlsx",
+        None,
+        threading.Event(),
+        timeout_seconds=15,
+    )
+
+    assert result.recognized is True
+    assert result.reconciliation_status == "passed"
+    assert len(result.transactions) == 2
+
+
+def test_parser_timeout_is_reported_without_leaving_a_worker(monkeypatch):
+    from app.api.v1.endpoints import statement
+
+    class _NeverResponds:
+        exitcode = None
+
+        def start(self):
+            return None
+
+        def is_alive(self):
+            return self.exitcode is None
+
+        def terminate(self):
+            self.exitcode = -15
+
+        def join(self, timeout=None):
+            return None
+
+        def kill(self):
+            self.exitcode = -9
+
+    class _Connection:
+        def close(self):
+            return None
+
+        def poll(self, timeout=0):
+            return False
+
+    class _Context:
+        process = _NeverResponds()
+
+        def Pipe(self, duplex=False):
+            return _Connection(), _Connection()
+
+        def Process(self, **kwargs):
+            return self.process
+
+    context = _Context()
+    monkeypatch.setattr(statement.multiprocessing, "get_context", lambda _name: context)
+
+    with pytest.raises(statement.StatementParserTimeout):
+        statement._run_parser_process(
+            b"synthetic",
+            "pdf",
+            None,
+            threading.Event(),
+            timeout_seconds=0,
+        )
+
+    assert context.process.exitcode == -15
+
+
+def test_parser_cancellation_is_reported_and_terminates_worker(monkeypatch):
+    from app.api.v1.endpoints import statement
+
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    class _Process:
+        exitcode = None
+
+        def start(self):
+            return None
+
+        def is_alive(self):
+            return self.exitcode is None
+
+        def terminate(self):
+            self.exitcode = -15
+
+        def join(self, timeout=None):
+            return None
+
+    class _Connection:
+        def close(self):
+            return None
+
+        def poll(self, timeout=0):
+            return False
+
+    process = _Process()
+    context = type(
+        "Context",
+        (),
+        {
+            "Pipe": lambda self, duplex=False: (_Connection(), _Connection()),
+            "Process": lambda self, **kwargs: process,
+        },
+    )()
+    monkeypatch.setattr(statement.multiprocessing, "get_context", lambda _name: context)
+
+    with pytest.raises(asyncio.CancelledError):
+        statement._run_parser_process(
+            b"synthetic",
+            "pdf",
+            None,
+            cancel_event,
+        )
+
+    assert process.exitcode == -15
 
 
 def test_parser_concurrency_limit_returns_retryable_busy_response(auth_client):

@@ -11,6 +11,9 @@ from app.core.parsers.hdfc_savings import PARSER as hdfc_savings
 from app.core.statement_parser import StatementParseResult
 
 
+MAX_PDF_PAGES = 250
+
+
 def registered_parsers() -> tuple[StatementParserPlugin, ...]:
     # Explicit imports keep parser plugins discoverable in frozen builds.
     return (hdfc_savings, hdfc_cc)
@@ -44,6 +47,8 @@ def _pdf_text(contents: bytes, password: Optional[str]) -> tuple[str, Optional[s
             "The PDF could not be opened. Check the file and its password, then try again."
         )
     try:
+        if len(pdf.pages) > MAX_PDF_PAGES:
+            return "", f"PDF exceeds the {MAX_PDF_PAGES}-page review limit"
         return "\n".join(page.extract_text() or "" for page in pdf.pages), None
     except Exception:
         return "", "The PDF layout could not be inspected safely."
