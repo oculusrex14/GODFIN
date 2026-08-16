@@ -113,7 +113,7 @@ See `MIGRATION_AND_ROLLBACK.md` and `DISASTER_RECOVERY_RUNBOOK.md`.
 | Database SQL | all Supabase SQL parsed; pgTAP authored but not executed without PostgreSQL/Docker |
 | Secret scanning | staged and full-history scans report no leak in the production repository |
 | Dependency audits | npm reports zero known vulnerabilities; pip-audit reports no unexcepted findings and one documented temporary exception (`PYSEC-2026-3552`, cryptography 49.0.0) because GODFIN does not use the affected PKCS#7 decrypt APIs and the assigned 50.0.0 fix is not yet available |
-| macOS arm64 private package | 3.0 s first start, 1.033 s restart, 604.5 MiB max idle, data preserved, package privacy passed |
+| macOS arm64 private package | 3.376 s first start, 1.229 s restart, 607 MiB max idle, data preserved, package privacy passed; corrected Gmail-restart build installed |
 | Other native platforms | not executed; CI build paths exist and external clean-machine evidence is assigned |
 
 Exact commands and current results are in `VERIFICATION_MATRIX.md`.

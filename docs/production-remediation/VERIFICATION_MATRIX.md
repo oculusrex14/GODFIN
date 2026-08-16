@@ -23,7 +23,7 @@ This matrix records the current executable evidence. “Not executed” is never
 | Supabase SQL syntax | pglast parse of all migration and pgTAP files | Passed | pgTAP not executed without PostgreSQL/Docker |
 | Desktop privacy/integrity | `npm run test:privacy` in `desktop` | Passed: 7 at current production baseline | Other native package formats pending |
 | Update/release contracts | `npm run test:update` and packaging tests | Passed: 12 at current production baseline | Signed updater/R2 staged drills pending |
-| macOS arm64 package | `docs/production-remediation/evidence/macos-arm64-package-0.1.0.json` | Passed private ad-hoc package/privacy/data-preservation checks | Not notarized; Gatekeeper correctly rejects public use |
+| macOS arm64 package | `docs/production-remediation/evidence/macos-arm64-package-0.1.0-ea76be1.json` | Passed private ad-hoc package/privacy/data-preservation checks; corrected Gmail-restart build installed with backend auto-start verified | Not notarized; Gatekeeper correctly rejects public use |
 | Python dependency audit | pip-audit 2.10.1 over runtime/test/build locks | Passed with no unexcepted findings; one documented temporary `PYSEC-2026-3552` exception for unused PKCS#7 decrypt APIs in cryptography 49.0.0 | Upgrade/remove exception as soon as the assigned fixed version is available; repeat on final candidate |
 | npm production audits | frontend/website/desktop locked sets | Passed, no known production vulnerabilities | Repeat on final immutable candidate |
 | SBOM/notices | supply-chain verifier and package byte comparison | Passed: 1,035-component current SBOM evidence | Qualified license review pending |
