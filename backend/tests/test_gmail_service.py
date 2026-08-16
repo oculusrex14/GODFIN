@@ -183,6 +183,47 @@ def test_oauth_callback_consumes_state_once_and_persists_credentials(
 
 
 @pytest.mark.parametrize(
+    "stored_expiry",
+    [
+        (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        (datetime.now(timezone.utc) + timedelta(hours=1))
+        .replace(tzinfo=None)
+        .isoformat(),
+        (datetime.now(timezone.utc) + timedelta(hours=1))
+        .isoformat()
+        .replace("+00:00", "Z"),
+    ],
+)
+def test_persisted_credentials_reload_after_restart(
+    fake_oauth,
+    monkeypatch,
+    stored_expiry,
+):
+    gmail_module.TOKEN_FILE.write_text(
+        json.dumps(
+            {
+                "token": encrypt("access-token"),
+                "refresh_token": encrypt("refresh-token"),
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "client_id": "test-client.apps.googleusercontent.com",
+                "client_secret": encrypt("test-secret"),
+                "scopes": [GMAIL_READONLY_SCOPE],
+                "expiry": stored_expiry,
+            }
+        ),
+        encoding="utf-8",
+    )
+    service = GmailService()
+    monkeypatch.setattr(service, "_build_service", lambda: None)
+
+    assert service.load_credentials() is True
+    assert service._credentials is not None
+    assert service._credentials.expiry is not None
+    assert service._credentials.expiry.tzinfo is None
+    assert service.connection_health().status == "connected"
+
+
+@pytest.mark.parametrize(
     ("state", "expected_code"),
     [("", "missing_state"), ("wrong-state", "invalid_state")],
 )

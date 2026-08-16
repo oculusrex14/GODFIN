@@ -123,6 +123,27 @@ def _utcnow_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _credentials_expiry_from_storage(value: str | None) -> datetime | None:
+    """Return the naive-UTC expiry representation required by google-auth."""
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _credentials_expiry_for_storage(value: datetime | None) -> str | None:
+    """Persist an unambiguous UTC timestamp without changing the instant."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat().replace("+00:00", "Z")
+
+
 def _state_hash(state: str) -> str:
     return hashlib.sha256(state.encode("utf-8")).hexdigest()
 
@@ -485,10 +506,8 @@ class GmailService:
             'client_id': self._credentials.client_id,
             'client_secret': encrypt(self._credentials.client_secret) if self._credentials.client_secret else None,
             'scopes': list(self._credentials.scopes) if self._credentials.scopes else [],
-            'expiry': (
-                self._credentials.expiry.isoformat()
-                if self._credentials.expiry is not None
-                else None
+            'expiry': _credentials_expiry_for_storage(
+                self._credentials.expiry
             ),
         }
         TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -530,12 +549,9 @@ class GmailService:
             with open(TOKEN_FILE, "r", encoding="utf-8") as f:
                 token_data = json.load(f)
 
-            expiry = token_data.get('expiry')
-            parsed_expiry = None
-            if expiry:
-                parsed_expiry = datetime.fromisoformat(expiry)
-                if parsed_expiry.tzinfo is None:
-                    parsed_expiry = parsed_expiry.replace(tzinfo=timezone.utc)
+            parsed_expiry = _credentials_expiry_from_storage(
+                token_data.get('expiry')
+            )
 
             # Decrypt sensitive fields
             self._credentials = Credentials(
