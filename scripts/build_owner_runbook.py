@@ -250,18 +250,28 @@ def add_numbering(document: Document, *, kind: str) -> int:
         "%1." if kind == "decimal" else ("☐" if kind == "check" else "•"),
     )
     level.append(level_text)
+    if kind == "decimal":
+        # A space suffix is stable when LibreOffice paginates a long list; the
+        # default tab suffix can strand the next marker at the prior line end.
+        suffix = OxmlElement("w:suff")
+        suffix.set(qn("w:val"), "space")
+        level.append(suffix)
     justification = OxmlElement("w:lvlJc")
     justification.set(qn("w:val"), "left")
     level.append(justification)
     p_pr = OxmlElement("w:pPr")
+    # Decimal instructions exceed 100 items, so reserve enough marker width for
+    # three digits plus punctuation. Bullet/check lists retain the compact inset.
+    list_left = "900" if kind == "decimal" else "720"
+    list_hanging = "540" if kind == "decimal" else "360"
     tabs = OxmlElement("w:tabs")
     tab = OxmlElement("w:tab")
     tab.set(qn("w:val"), "num")
-    tab.set(qn("w:pos"), "720")
+    tab.set(qn("w:pos"), list_left)
     tabs.append(tab)
     indent = OxmlElement("w:ind")
-    indent.set(qn("w:left"), "720")
-    indent.set(qn("w:hanging"), "360")
+    indent.set(qn("w:left"), list_left)
+    indent.set(qn("w:hanging"), list_hanging)
     spacing = OxmlElement("w:spacing")
     spacing.set(qn("w:after"), "60")
     spacing.set(qn("w:line"), "276")
@@ -449,7 +459,7 @@ def build_document() -> Document:
     metadata.paragraph_format.space_after = Pt(42)
     set_run_font(
         metadata.add_run(
-            "Version 2.5  •  16 August 2026  •  oculusrex14/GODFIN (private)\n"
+            "Version 2.6  •  16 August 2026  •  oculusrex14/GODFIN (private)\n"
             "Production branch: codex/godfin-production-v5"
         ),
         size=10,
@@ -486,7 +496,7 @@ def build_document() -> Document:
     add_callout(
         document,
         "ENGINEERING BASELINE",
-        "Production remediation is tracked on the private v5 branch. The clean Python 3.12 baseline is 878 passing backend tests. All 182 API operations publish an explicit success or intentional terminal status, a non-empty media-specific success schema, and the shared error contract. Frontend lint, accessibility, authentication, and production builds pass; five executable Cashfree contract tests and the website production build pass; desktop release/update tests pass 12/12; and package privacy checks pass 7/7.",
+        "Production remediation is tracked on the private v5 branch. The clean Python 3.12 baseline is 883 passing backend tests. All 182 API operations publish an explicit success or intentional terminal status, a non-empty media-specific success schema, and the shared error contract. Frontend lint, accessibility, authentication, and production builds pass; five executable Cashfree contract tests and the website production build pass; desktop release/update tests pass 12/12; and package privacy checks pass 7/7.",
         tone="good",
     )
     for item in (
@@ -502,11 +512,11 @@ def build_document() -> Document:
         "A non-revenue Max owner_test license is active for the owner account. The server stores only its hash, purchase history remains empty, and one macOS arm64 installation is verified through the normal three-device flow. The full key is retained only in macOS Keychain and encrypted local app storage.",
         "Dependency surfaces are separated into runtime, test, and frozen-build locks. The Gmail API client is an explicit runtime dependency. All four JavaScript workspaces and all three Python lock surfaces audit with no unaccepted known vulnerability; the qualified cryptography finding is documented in the signed evidence.",
         "The deterministic CycloneDX 1.6 SBOM contains 1,035 unique components with zero unresolved license identifiers. Third-party notices list all conditional licenses. Final human legal clearance is intentionally fail-closed and remains pending in supply-chain/legal-clearance.json.",
-        "A fresh local macOS arm64 package was built from code commit 25fd5f7 using the locked toolchain. It starts in 3.000 seconds on first launch and 1.033 seconds on restart, preserves its database, enforces the local trust and maintenance boundaries, and remains below the 700 MB idle-memory budget at 604.5 MB across five processes. The private DMG SHA-256 is 5b3fd15ae40e9ab59ea2b344f6de9e15f37e6ad2030b1d2f330253f2ed4c98c5 and the ZIP SHA-256 is 8bd9d5b59e11e3bdbb5edfb5f882ed953a5341a178a2d77cd0a7190154ce5b91. This is an ad-hoc local test signature, not an Apple-notarized customer release.",
+        "A fresh local macOS arm64 package was built from repository commit ea76be1, containing Gmail restart fix 8dce936, using the locked toolchain. It starts in 3.376 seconds on first launch and 1.229 seconds on restart, preserves its database, enforces the local trust and maintenance boundaries, and remains below the 700 MB idle-memory budget at 607 MB across five processes. The private DMG SHA-256 is 2b68a8245c5c622f2def9b364eca6864eb3a1f58192a75032dcd8c50f2c65937 and the ZIP SHA-256 is 59cfcf718772a1b5a59064a0e9b66b9a20ed7d22182fed7d3bcc3122f7e56a9d. This is an ad-hoc local test signature, not an Apple-notarized customer release.",
         "Release workflows require exact tag, commit, and package-version agreement; refuse an existing GitHub Release; publish deterministic SBOM, notices, checksums, and provenance; use immutable action SHAs; and require staged promotion plus a reviewed rollback path.",
-        "Repository code evidence is current through commit aeb5cb9 on codex/godfin-production-v5. Cashfree, canonical-domain, Gmail-callback, and bounded-job changes are pushed privately; this v2.5 runbook is the next documentation-only commit.",
-        "The Gmail callback trust defect is fixed in the installed app: the exact external-browser callback may reach the OAuth handler while ordinary routes still require the per-launch secret. Owner consent/sync/disconnect/reconnect must now be retried with the configured Desktop client; naraharikripa14@gmail.com is also listed as a Google test user.",
-        "Final Gmail consent, Cashfree KYC/sandbox/live tests, Supabase migration 0006 deployment, Resend DNS, Google/Supabase canonical redirect updates, Apple/Windows certificates, R2, cross-platform clean-system evidence, dependency-license approval, and public-launch authorization are not yet complete.",
+        "Repository evidence is current through commit 9e355bf on codex/godfin-production-v5. Cashfree, canonical-domain, Gmail callback, credential-restart, browser-matrix, and bounded-job changes are pushed privately; this v2.6 runbook is the next documentation-only commit.",
+        "The private desktop Gmail flow is complete: the exact external-browser callback reaches the OAuth handler while ordinary routes still require the per-launch secret; owner consent succeeded; the first sync processed 718 messages and created 158 transactions; and persisted credentials now reload after a complete desktop/backend restart. naraharikripa14@gmail.com is also listed as a Google test user.",
+        "Public Gmail consent-screen review, Cashfree KYC/sandbox/live tests, Supabase migration 0006 deployment, Resend DNS, Google/Supabase canonical redirect updates, Apple/Windows certificates, R2, cross-platform clean-system evidence, dependency-license approval, GitHub Actions billing, and public-launch authorization are not yet complete.",
         "Reward pilot, sponsor card, PPP checkout, and OpenDataLoader shipping remain safely feature-gated where applicable.",
         "Nothing in this document authorizes a public release. Phase 6 starts only after explicit written public-launch authorization.",
     ):
@@ -518,7 +528,7 @@ def build_document() -> Document:
         document,
         ["Blocker", "Why blocked", "Your intervention", "Completion evidence"],
         [
-            ["Desktop Gmail OAuth", "Client setup is done and callback trust is fixed; end-to-end consent/sync has not been re-run.", "Retry Connect Gmail in the installed app and complete Google consent.", "Connect, callback, status, sync, disconnect, and reauthorization pass."],
+            ["GitHub Actions billing", "GitHub rejects every hosted CI job before step 1 because the account payment or Actions spending limit blocks runners.", "Open account Billing & licensing; fix the payment method and create or raise a GitHub Actions budget that permits usage.", "The exact private candidate CI run starts every job and finishes green."],
             ["Dependency legal review", "Automated license inventory is complete; human approval is not.", "Review conditional licenses and sign legal-clearance.json without changing evidence hashes.", "Release gate reports approved and the signed record is archived."],
             ["Cashfree India", "Repository integration exists; KYC, credentials, webhook, and sandbox evidence are absent.", "Complete KYC; configure sandbox keys and all required webhook events.", "Replay-safe purchase, refund, dispute, and email flows pass."],
             ["Resend + DNS", "No sending key/domain verification.", "Verify godfin.dev and add the production key.", "SPF, DKIM, DMARC and two inbox tests pass."],
@@ -526,7 +536,7 @@ def build_document() -> Document:
             ["Signing", "No GitHub signing secrets are configured.", "Complete Apple and Windows signing enrollment.", "Notarized/signed installers verify."],
             ["R2 updates", "No release bucket or releases.godfin.dev.", "Create R2, DNS, and least-privilege secrets.", "Immutable assets and updater metadata resolve."],
             ["Clean systems", "Only local macOS arm64 packaging is evidenced.", "Provide clean supported VMs/hardware.", "Install/upgrade/recovery matrix is signed."],
-            ["Browser matrix", "Provider-backed browser checks are deferred to the final tranche.", "Run supported Chrome, Safari, Firefox, and Edge acceptance flows.", "Screenshots, traces, accessibility, and isolation evidence are archived."],
+            ["Browser matrix", "Twelve Chromium, Firefox, and WebKit cases enumerate locally, but hosted jobs cannot start until GitHub Actions billing is restored.", "Fix Actions billing first; then run CI plus supported Chrome, Safari, Firefox, and Edge acceptance flows.", "Green run, screenshots, traces, accessibility, and isolation evidence are archived."],
             ["Public launch", "Owner authorization has not been issued.", "Complete final gate and sign Section 16.", "Written authorization and release IDs."],
         ],
         [1500, 2100, 3000, 2760],
@@ -945,13 +955,13 @@ def build_document() -> Document:
     document.add_page_break()
     document.add_heading("13. Security, privacy, payment, and recovery evidence", level=1)
     for item in (
-        "Backend: 878 tests pass under clean Python 3.12, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, bounded background-job lock recovery, exact response contracts for all 182 API operations, goal ledgers and FD/RD suggestions, simulation reference vectors, recurring detection, atomic accounts, package privacy, CA tax pack, classification memory, performance, net worth, behavior insights, reward-pilot redaction, and UTC finance-fetch regressions.",
+        "Backend: 883 tests pass under clean Python 3.12, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, bounded background-job lock recovery, exact response contracts for all 182 API operations, Gmail credential reload after restart, goal ledgers and FD/RD suggestions, simulation reference vectors, recurring detection, atomic accounts, package privacy, CA tax pack, classification memory, performance, net worth, behavior insights, reward-pilot redaction, and UTC finance-fetch regressions.",
         "Frontend: lint, accessibility checks, authentication checks, and production build pass. Focused Playwright covers PIN entry, portal calculation help, goals, recurring re-detection, external pricing, settings disclosure, and CA tax-pack controls.",
         "Website: entitlement/payment contract verification, production build, real-app product chapters, reduced-motion fallbacks, mobile overflow, lifetime/no-bundled-credit pricing, security headers, checkout safe-disable behavior, and dependency audit pass. The final production URL scores Lighthouse performance 99, accessibility 100, and SEO 100, with LCP 1.73 seconds and CLS 0.",
         "Dependencies: runtime, test, and build Python locks are separated and hash-locked; frontend, website, desktop, and Playwright workspaces use npm ci. Audits report zero unaccepted known vulnerabilities. The Gmail API client is explicit in runtime requirements.",
         "Supply chain: deterministic CycloneDX 1.6 SBOM and third-party notices cover 1,035 unique components with zero unresolved license identifiers. Human review of conditional licenses remains a required fail-closed release gate.",
         "Release engineering: 12/12 desktop update/release workflow tests and 7/7 package privacy checks pass. All GitHub Actions are pinned to verified 40-character commit SHAs, and release provenance binds the exact commit, tag, package version, SBOM, notices, and checksums.",
-        "Local packaging: the fresh commit-25fd5f7 macOS arm64 candidate passed strict codesign verification, first start 3.000 seconds, restart 1.033 seconds, idle memory 604.5 MB across five processes, database preservation, local trust boundary, and maintenance-boundary checks. The DMG and ZIP exact SHA-256 values are recorded in the current package evidence. Gatekeeper correctly rejects the candidate because it is not yet Apple-notarized.",
+        "Local packaging: the fresh ea76be1 macOS arm64 candidate, containing Gmail restart fix 8dce936, passed strict codesign verification, first start 3.376 seconds, restart 1.229 seconds, idle memory 607 MB across five processes, database preservation, local trust boundary, maintenance boundary, backend auto-start, and callback-path checks. The DMG and ZIP exact SHA-256 values are recorded in the current package evidence. Gatekeeper correctly rejects the candidate because it is not yet Apple-notarized.",
         "Secrets: gitleaks scans the complete cleaned history; no real statements, databases, tokens, keys, or customer screenshots are tracked.",
         "Recovery: empty database bootstrap, schema-revision backup, retained daily/weekly backups, restore-on-copy, upgrade, rollback, and license offline-grace tests pass.",
         "Payment: test-mode replay, amount/currency mismatch, invalid signature, unauthenticated checkout, device limit, deactivation, and resend behavior pass after provider credentials are available.",
@@ -961,9 +971,21 @@ def build_document() -> Document:
     add_callout(
         document,
         "CI RELEASE GATE",
-        "Do not tag a candidate until the CI run for the exact commit is green. A local pass is necessary but not sufficient.",
+        "Do not tag a candidate until the CI run for the exact commit is green. Current jobs do not reach step 1 because GitHub reports a failed account payment or Actions spending limit. A local pass is necessary but not sufficient.",
         tone="warn",
     )
+    document.add_heading("13.1 Restore GitHub Actions in plain language", level=2)
+    for item in (
+        "Open https://github.com/settings/billing in the GitHub account that owns oculusrex14/GODFIN. Sign in and complete password or two-factor checks yourself.",
+        "Open Payment information. If GitHub shows a failed, expired, or missing payment method, add or correct it. Do not share card details, billing address, one-time passwords, or screenshots containing them.",
+        "Open Budgets and alerts. Find a GitHub Actions budget for the personal account or this repository. If it stops usage at zero or at a reached limit, raise it to a small monthly amount you are comfortable with, or disable only the stop-usage control. Keep email alerts enabled.",
+        "Return to https://github.com/oculusrex14/GODFIN/actions. Open the newest failed CI run and choose Re-run all jobs. If the button is missing, push no new code; ask Codex to re-run the existing private workflow through GitHub CLI after billing is fixed.",
+        "A successful repair is obvious: backend, frontend, website, website-browser-matrix, desktop-audit, and e2e show real steps instead of failing instantly. Wait until all six are green, then copy only the run URL into the evidence field below.",
+        "If GitHub still shows the same billing annotation after payment and budget changes, wait up to 15 minutes, sign out/in, and contact GitHub Billing Support. Do not make the repository public to obtain free Actions minutes.",
+    ):
+        add_list_item(document, item, decimal_num)
+    add_source(document, "GitHub Actions billing", "https://docs.github.com/en/billing/concepts/product-billing/github-actions")
+    add_source(document, "GitHub budgets and alerts", "https://docs.github.com/en/billing/concepts/budgets-and-alerts")
     add_owner_fields(document, ["Release commit", "CI run URL", "Security scan evidence", "Completed by / date"])
 
     document.add_heading("14. Prepare the private draft release", level=1)
@@ -1029,7 +1051,7 @@ def build_document() -> Document:
         [
             ["Google OAuth callback", "Codex", "☒", "Production callback passed twice on 30 Jul 2026; rotated client active; original client revoked."],
             ["Second-account isolation", "", "☐", "Repeat with a distinct Google test account before public launch."],
-            ["Desktop Gmail OAuth + sync", "", "☐", "Separate Desktop client; read-only consent; connect/sync/disconnect/reconnect evidence."],
+            ["Desktop Gmail OAuth + sync", "Codex + owner", "☒", "Private Desktop client; read-only consent, callback, initial sync, safe routing, and restart reload verified on 16 Aug 2026. Public consent publication remains separate."],
             ["Dependency license clearance", "", "☐", "Human approval of conditional licenses with unchanged SBOM/notices hashes."],
             ["Cashfree + webhook + refund/tax", "", "☐", ""],
             ["Resend + DNS + support inboxes", "", "☐", ""],
@@ -1040,6 +1062,7 @@ def build_document() -> Document:
             ["Local macOS arm64 package proof", "Codex", "☒", "Locked local candidate meets startup, memory, privacy, persistence, and trust-boundary budgets; not notarized."],
             ["Cross-platform clean-system matrix", "", "☐", "macOS x64, Windows 10/11 x64, and Ubuntu 22.04 x64 remain external gates."],
             ["Browser-family matrix", "", "☐", "Chrome, Safari, Firefox, and Edge acceptance evidence remains deferred."],
+            ["GitHub Actions runner availability", "", "☐", "Resolve account payment/Actions budget block; retain one exact-commit run with all jobs green."],
             ["Security/privacy/recovery matrix", "", "☐", ""],
             ["Legal/tax/privacy review", "", "☐", ""],
             ["Private draft + screenshots + demo", "", "☐", ""],

@@ -62,6 +62,7 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 - [x] General contact defaults to `hello@godfin.dev`.
 - [x] App/website entitlement manifest rejects unreleased feature claims.
 - [x] Three-engine Playwright CI matrix is configured.
+- [ ] Resolve GitHub Actions account billing/spending-limit block and retain a successful private CI run.
 - [ ] Configure and test website Google OAuth with exact Supabase callback and two users.
 - [ ] Verify `godfin.dev` DNS, HTTPS, redirects, CSP, sitemap, robots, and 404.
 - [ ] Verify Resend domain, SPF, DKIM, DMARC, sender, delivery, and reply handling.
@@ -84,6 +85,7 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 - [x] Release, promotion, and rollback workflows use pinned actions and protected confirmation gates.
 - [x] Public promotion requires exact legal-clearance/SBOM evidence.
+- [ ] Confirm GitHub Actions jobs can start; current private runs fail before step 1 because the account payment/spending limit blocks runners.
 - [ ] Configure protected R2 release environment and immutable storage.
 - [ ] Create a private draft release only.
 - [ ] Exercise 5%, 25%, 50%, and 100% staged promotion with health review on a private channel.

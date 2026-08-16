@@ -125,10 +125,10 @@ No Critical/High item remains open without classification. The remaining Critica
 - lawful real-statement corpus breadth (`GF-PARSE-001`, `GF-PARSE-002`);
 - clean native migration/restore/update/package evidence (`GF-DATA-002`, `GF-DB-001`, `GF-BKP-001`, `GF-MIG-001`, `GF-REL-001`, `GF-REL-002`, `GF-PERF-002`);
 - qualified legal/privacy/tax and truthful deployed-content review (`GF-CONTENT-001`);
-- live Supabase/Cashfree/signing/provider evidence (`GF-LIC-002`, `GF-PAY-001`, `GF-PRICE-001`, `GF-OPS-001`).
+- live Supabase/Cashfree/signing/provider evidence and GitHub-hosted runner availability (`GF-LIC-002`, `GF-PAY-001`, `GF-PRICE-001`, `GF-OPS-001`).
 
 These do not authorize public launch. They are assigned in `EXTERNAL_RELEASE_GATES.md`.
 
 ## Final recommendation
 
-Keep the repository and releases private. Use the current code only for private release-candidate evaluation. Complete the Supabase/Cashfree, DNS/email, signing/notarization, clean-platform, lawful parser-corpus, qualified review, and final native browser matrices; then require explicit written owner authorization before any public website promotion, installer publication, or update-feed promotion.
+Keep the repository and releases private. Use the current code only for private release-candidate evaluation. Restore GitHub Actions billing, then complete the Supabase/Cashfree, DNS/email, signing/notarization, clean-platform, lawful parser-corpus, qualified review, and final native browser matrices; require explicit written owner authorization before any public website promotion, installer publication, or update-feed promotion.

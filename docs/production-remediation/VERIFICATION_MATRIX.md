@@ -17,8 +17,8 @@ This matrix records the current executable evidence. “Not executed” is never
 | Website Cashfree unit tests | `npm run test:cashfree` in `website` | Passed: 5 | Cashfree sandbox/live pending |
 | Website production contracts | `npm run verify:contracts` in `website` | Passed | Deployed environment and qualified policy review pending |
 | Website lint/build | `npm run lint && npm run build` in `website` | Passed at current production baseline | Production deployment intentionally not promoted with Cashfree enabled |
-| Website browser config | `npm run test:website -- --list` in `playwright-tests` | Passed: 12 cases across Chromium/Firefox/WebKit enumerated | First CI run and native Safari/provider flows pending |
-| Workflow syntax | YAML parse of `.github/workflows/ci.yml` | Passed: six jobs including website browser matrix | GitHub runner outcome must be retained |
+| Website browser config | `npm run test:website -- --list` in `playwright-tests` | Passed: 12 cases across Chromium/Firefox/WebKit enumerated | Hosted jobs fail before step 1 because GitHub reports an account payment/spending-limit block; native Safari/provider flows also remain pending |
+| Workflow syntax | YAML parse of `.github/workflows/ci.yml` | Passed: six jobs including website browser matrix | GitHub Actions billing must be restored, then the exact candidate run retained |
 | Supabase migration manifest | `npm run verify:migrations` in `website` | Passed through migration 0006 | Remote application pending |
 | Supabase SQL syntax | pglast parse of all migration and pgTAP files | Passed | pgTAP not executed without PostgreSQL/Docker |
 | Desktop privacy/integrity | `npm run test:privacy` in `desktop` | Passed: 7 at current production baseline | Other native package formats pending |
