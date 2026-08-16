@@ -356,12 +356,6 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
     if not parser_profile:
         result.skipped_no_match += 1
         return
-    account_id = (
-        mapping["account_id"]
-        if mapping
-        else resolve_profile_account(db, parser_profile)
-    )
-
     # Check subject blacklist
     if is_blacklisted_subject(subject):
         result.skipped_blacklist += 1
@@ -386,20 +380,29 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
         return
 
     if not parsed:
-        # Log first few examples for debugging (message_id, subject, sender for issue tracking)
+        # Keep diagnostics support-safe: never log Gmail identifiers, senders,
+        # subjects, or message bodies from a user's mailbox.
         if result.skipped_no_match < 5:
             logger.warning(
-                f"Email parsing failed (no pattern match): "
-                f"message_id={message_id}, subject='{subject[:80] if subject else 'None'}', "
-                f"sender='{sender[:50] if sender else 'None'}', "
-                f"parser_profile={parser_profile}"
+                "Email parsing failed (no supported alert pattern): "
+                "parser_profile=%s",
+                parser_profile,
             )
         result.skipped_no_match += 1
         return
 
-    # Special handling for RuPay Credit UPI - comes from savings sender but is credit card tx
-    if parsed.instrument == 'rupay_credit_upi':
-        account_id = resolve_profile_account(db, "hdfc_credit")
+    # Sender addresses are only hints. Explicit message content and its last
+    # four digits decide which configured active account receives the row.
+    if parsed.account_last4:
+        account_id = resolve_profile_account(
+            db,
+            parsed.account_type,
+            parsed.account_last4,
+        )
+    elif mapping and mapping["parser_profile"] == parsed.account_type:
+        account_id = mapping["account_id"]
+    else:
+        account_id = resolve_profile_account(db, parsed.account_type)
 
     if not account_id:
         result.skipped_no_match += 1

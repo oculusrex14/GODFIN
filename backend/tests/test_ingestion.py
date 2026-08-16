@@ -32,6 +32,32 @@ def test_ingestion_creates_transactions(db_session):
     assert result.processed == 2
 
 
+def test_ingestion_uses_explicit_account_digits_when_sender_hint_is_wrong(
+    db_session,
+):
+    message = {
+        "id": "sender-hint-mismatch-1",
+        "sender": "HDFC Alerts <alerts@hdfcbank.bank.in>",
+        "subject": "Transaction alert",
+        "body": (
+            "Dear Customer, Rs.350.00 has been debited from account 0000 to "
+            "VPA cafe@ybl Synthetic Cafe on 10-02-26. Your UPI transaction "
+            "reference number is 504123456789."
+        ),
+    }
+
+    result = run_ingestion(db_session, mock_messages=[message])
+
+    assert result.created == 1
+    transaction = (
+        db_session.query(Transaction)
+        .filter_by(email_message_id=message["id"])
+        .one()
+    )
+    assert transaction.account.last_4_digits == "0000"
+    assert transaction.instrument == "upi"
+
+
 def test_ingestion_reports_and_retries_finalized_period_messages(
     db_session,
 ):

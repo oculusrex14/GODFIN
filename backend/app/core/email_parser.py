@@ -214,6 +214,7 @@ class ParsedTransaction:
         upi_ref_number: Optional[str] = None,
         txn_time: Optional[str] = None,
         is_p2p: bool = False,
+        account_last4: Optional[str] = None,
         raw_text: str = '',
     ):
         self.amount = amount
@@ -227,12 +228,21 @@ class ParsedTransaction:
         self.upi_ref_number = upi_ref_number
         self.txn_time = txn_time
         self.is_p2p = is_p2p
+        self.account_last4 = account_last4
         self.raw_text = raw_text
 
 
 # --- Main Parse Function ---
 
 def parse_email_body(body: str, account_type: str) -> Optional[ParsedTransaction]:
+    """Parse a supported HDFC alert, using content as the account authority.
+
+    ``account_type`` is only a sender-routing hint. HDFC can send savings and
+    credit-card alerts from the same address, so explicit wording and the
+    instrument's last four digits decide the parsed profile.
+    """
+    if account_type not in {'hdfc_savings', 'hdfc_credit'}:
+        return None
     text = extract_text_from_html(body) if '<' in body else body
 
     # Try RuPay Credit Card + UPI first (comes from savings sender but is credit card)
@@ -248,10 +258,11 @@ def parse_email_body(body: str, account_type: str) -> Optional[ParsedTransaction
             txn_date=parse_upi_date(match.group('date')),
             txn_type='debit',
             instrument='rupay_credit_upi',
-            account_type='hdfc_savings',
+            account_type='hdfc_credit',
             vpa_handle=vpa,
             upi_ref_number=match.group('ref'),
             is_p2p=is_p2p,
+            account_last4=match.group('card_last4'),
             raw_text=text,
         )
 
@@ -271,60 +282,62 @@ def parse_email_body(body: str, account_type: str) -> Optional[ParsedTransaction
             account_type='hdfc_savings',
             vpa_handle=vpa,
             is_p2p=is_p2p,
+            account_last4=match.group('account'),
             raw_text=text,
         )
 
-    if account_type == 'hdfc_savings':
-        # Try standard UPI Debit
-        match = UPI_DEBIT_PATTERN.search(text)
-        if match:
-            merchant_raw = match.group('merchant').strip()
-            vpa = match.group('vpa').strip()
-            is_p2p = bool(P2P_VPA_PATTERN.match(vpa))
-            return ParsedTransaction(
-                amount=parse_amount(match.group('amount')),
-                merchant_raw=merchant_raw,
-                merchant_normalized=normalize_merchant(merchant_raw),
-                txn_date=parse_upi_date(match.group('date')),
-                txn_type='debit',
-                instrument='upi',
-                account_type=account_type,
-                vpa_handle=vpa,
-                upi_ref_number=match.group('ref'),
-                is_p2p=is_p2p,
-                raw_text=text,
-            )
+    # HDFC sender addresses are not reliable account-type identifiers. These
+    # patterns are explicit enough to select savings/debit routing safely.
+    match = UPI_DEBIT_PATTERN.search(text)
+    if match:
+        merchant_raw = match.group('merchant').strip()
+        vpa = match.group('vpa').strip()
+        is_p2p = bool(P2P_VPA_PATTERN.match(vpa))
+        return ParsedTransaction(
+            amount=parse_amount(match.group('amount')),
+            merchant_raw=merchant_raw,
+            merchant_normalized=normalize_merchant(merchant_raw),
+            txn_date=parse_upi_date(match.group('date')),
+            txn_type='debit',
+            instrument='upi',
+            account_type='hdfc_savings',
+            vpa_handle=vpa,
+            upi_ref_number=match.group('ref'),
+            is_p2p=is_p2p,
+            account_last4=match.group('account'),
+            raw_text=text,
+        )
 
-        # Try Debit Card
-        match = DEBIT_CARD_PATTERN.search(text)
-        if match:
-            merchant_raw = match.group('merchant').strip()
-            return ParsedTransaction(
-                amount=parse_amount(match.group('amount')),
-                merchant_raw=merchant_raw,
-                merchant_normalized=normalize_merchant(merchant_raw),
-                txn_date=parse_debit_card_date(match.group('date')),
-                txn_type='debit',
-                instrument='debit_card',
-                account_type=account_type,
-                txn_time=match.group('time'),
-                raw_text=text,
-            )
+    match = DEBIT_CARD_PATTERN.search(text)
+    if match:
+        merchant_raw = match.group('merchant').strip()
+        return ParsedTransaction(
+            amount=parse_amount(match.group('amount')),
+            merchant_raw=merchant_raw,
+            merchant_normalized=normalize_merchant(merchant_raw),
+            txn_date=parse_debit_card_date(match.group('date')),
+            txn_type='debit',
+            instrument='debit_card',
+            account_type='hdfc_savings',
+            txn_time=match.group('time'),
+            account_last4=match.group('card_last4'),
+            raw_text=text,
+        )
 
-    if account_type == 'hdfc_credit':
-        match = CC_DEBIT_PATTERN.search(text)
-        if match:
-            merchant_raw = match.group('merchant').strip()
-            return ParsedTransaction(
-                amount=parse_amount(match.group('amount')),
-                merchant_raw=merchant_raw,
-                merchant_normalized=normalize_merchant(merchant_raw),
-                txn_date=parse_cc_date(match.group('date')),
-                txn_type='debit',
-                instrument='credit_card',
-                account_type=account_type,
-                txn_time=match.group('time') if match.group('time') else None,
-                raw_text=text,
-            )
+    match = CC_DEBIT_PATTERN.search(text)
+    if match:
+        merchant_raw = match.group('merchant').strip()
+        return ParsedTransaction(
+            amount=parse_amount(match.group('amount')),
+            merchant_raw=merchant_raw,
+            merchant_normalized=normalize_merchant(merchant_raw),
+            txn_date=parse_cc_date(match.group('date')),
+            txn_type='debit',
+            instrument='credit_card',
+            account_type='hdfc_credit',
+            txn_time=match.group('time') if match.group('time') else None,
+            account_last4=match.group('card_last4'),
+            raw_text=text,
+        )
 
     return None
