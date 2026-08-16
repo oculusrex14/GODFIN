@@ -18,6 +18,6 @@ most three user-managed installations.
 
 ## Consequences
 
-Refunds/disputes must revoke entitlements. Website, verifier, and app require
+Cashfree refunds/disputes must suspend or revoke entitlements. Website, verifier, and app require
 cross-contract tests. Payment data and hardware identifiers are not copied into
 the desktop database.

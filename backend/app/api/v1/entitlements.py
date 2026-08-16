@@ -31,7 +31,7 @@ def raise_license_error(exc: LicenseError) -> None:
         detail={
             "code": exc.code,
             "message": exc.public_message,
-            "hint": "Open godfin.vercel.app/account if you need the key resent.",
+            "hint": "Open godfin.dev/account if you need the key resent.",
             "retriable": exc.retriable,
         },
     ) from exc

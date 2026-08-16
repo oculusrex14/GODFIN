@@ -1,8 +1,15 @@
 import { createHash } from "node:crypto";
 
 import { NextResponse } from "next/server";
-import type Stripe from "stripe";
 
+import {
+  cashfreeAmountToMinor,
+  getCashfreeOrder,
+  getCashfreePayments,
+  verifyCashfreeWebhook,
+  type CashfreeOrder,
+  type CashfreePayment,
+} from "@/lib/cashfree";
 import { sendLicenseEmail } from "@/lib/email";
 import { serverEnv } from "@/lib/env";
 import {
@@ -10,296 +17,344 @@ import {
   licenseKeyForSession,
   type LicenseTier,
 } from "@/lib/license";
-import {
-  isProductCode,
-  PRODUCTS,
-  stripePriceIdForEnvironment,
-} from "@/lib/products";
+import { isProductCode, PRODUCTS } from "@/lib/products";
 import {
   isLicenseProduct,
   PPP_PRICE_VERSION,
   regionalPrice,
 } from "@/lib/regional-pricing";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { stripe } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 
-const PAYMENT_EVENT_TYPES = new Set<Stripe.Event.Type>([
-  "checkout.session.completed",
-  "checkout.session.async_payment_succeeded",
-  "checkout.session.async_payment_failed",
-  "refund.created",
-  "refund.updated",
-  "refund.failed",
-  "charge.refunded",
-  "charge.dispute.created",
-  "charge.dispute.updated",
-  "charge.dispute.closed",
-  "charge.dispute.funds_withdrawn",
-  "charge.dispute.funds_reinstated",
+const CASHFREE_EVENT_TYPES = new Set([
+  "PAYMENT_SUCCESS_WEBHOOK",
+  "PAYMENT_FAILED_WEBHOOK",
+  "PAYMENT_USER_DROPPED_WEBHOOK",
+  "REFUND_STATUS_WEBHOOK",
+  "AUTO_REFUND_STATUS_WEBHOOK",
+  "DISPUTE_CREATED",
+  "DISPUTE_UPDATED",
+  "DISPUTE_CLOSED",
 ]);
 
-type StripeObject = { id: string };
+type JsonRecord = Record<string, unknown>;
 
-function relatedId(value: string | StripeObject | null | undefined): string | null {
-  if (typeof value === "string") return value;
-  return value?.id || null;
+function record(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
 }
 
-function normalizedCountry(value: string | null | undefined): string | null {
-  const country = value?.trim().toUpperCase();
-  return country && /^[A-Z]{2}$/.test(country) ? country : null;
+function text(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
 }
 
-function pricingReview({
-  session,
-  expectedCurrency,
-  expectedSubtotal,
-  expectedPriceId,
-  pricingCountry,
-  actualPriceId,
-}: {
-  session: Stripe.Checkout.Session;
-  expectedCurrency: string;
-  expectedSubtotal: number;
-  expectedPriceId: string;
-  pricingCountry: "IN" | "US";
-  actualPriceId: string | null;
-}): { verified: boolean; reason: string | null; billingCountry: string | null } {
-  const billingCountry = normalizedCountry(
-    session.customer_details?.address?.country,
-  );
-  const failures: string[] = [];
-  if (session.currency !== expectedCurrency) failures.push("currency_mismatch");
-  if (session.amount_subtotal !== expectedSubtotal) failures.push("subtotal_mismatch");
-  if (actualPriceId !== expectedPriceId) failures.push("price_id_mismatch");
-  if (session.metadata?.pricing_version !== PPP_PRICE_VERSION) {
-    failures.push("pricing_version_mismatch");
+function normalizedCurrency(value: unknown): string | null {
+  const currency = text(value)?.toLowerCase();
+  return currency && /^[a-z]{3}$/.test(currency) ? currency : null;
+}
+
+function occurredAt(value: unknown): string | null {
+  const parsed = Date.parse(text(value) || "");
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function eventIdentity(
+  idempotencyKey: string | null,
+  rawBody: string,
+): string {
+  const safeHeader = idempotencyKey?.trim().slice(0, 180);
+  return `cashfree:${safeHeader || createHash("sha256").update(rawBody).digest("hex")}`;
+}
+
+function paymentEventFields(event: JsonRecord) {
+  const type = text(event.type) || "";
+  const data = record(event.data);
+  const base = {
+    p_event_type: type,
+    p_object_id: null as string | null,
+    p_provider_order_id: null as string | null,
+    p_provider_payment_id: null as string | null,
+    p_provider_refund_id: null as string | null,
+    p_provider_dispute_id: null as string | null,
+    p_amount: null as number | null,
+    p_currency: null as string | null,
+    p_event_status: null as string | null,
+    p_reason: null as string | null,
+  };
+
+  if (type.startsWith("PAYMENT_")) {
+    const order = record(data.order);
+    const payment = record(data.payment);
+    const paymentId = text(payment.cf_payment_id);
+    return {
+      ...base,
+      p_object_id: paymentId,
+      p_provider_order_id: text(order.order_id),
+      p_provider_payment_id: paymentId,
+      p_amount: cashfreeAmountToMinor(payment.payment_amount),
+      p_currency: normalizedCurrency(payment.payment_currency),
+      p_event_status: text(payment.payment_status),
+      p_reason: text(payment.payment_message),
+    };
   }
-  if (session.automatic_tax?.enabled !== true) failures.push("tax_not_enabled");
-  if (!billingCountry) {
-    failures.push("billing_country_missing");
-  } else if (
-    (pricingCountry === "IN" && billingCountry !== "IN") ||
-    (pricingCountry === "US" && billingCountry === "IN")
-  ) {
-    failures.push("billing_country_mismatch");
+
+  if (type === "REFUND_STATUS_WEBHOOK" || type === "AUTO_REFUND_STATUS_WEBHOOK") {
+    const refund = record(
+      type === "AUTO_REFUND_STATUS_WEBHOOK" ? data.auto_refund : data.refund,
+    );
+    const refundId = text(refund.refund_id) || text(refund.cf_refund_id);
+    return {
+      ...base,
+      p_object_id: refundId,
+      p_provider_order_id: text(refund.order_id),
+      p_provider_payment_id: text(refund.cf_payment_id),
+      p_provider_refund_id: refundId,
+      p_amount: cashfreeAmountToMinor(refund.refund_amount),
+      p_currency: normalizedCurrency(refund.refund_currency),
+      p_event_status: text(refund.refund_status),
+      p_reason: text(refund.refund_reason) || text(refund.status_description),
+    };
   }
+
+  const dispute = record(data.dispute);
+  const order = record(data.order_details);
+  const disputeId = text(dispute.dispute_id);
   return {
-    verified: failures.length === 0,
-    reason: failures.length ? failures.join(",") : null,
-    billingCountry,
+    ...base,
+    p_object_id: disputeId,
+    p_provider_order_id: text(order.order_id),
+    p_provider_payment_id: text(order.cf_payment_id),
+    p_provider_dispute_id: disputeId,
+    p_amount: cashfreeAmountToMinor(dispute.dispute_amount),
+    p_currency:
+      normalizedCurrency(dispute.dispute_amount_currency) ||
+      normalizedCurrency(order.payment_currency),
+    p_event_status: text(dispute.dispute_status),
+    p_reason:
+      text(dispute.reason_description) || text(dispute.cf_dispute_remarks),
   };
 }
 
-async function hydratedSession(
-  incoming: Stripe.Checkout.Session,
-): Promise<Stripe.Checkout.Session> {
-  return stripe().checkout.sessions.retrieve(incoming.id, {
-    expand: ["line_items.data.price", "payment_intent.latest_charge"],
-  });
+function purchaseReview({
+  order,
+  payment,
+  expectedAmount,
+  expectedCurrency,
+  pricingCountry,
+  pricingVersion,
+  accountEmail,
+}: {
+  order: CashfreeOrder;
+  payment: CashfreePayment;
+  expectedAmount: number;
+  expectedCurrency: string;
+  pricingCountry: "IN" | "US";
+  pricingVersion: string | null;
+  accountEmail: string;
+}): { verified: boolean; reason: string | null } {
+  const failures: string[] = [];
+  if (order.order_status.toUpperCase() !== "PAID") failures.push("order_not_paid");
+  if (payment.payment_status.toUpperCase() !== "SUCCESS") {
+    failures.push("payment_not_successful");
+  }
+  if (cashfreeAmountToMinor(order.order_amount) !== expectedAmount) {
+    failures.push("order_amount_mismatch");
+  }
+  if (cashfreeAmountToMinor(payment.payment_amount) !== expectedAmount) {
+    failures.push("payment_amount_mismatch");
+  }
+  if (order.order_currency.toLowerCase() !== expectedCurrency) {
+    failures.push("order_currency_mismatch");
+  }
+  if (payment.payment_currency.toLowerCase() !== expectedCurrency) {
+    failures.push("payment_currency_mismatch");
+  }
+  if (pricingVersion !== PPP_PRICE_VERSION) failures.push("pricing_version_mismatch");
+  if (
+    order.customer_details?.customer_email?.trim().toLowerCase() !==
+    accountEmail.trim().toLowerCase()
+  ) {
+    failures.push("account_email_mismatch");
+  }
+  // India is the only checkout region enabled by default. A future global
+  // rollout must add an authoritative billing-country signal before PPP is
+  // enabled; a browser or edge country alone is not enough to authorize price.
+  if (pricingCountry !== "IN") failures.push("billing_country_unverified");
+  return {
+    verified: failures.length === 0,
+    reason: failures.length ? failures.join(",") : null,
+  };
 }
 
-async function provision(incoming: Stripe.Checkout.Session) {
-  const session = await hydratedSession(incoming);
-  const productCode = session.metadata?.product_code;
-  const userId = session.client_reference_id || session.metadata?.user_id;
-  if (!isProductCode(productCode) || !isLicenseProduct(productCode) || !userId) {
-    throw new Error("Checkout metadata is incomplete.");
-  }
-  const product = PRODUCTS[productCode];
-  const expected = regionalPrice(
-    productCode,
-    session.metadata?.pricing_country,
-    false,
-  );
-  const expectedPriceId = stripePriceIdForEnvironment(expected.priceEnv);
-  const lineItems = session.line_items?.data || [];
-  const lineItem = lineItems.length === 1 ? lineItems[0] : null;
-  const actualPriceId = relatedId(lineItem?.price);
-  const review = pricingReview({
-    session,
-    expectedCurrency: expected.currency,
-    expectedSubtotal: expected.amount,
-    expectedPriceId,
-    pricingCountry: expected.country,
-    actualPriceId,
-  });
-  if (lineItem?.quantity !== 1) {
-    review.verified = false;
-    review.reason = [review.reason, "invalid_quantity"].filter(Boolean).join(",");
-  }
-  if (session.payment_status !== "paid" || session.amount_total === null) {
-    throw new Error("Checkout is not paid.");
+async function provisionCashfreePurchase(incoming: JsonRecord) {
+  const incomingData = record(incoming.data);
+  const incomingOrder = record(incomingData.order);
+  const incomingPayment = record(incomingData.payment);
+  const orderId = text(incomingOrder.order_id);
+  const incomingPaymentId = text(incomingPayment.cf_payment_id);
+  if (!orderId || !incomingPaymentId) {
+    throw new Error("Cashfree payment webhook is missing order identifiers.");
   }
 
-  const tier = product.tier as LicenseTier;
+  const [order, payments] = await Promise.all([
+    getCashfreeOrder(orderId),
+    getCashfreePayments(orderId),
+  ]);
+  const payment = payments.find(
+    (candidate) => String(candidate.cf_payment_id) === incomingPaymentId,
+  );
+  if (!payment) throw new Error("Cashfree payment could not be revalidated.");
+
+  const productCode = order.order_tags?.product_code;
+  const userId = order.order_tags?.user_id;
+  const pricingCountry = order.order_tags?.pricing_country;
+  const pricingVersion = order.order_tags?.pricing_version || null;
+  if (
+    !isProductCode(productCode) ||
+    !isLicenseProduct(productCode) ||
+    !userId ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)
+  ) {
+    throw new Error("Cashfree order metadata is incomplete.");
+  }
+
+  const expected = regionalPrice(productCode, pricingCountry, false);
+  const admin = createAdminClient();
+  const { data: account, error: accountError } =
+    await admin.auth.admin.getUserById(userId);
+  if (accountError || !account.user?.email) {
+    throw accountError || new Error("Purchase account was not found.");
+  }
+  const review = purchaseReview({
+    order,
+    payment,
+    expectedAmount: expected.amount,
+    expectedCurrency: expected.currency,
+    pricingCountry: expected.country,
+    pricingVersion,
+    accountEmail: account.user.email,
+  });
+
+  const tier = PRODUCTS[productCode].tier as LicenseTier;
   const licenseKey = licenseKeyForSession(
-    session.id,
+    order.order_id,
     tier,
     serverEnv.licenseSigningSecret(),
   );
-  const paymentIntent = session.payment_intent;
-  const paymentIntentId = relatedId(paymentIntent);
-  const chargeId =
-    paymentIntent && typeof paymentIntent !== "string"
-      ? relatedId(paymentIntent.latest_charge)
-      : null;
-  const admin = createAdminClient();
-  const { data, error } = await admin.rpc("provision_purchase", {
-    p_checkout_session_id: session.id,
-    p_payment_intent_id: paymentIntentId,
-    p_charge_id: chargeId,
-    p_stripe_customer_id: relatedId(session.customer),
+  const { data, error } = await admin.rpc("provision_cashfree_purchase", {
+    p_order_id: order.order_id,
+    p_cf_order_id: String(order.cf_order_id),
+    p_cf_payment_id: String(payment.cf_payment_id),
+    p_cf_customer_id: order.customer_details?.customer_id || null,
     p_user_id: userId,
     p_product_code: productCode,
-    p_amount_total: session.amount_total,
-    p_currency: session.currency,
+    p_amount_total: expected.amount,
+    p_currency: expected.currency,
     p_license_tier: tier,
     p_license_hash: hashLicenseKey(licenseKey),
     p_license_last4: licenseKey.slice(-4),
-    p_credits: 0,
-    p_billing_country: review.billingCountry,
+    p_billing_country: expected.country === "IN" ? "IN" : null,
     p_pricing_country: expected.country,
-    p_pricing_version: session.metadata?.pricing_version || null,
+    p_pricing_version: pricingVersion,
     p_pricing_verified: review.verified,
     p_pricing_review_reason: review.reason,
   });
   if (error) throw error;
 
   const provisioned = Array.isArray(data) ? data[0] : data;
-  const email = session.customer_details?.email || session.customer_email;
   if (
     review.verified &&
     provisioned?.license_status === "active" &&
-    email &&
     !provisioned?.email_sent_at
   ) {
     await sendLicenseEmail({
-      to: email,
+      to: account.user.email,
       licenseKey,
       tier,
-      idempotencyKey: `license:${session.id}`,
+      idempotencyKey: `cashfree-license:${order.order_id}`,
     });
     await admin
       .from("purchases")
       .update({ email_sent_at: new Date().toISOString() })
-      .eq("checkout_session_id", session.id);
+      .eq("provider_order_id", order.order_id)
+      .eq("payment_provider", "cashfree");
   }
 }
 
-function paymentEventFields(event: Stripe.Event) {
-  const object = event.data.object;
-  const base = {
-    p_stripe_event_id: event.id,
-    p_event_type: event.type,
-    p_object_id: relatedId(object as StripeObject),
-    p_checkout_session_id: null as string | null,
-    p_payment_intent_id: null as string | null,
-    p_charge_id: null as string | null,
-    p_refund_id: null as string | null,
-    p_dispute_id: null as string | null,
-    p_amount: null as number | null,
-    p_currency: null as string | null,
-    p_event_status: null as string | null,
-    p_reason: null as string | null,
-  };
-  if (event.type.startsWith("checkout.session.")) {
-    const session = object as Stripe.Checkout.Session;
-    return {
-      ...base,
-      p_checkout_session_id: session.id,
-      p_payment_intent_id: relatedId(session.payment_intent),
-      p_amount: session.amount_total,
-      p_currency: session.currency,
-      p_event_status:
-        event.type === "checkout.session.async_payment_failed"
-          ? "failed"
-          : session.payment_status,
-    };
-  }
-  if (event.type.startsWith("refund.")) {
-    const refund = object as Stripe.Refund;
-    return {
-      ...base,
-      p_payment_intent_id: relatedId(refund.payment_intent),
-      p_charge_id: relatedId(refund.charge),
-      p_refund_id: refund.id,
-      p_amount: refund.amount,
-      p_currency: refund.currency,
-      p_event_status: refund.status,
-      p_reason: refund.failure_reason || refund.pending_reason || refund.reason,
-    };
-  }
-  if (event.type === "charge.refunded") {
-    const charge = object as Stripe.Charge;
-    return {
-      ...base,
-      p_payment_intent_id: relatedId(charge.payment_intent),
-      p_charge_id: charge.id,
-      p_amount: charge.amount_refunded,
-      p_currency: charge.currency,
-      p_event_status: charge.refunded ? "refunded" : "partially_refunded",
-    };
-  }
-  const dispute = object as Stripe.Dispute;
-  return {
-    ...base,
-    p_payment_intent_id: relatedId(dispute.payment_intent),
-    p_charge_id: relatedId(dispute.charge),
-    p_dispute_id: dispute.id,
-    p_amount: dispute.amount,
-    p_currency: dispute.currency,
-    p_event_status: dispute.status,
-    p_reason: dispute.reason,
-  };
-}
-
-async function recordPaymentEvent(event: Stripe.Event, payloadSha256: string) {
-  if (!PAYMENT_EVENT_TYPES.has(event.type)) return;
+async function recordCashfreeEvent({
+  event,
+  providerEventId,
+  payloadSha256,
+}: {
+  event: JsonRecord;
+  providerEventId: string;
+  payloadSha256: string;
+}) {
+  const eventType = text(event.type) || "";
+  if (!CASHFREE_EVENT_TYPES.has(eventType)) return;
+  const eventTime = occurredAt(event.event_time);
+  if (!eventTime) throw new Error("Cashfree event time is invalid.");
   const admin = createAdminClient();
-  const { error } = await admin.rpc("record_payment_event", {
+  const { error } = await admin.rpc("record_cashfree_payment_event", {
+    p_provider_event_id: providerEventId,
     ...paymentEventFields(event),
     p_payload_sha256: payloadSha256,
-    p_occurred_at: new Date(event.created * 1000).toISOString(),
+    p_occurred_at: eventTime,
   });
   if (error) throw error;
 }
 
 export async function POST(request: Request) {
-  const signature = request.headers.get("stripe-signature");
-  if (!signature) {
-    return NextResponse.json({ message: "Missing signature." }, { status: 400 });
-  }
-
   const rawBody = await request.text();
-  let event: Stripe.Event;
+  let signatureValid = false;
   try {
-    event = stripe().webhooks.constructEvent(
+    signatureValid = verifyCashfreeWebhook({
       rawBody,
-      signature,
-      serverEnv.stripeWebhookSecret(),
-    );
+      signature: request.headers.get("x-webhook-signature"),
+      timestamp: request.headers.get("x-webhook-timestamp"),
+      version: request.headers.get("x-webhook-version"),
+    });
   } catch {
+    signatureValid = false;
+  }
+  if (!signatureValid) {
     return NextResponse.json({ message: "Invalid signature." }, { status: 400 });
   }
 
+  let event: JsonRecord;
   try {
-    await recordPaymentEvent(
+    event = record(JSON.parse(rawBody));
+  } catch {
+    return NextResponse.json({ message: "Invalid payload." }, { status: 400 });
+  }
+
+  const eventType = text(event.type) || "";
+  if (!CASHFREE_EVENT_TYPES.has(eventType)) {
+    return NextResponse.json({ received: true, ignored: true });
+  }
+
+  try {
+    await recordCashfreeEvent({
       event,
-      createHash("sha256").update(rawBody).digest("hex"),
-    );
-    if (
-      event.type === "checkout.session.completed" ||
-      event.type === "checkout.session.async_payment_succeeded"
-    ) {
-      const session = event.data.object as Stripe.Checkout.Session;
-      if (session.payment_status === "paid") await provision(session);
+      providerEventId: eventIdentity(
+        request.headers.get("x-idempotency-key"),
+        rawBody,
+      ),
+      payloadSha256: createHash("sha256").update(rawBody).digest("hex"),
+    });
+    if (eventType === "PAYMENT_SUCCESS_WEBHOOK") {
+      await provisionCashfreePurchase(event);
     }
     return NextResponse.json({ received: true });
   } catch (error) {
-    console.error("Stripe fulfillment failed", error);
+    console.error("Cashfree fulfillment failed", {
+      eventType,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
     return NextResponse.json(
       { message: "Fulfillment failed and will be retried." },
       { status: 500 },

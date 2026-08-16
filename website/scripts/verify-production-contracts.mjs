@@ -55,17 +55,20 @@ assert.doesNotMatch(products, /credits_(starter|regular|power)\s*:/);
 assert.match(products, /isRetiredHostedCreditCode/);
 
 const checkout = await text("src/app/api/checkout/route.ts");
-assert.match(checkout, /mode:\s*"payment"/);
-assert.doesNotMatch(checkout, /mode:\s*"subscription"/);
-assert.match(checkout, /stripePriceIdForEnvironment/);
+assert.match(checkout, /createCashfreeOrder/);
+assert.match(checkout, /paymentSessionId/);
+assert.match(checkout, /checkoutAttemptId/);
+assert.doesNotMatch(checkout, /Stripe|stripePriceIdForEnvironment/);
 assert.match(checkout, /isRetiredHostedCreditCode/);
 assert.match(checkout, /status:\s*410/);
 assert.match(checkout, /requestPricingCountry\(request\)/);
-assert.match(checkout, /automatic_tax:\s*\{\s*enabled:\s*true\s*\}/);
 assert.doesNotMatch(checkout, /body\.country/);
 
 const purchaseButton = await text("src/components/purchase-button.tsx");
-assert.match(purchaseButton, /JSON\.stringify\(\{ product \}\)/);
+assert.match(purchaseButton, /checkoutAttemptId:\s*checkoutAttemptId\.current/);
+assert.match(purchaseButton, /cashfree\.checkout/);
+assert.match(purchaseButton, /document\.createElement\("script"\)/);
+assert.match(purchaseButton, /https:\/\/sdk\.cashfree\.com\/js\/v3\/cashfree\.js/);
 assert.doesNotMatch(purchaseButton, /checkoutCountry|localeCountry/);
 
 const regionalPricing = await text("src/lib/regional-pricing.ts");
@@ -140,18 +143,18 @@ const waitlistRoute = await text("src/app/api/waitlist/route.ts");
 assert.match(waitlistRoute, /waitlistConfigured\(\)/);
 
 const webhook = await text("src/app/api/webhook/route.ts");
-assert.match(webhook, /webhooks\.constructEvent/);
-assert.match(webhook, /checkout\.session\.completed/);
-assert.match(webhook, /checkout\.session\.async_payment_succeeded/);
+assert.match(webhook, /verifyCashfreeWebhook/);
+assert.match(webhook, /getCashfreeOrder/);
+assert.match(webhook, /getCashfreePayments/);
 for (const eventType of [
-  "checkout.session.async_payment_failed",
-  "refund.created",
-  "refund.updated",
-  "refund.failed",
-  "charge.refunded",
-  "charge.dispute.created",
-  "charge.dispute.updated",
-  "charge.dispute.closed",
+  "PAYMENT_SUCCESS_WEBHOOK",
+  "PAYMENT_FAILED_WEBHOOK",
+  "PAYMENT_USER_DROPPED_WEBHOOK",
+  "REFUND_STATUS_WEBHOOK",
+  "AUTO_REFUND_STATUS_WEBHOOK",
+  "DISPUTE_CREATED",
+  "DISPUTE_UPDATED",
+  "DISPUTE_CLOSED",
 ]) {
   assert.equal(
     webhook.includes(`"${eventType}"`),
@@ -159,12 +162,21 @@ for (const eventType of [
     `Webhook is missing ${eventType}.`,
   );
 }
-assert.match(webhook, /record_payment_event/);
+assert.match(webhook, /record_cashfree_payment_event/);
 assert.match(webhook, /createHash\("sha256"\)\.update\(rawBody\)/);
-assert.match(webhook, /session\.amount_subtotal\s*!==\s*expectedSubtotal/);
-assert.match(webhook, /actualPriceId\s*!==\s*expectedPriceId/);
-assert.match(webhook, /billing_country_mismatch/);
+assert.match(webhook, /order_amount_mismatch/);
+assert.match(webhook, /payment_amount_mismatch/);
+assert.match(webhook, /account_email_mismatch/);
+assert.match(webhook, /billing_country_unverified/);
 assert.match(webhook, /provisioned\?\.license_status === "active"/);
+
+const cashfree = await text("src/lib/cashfree.ts");
+assert.match(cashfree, /CASHFREE_API_VERSION = "2026-01-01"/);
+assert.match(cashfree, /"x-idempotency-key"/);
+assert.match(cashfree, /timestamp \+ rawBody/);
+assert.match(cashfree, /createHmac\("sha256", serverEnv\.cashfreeClientSecret\(\)\)/);
+assert.match(cashfree, /timingSafeEqual/);
+assert.match(cashfree, /WEBHOOK_CLOCK_SKEW_MS = 5 \* 60 \* 1000/);
 
 const migration = await text("supabase/migrations/0002_phase2_entitlements_waitlist.sql");
 assert.match(migration, /p_activation_limit integer/);
@@ -221,6 +233,27 @@ for (const requiredSql of [
   assert.match(abuseMigration, requiredSql);
 }
 
+const cashfreeMigration = await text(
+  "supabase/migrations/0006_cashfree_commerce.sql",
+);
+for (const requiredSql of [
+  /payment_provider text not null default 'stripe'/,
+  /create or replace function public\.provision_cashfree_purchase/,
+  /create or replace function public\.record_cashfree_payment_event/,
+  /create or replace function private\.recompute_cashfree_purchase_license_state/,
+  /e\.provider_payment_id = p_cf_payment_id/,
+  /event_status ~ '_MERCHANT_\(LOST\|ACCEPTED\)\$'/,
+  /grant execute on function public\.provision_cashfree_purchase[\s\S]*?to service_role/,
+  /grant execute on function public\.record_cashfree_payment_event[\s\S]*?to service_role/,
+]) {
+  assert.match(cashfreeMigration, requiredSql);
+}
+assert.doesNotMatch(
+  cashfreeMigration,
+  /e\.provider_order_id = p_order_id\s*\)\s*;\s*v_license_status/,
+  "Cashfree refunds must not map to a purchase by order ID alone.",
+);
+
 const middleware = await text("src/middleware.ts");
 const nextConfig = await text("next.config.ts");
 const rootLayout = await text("src/app/layout.tsx");
@@ -237,6 +270,11 @@ assert.doesNotMatch(nextConfig, /unsafe-inline/);
 assert.match(nextConfig, /default-src 'none'/);
 assert.match(rootLayout, /dynamic = "force-dynamic"/);
 assert.match(rootLayout, /<PrivacyAnalytics nonce=\{nonce\}/);
+assert.doesNotMatch(
+  rootLayout,
+  /sdk\.cashfree\.com/,
+  "Cashfree must load only after the shopper starts checkout.",
+);
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -280,8 +318,10 @@ for (const key of Object.values(publicKeyManifest.keys)) {
 
 const envExample = await text(".env.example");
 for (const name of [
-  "STRIPE_PRICE_PRO_US",
-  "STRIPE_PRICE_MAX_US",
+  "CASHFREE_CLIENT_ID",
+  "CASHFREE_CLIENT_SECRET",
+  "CASHFREE_ENVIRONMENT",
+  "CASHFREE_GLOBAL_PAYMENTS_APPROVED",
   "PPP_CHECKOUT_ENABLED",
   "LICENSE_SIGNING_SECRET",
   "ABUSE_HASH_SECRET",

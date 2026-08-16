@@ -37,12 +37,12 @@ SBOM, notice, policy, and provenance changes.
 
 ## Vulnerability and license inventory
 
-The deterministic CycloneDX 1.6 SBOM contains 1,008 unique components: 904 npm
+The deterministic CycloneDX 1.6 SBOM contains 1,035 unique components: 931 npm
 and 104 PyPI packages. Every component has a version, package URL, integrity
 hash where its ecosystem provides one, dependency surface, scope, and resolved
 license expression. The exact SBOM SHA-256 is:
 
-`5d608767335fb9a259832b2d7e364a78af1a781890be5a923624f0766f44175b`
+`c2e8f00b18dad0ba0cf346dbae5bbafce89020f857d46fa1dd6bc2f2db92455d`
 
 `THIRD_PARTY_NOTICES.md` is generated from the same exact lock inputs. The
 generator rejects unreviewed Python versions, missing npm license metadata,

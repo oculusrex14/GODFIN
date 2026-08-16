@@ -21,7 +21,7 @@ The limiter never stores a raw IP address, email address, user ID, or license ke
 | Checkout creation | Signed-in user | 10/hour |
 | OAuth callback | Network address | 60/hour |
 
-Blocked JSON responses use HTTP 429, `Retry-After`, `Cache-Control: no-store`, and remaining-limit headers. Failures in the durable control fail closed before email, Stripe, licensing, or OAuth work. The Stripe webhook is not application-rate-limited because it already requires Stripe's signed payload and must remain retryable; provider ingress controls should protect it without rejecting legitimate retries.
+Blocked JSON responses use HTTP 429, `Retry-After`, `Cache-Control: no-store`, and remaining-limit headers. Failures in the durable control fail closed before email, Cashfree, licensing, or OAuth work. The Cashfree webhook is not application-rate-limited because it already requires Cashfree's signed raw-body payload and must remain retryable; provider ingress controls should protect it without rejecting legitimate retries.
 
 ### Secret setup and rotation
 
@@ -31,7 +31,7 @@ The deployment must not enable checkout or waitlist submission until the secret 
 
 ## Content Security Policy
 
-Every HTML request receives a cryptographically random nonce through Next.js middleware. The nonce is placed on framework and privacy-analytics scripts. Production policy uses `strict-dynamic`, has no `unsafe-inline` or `unsafe-eval`, blocks inline style attributes and object embedding, disallows framing, and permits only the explicitly listed Supabase, Stripe, Google sign-in, and privacy-analytics connections. Arbitrary WebSocket origins are permitted only by the development policy.
+Every HTML request receives a cryptographically random nonce through Next.js middleware. The nonce is placed on framework, Cashfree checkout, and privacy-analytics scripts. Production policy uses `strict-dynamic`, has no `unsafe-inline` or `unsafe-eval`, blocks inline style attributes and object embedding, disallows framing, and permits only the explicitly listed Supabase, Cashfree, Google sign-in, and privacy-analytics connections. Arbitrary WebSocket origins are permitted only by the development policy.
 
 API responses receive a separate `default-src 'none'` policy and `Cache-Control: no-store`. The nonce policy requires dynamic rendering of HTML routes; performance must be measured against the website budget before launch.
 

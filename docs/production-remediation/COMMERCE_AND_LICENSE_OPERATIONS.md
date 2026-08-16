@@ -14,7 +14,7 @@ tests remain release gates.
 - Supabase is authoritative for license status and the three-active-device
   limit. The app's local `license_tier`, `license_status`, and verification-date
   settings are compatibility/display fields and cannot enable a paid feature.
-- Stripe is authoritative for payment, refund, and dispute events. Only a
+- Cashfree is authoritative for payment, refund, and dispute events. Only a
   signature-verified webhook may call the service-role provisioning and payment
   reconciliation functions.
 - Ordinary finance data remains in local SQLite and is never part of the
@@ -75,20 +75,20 @@ Emergency compromise response:
 
 ## Payment reversal state machine
 
-The database recalculates state from the latest event for each Stripe object,
+The database recalculates state from the latest event for each provider object,
 using provider occurrence time rather than webhook arrival order.
 
 | Payment condition | Purchase status | License status |
 |---|---|---|
 | Paid, region verified, no adverse event | `paid` | `active` |
-| Missing/mismatched billing region, Price, currency, subtotal, pricing version, or automatic tax | `pricing_review` | `suspended` |
+| Missing/mismatched amount, currency, account email, pricing version, or regional proof | `pricing_review` | `suspended` |
 | Pending or partial refund | `refund_pending` / `partially_refunded` | `suspended` |
 | Open dispute | `disputed` | `suspended` |
 | Full refund | `refunded` | `revoked` |
 | Lost dispute | `dispute_lost` | `revoked` |
 | Won/closed dispute or failed refund with no other adverse state | `paid` | `active` |
 
-Every Stripe event ID is unique. Replays do not duplicate rows or license
+Every Cashfree event ID is unique. Replays do not duplicate rows or license
 changes. Raw webhook bodies are not stored; the event ledger retains bounded
 provider IDs, normalized state, amount/currency, occurrence time, and a SHA-256
 digest for support reconciliation.
@@ -99,16 +99,20 @@ digest for support reconciliation.
 - When PPP is enabled, Vercel's server-populated country header selects the
   India table only for `IN`; missing or any other signal uses the higher US
   anchor.
-- Stripe Checkout collects billing address and enables automatic tax.
-- Fulfillment retrieves the Checkout Session from Stripe and rechecks the exact
-  Price ID, currency, pre-tax subtotal, quantity, pricing-table version,
-  automatic-tax flag, and billing-country eligibility.
+- Checkout creates a Cashfree order from the server-side product catalog. The
+  browser never supplies an amount, currency, country, or entitlement.
+- Fulfillment retrieves the authoritative order and payment from Cashfree and
+  rechecks the amount, currency, paid/success state, account email, product,
+  user ID, and pricing-table version.
+- PPP checkout remains disabled. A future non-India rollout requires an
+  authoritative billing-country signal and qualified tax review; Vercel's edge
+  country alone is not enough to authorize a regional price.
 - A mismatch creates a suspended review record and never emails a usable
   license. Support must resolve or refund it; it must never be manually marked
   active without reviewed billing evidence.
 
-PPP coefficients and tax treatment require qualified annual review. Stripe's
-production tax registration/configuration, regional Prices, and test/live
+PPP coefficients and tax treatment require qualified annual review. Cashfree's
+production KYC, tax/invoice configuration, international-payment approval, and test/live
 webhooks are provider release gates.
 
 ## Supabase migration and RLS procedure
@@ -131,16 +135,16 @@ webhooks are provider release gates.
 
 ## Provider reconciliation checklist
 
-- Stripe endpoint subscribes to Checkout completion/async success/failure,
-  refund created/updated/failed, charge refunded, and dispute lifecycle events.
-- Webhook signing secret is distinct between test and live modes.
+- Cashfree endpoint subscribes to payment success/failure/user-dropped,
+  refund/auto-refund, and dispute created/updated/closed events.
+- Sandbox and production credentials remain separate and never enter source control.
 - A complete test purchase provisions one lifetime license and sends one email.
-- Duplicate delivery leaves one purchase, one Stripe-event row, and one email.
+- Duplicate delivery leaves one purchase, one provider-event row, and one email.
 - A partial refund suspends; a full refund revokes; a won dispute restores only
   when no other adverse condition remains.
 - The next online desktop verification rejects a suspended/revoked license and
   removes its cached paid entitlement.
 - Three installations verify; a fourth does not. Account deactivation frees a
   slot without deleting history.
-- Stripe Tax, invoices/receipts, refund policy, and regional prices receive
+- Cashfree invoices/receipts, GST/tax treatment, refund policy, and regional prices receive
   qualified tax/legal review before checkout is enabled.

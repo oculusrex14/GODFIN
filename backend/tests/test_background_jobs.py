@@ -259,3 +259,36 @@ def test_dispatcher_never_runs_more_than_the_configured_concurrency(job_runtime)
         time.sleep(0.02)
     else:
         raise AssertionError("bounded worker did not finish queued work")
+
+
+def test_claimed_job_waits_out_a_short_sqlite_read_lock(job_runtime):
+    calls = []
+    register_job_handler(
+        "test_claim_read_lock",
+        lambda _context, _payload: calls.append("ran") or {},
+    )
+    queued = enqueue_job("test_claim_read_lock", active_key="claim-read-lock")
+    assert background_jobs._claim_next_job() == queued.job_id
+
+    locker = job_runtime()
+    locker.execute(text("BEGIN IMMEDIATE"))
+    locker.execute(
+        text(
+            "UPDATE background_jobs SET public_message = public_message "
+            "WHERE id = :job_id"
+        ),
+        {"job_id": queued.job_id},
+    )
+    worker = threading.Thread(
+        target=background_jobs._execute_job,
+        args=(queued.job_id,),
+    )
+    worker.start()
+    time.sleep(0.08)
+    locker.commit()
+    locker.close()
+    worker.join(timeout=5)
+
+    assert worker.is_alive() is False
+    assert calls == ["ran"]
+    assert _job(job_runtime, queued.job_id).status == "completed"

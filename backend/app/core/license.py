@@ -36,8 +36,8 @@ _SENSITIVE_KEYS = {"license_key"}
 _INSTALLATION_KEYCHAIN_SERVICE = "com.godfin.desktop"
 _INSTALLATION_KEYCHAIN_ACCOUNT = "installation-id"
 _PACKAGED_LICENSE_ENDPOINTS = (
-    "https://godfin.vercel.app/api/license/verify",
     "https://godfin.dev/api/license/verify",
+    "https://godfin.vercel.app/api/license/verify",
 )
 
 

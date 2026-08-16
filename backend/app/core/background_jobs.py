@@ -481,45 +481,58 @@ def _fail_job(
     _write_with_lock_retry(update)
 
 
-def _execute_job(job_id: str) -> None:
-    db = _session()
-    try:
+def _claimed_job_details(job_id: str) -> tuple[str, dict[str, Any], int] | None:
+    """Load a claimed job without abandoning its lease on a short SQLite lock."""
+
+    def load(db):
         job = db.query(BackgroundJob).filter_by(id=job_id).one_or_none()
         if job is None:
-            return
-        kind = job.kind
-        payload = _decoded_json(job.payload_json)
-        attempt = job.attempt
-    finally:
-        db.close()
-    context = JobContext(job_id, attempt=attempt)
-    with _handlers_lock:
-        handler = _handlers.get(kind)
-    if handler is None:
-        _fail_job(job_id, code="JOB_HANDLER_UNAVAILABLE", retryable=False)
-        return
-    context.start_heartbeat()
+            return None
+        return job.kind, _decoded_json(job.payload_json), job.attempt
+
+    return _write_with_lock_retry(load)
+
+
+def _execute_job(job_id: str) -> None:
+    context: JobContext | None = None
     try:
-        context.check_cancelled()
-        result = handler(context, payload)
-        context.check_cancelled()
-        _complete_job(job_id, result)
-    except JobCancelled:
-        _fail_job(job_id, code="JOB_CANCELLED", retryable=False, cancelled=True)
-    except JobExecutionError as exc:
-        _fail_job(job_id, code=exc.code, retryable=exc.retryable)
-    except Exception as exc:
-        logger.exception(
-            "Background job failed",
-            extra={
-                "operation_id": kind,
-                "error_code": "JOB_HANDLER_FAILED",
-                "cause_type": type(exc).__name__,
-            },
-        )
-        _fail_job(job_id, code="JOB_HANDLER_FAILED", retryable=True)
+        try:
+            details = _claimed_job_details(job_id)
+        except JobExecutionError as exc:
+            _fail_job(job_id, code=exc.code, retryable=exc.retryable)
+            return
+        if details is None:
+            return
+        kind, payload, attempt = details
+        context = JobContext(job_id, attempt=attempt)
+        with _handlers_lock:
+            handler = _handlers.get(kind)
+        if handler is None:
+            _fail_job(job_id, code="JOB_HANDLER_UNAVAILABLE", retryable=False)
+            return
+        context.start_heartbeat()
+        try:
+            context.check_cancelled()
+            result = handler(context, payload)
+            context.check_cancelled()
+            _complete_job(job_id, result)
+        except JobCancelled:
+            _fail_job(job_id, code="JOB_CANCELLED", retryable=False, cancelled=True)
+        except JobExecutionError as exc:
+            _fail_job(job_id, code=exc.code, retryable=exc.retryable)
+        except Exception as exc:
+            logger.exception(
+                "Background job failed",
+                extra={
+                    "operation_id": kind,
+                    "error_code": "JOB_HANDLER_FAILED",
+                    "cause_type": type(exc).__name__,
+                },
+            )
+            _fail_job(job_id, code="JOB_HANDLER_FAILED", retryable=True)
     finally:
-        context.stop_heartbeat()
+        if context is not None:
+            context.stop_heartbeat()
         with _worker_lock:
             _active_threads.pop(job_id, None)
         _worker_wake.set()

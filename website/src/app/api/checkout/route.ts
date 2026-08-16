@@ -1,19 +1,23 @@
+import { createHmac } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
-import { commerceConfigured, siteUrl } from "@/lib/env";
+import {
+  cashfreeMode,
+  createCashfreeOrder,
+} from "@/lib/cashfree";
+import { commerceConfigured, serverEnv } from "@/lib/env";
 import {
   isProductCode,
   isRetiredHostedCreditCode,
   PRODUCTS,
-  stripePriceIdForEnvironment,
 } from "@/lib/products";
 import {
   regionalPrice,
   requestPricingCountry,
 } from "@/lib/regional-pricing";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { stripe } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 
@@ -58,7 +62,10 @@ export async function POST(request: Request) {
     });
     if (!userLimit.allowed) return rateLimitResponse(userLimit);
 
-    const body = (await request.json()) as { product?: unknown };
+    const body = (await request.json()) as {
+      product?: unknown;
+      checkoutAttemptId?: unknown;
+    };
     if (isRetiredHostedCreditCode(body.product)) {
       return NextResponse.json(
         {
@@ -71,33 +78,48 @@ export async function POST(request: Request) {
     if (!isProductCode(body.product)) {
       return NextResponse.json({ message: "Unknown product." }, { status: 400 });
     }
+    if (
+      typeof body.checkoutAttemptId !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        body.checkoutAttemptId,
+      )
+    ) {
+      return NextResponse.json(
+        { message: "Checkout attempt is invalid. Please try again." },
+        { status: 400 },
+      );
+    }
     const product = PRODUCTS[body.product];
     const pricingCountry = requestPricingCountry(request);
     const licensePrice = regionalPrice(body.product, pricingCountry);
-    const priceId = stripePriceIdForEnvironment(licensePrice.priceEnv);
-
-    const session = await stripe().checkout.sessions.create({
-      mode: "payment",
-      line_items: [{ price: priceId, quantity: 1 }],
-      customer_email: user.email,
-      customer_creation: "always",
-      client_reference_id: user.id,
-      billing_address_collection: "required",
-      automatic_tax: { enabled: true },
-      payment_intent_data: {
-        description: product.description,
-      },
-      metadata: {
+    const orderId = `godfin_${body.checkoutAttemptId}`;
+    const customerId = `gf_${createHmac("sha256", serverEnv.abuseHashSecret())
+      .update(`cashfree-customer:${user.id}`)
+      .digest("hex")
+      .slice(0, 32)}`;
+    const order = await createCashfreeOrder({
+      orderId,
+      amountMinor: licensePrice.amount,
+      currency: licensePrice.currency,
+      customerId,
+      customerEmail: user.email,
+      productName: product.description,
+      tags: {
         product_code: product.code,
         user_id: user.id,
         pricing_country: licensePrice.country,
         pricing_version: licensePrice.priceVersion,
       },
-      success_url: `${siteUrl()}/account?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${siteUrl()}/pricing?checkout=cancelled`,
     });
+    if (!order.payment_session_id || order.order_id !== orderId) {
+      throw new Error("Cashfree did not return a usable payment session.");
+    }
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({
+      paymentSessionId: order.payment_session_id,
+      orderId,
+      mode: cashfreeMode(),
+    });
   } catch (error) {
     console.error("Checkout creation failed", error);
     return NextResponse.json(

@@ -44,7 +44,7 @@ export default function PrivacyPage() {
           <ul>
             <li>Vercel hosts the marketing and account website.</li>
             <li>Supabase provides website authentication and license records.</li>
-            <li>Stripe processes payments; GODFIN does not store full card details.</li>
+            <li>Cashfree processes payments; GODFIN does not store full card details.</li>
             <li>Resend delivers transactional license and account email.</li>
           </ul>
 

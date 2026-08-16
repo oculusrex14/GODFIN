@@ -8,7 +8,6 @@ import { ResendLicenseButton } from "@/components/resend-license-button";
 import { serverEnv, supabasePublicConfig } from "@/lib/env";
 import { licenseKeyForSession, type LicenseTier } from "@/lib/license";
 import { isProductCode, PRODUCTS } from "@/lib/products";
-import { stripe } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
@@ -22,7 +21,7 @@ type AccountSearchParams = Promise<{
   checkout?: string;
   next?: string;
   error?: string;
-  session_id?: string;
+  order_id?: string;
 }>;
 
 export default async function AccountPage({
@@ -50,6 +49,10 @@ export default async function AccountPage({
     product_code: string;
     amount_total: number;
     currency: string;
+    status: string;
+    license_id: string | null;
+    payment_provider: string;
+    provider_order_id: string | null;
     created_at: string;
   }> = [];
   let activations: Array<{
@@ -71,7 +74,9 @@ export default async function AccountPage({
         .order("issued_at", { ascending: false }),
       supabase
         .from("purchases")
-        .select("id,product_code,amount_total,currency,created_at")
+        .select(
+          "id,product_code,amount_total,currency,status,license_id,payment_provider,provider_order_id,created_at",
+        )
         .order("created_at", { ascending: false })
         .limit(20),
       supabase
@@ -85,31 +90,27 @@ export default async function AccountPage({
     activations = activationResult.data || [];
 
     if (
-      params.checkout === "success" &&
-      params.session_id?.startsWith("cs_")
+      params.checkout === "return" &&
+      params.order_id &&
+      /^godfin_[0-9a-f-]{36}$/i.test(params.order_id)
     ) {
-      try {
-        const session = await stripe().checkout.sessions.retrieve(
-          params.session_id.slice(0, 255),
+      const returnedPurchase = purchases.find(
+        (purchase) =>
+          purchase.payment_provider === "cashfree" &&
+          purchase.provider_order_id === params.order_id,
+      );
+      if (
+        returnedPurchase?.status === "paid" &&
+        returnedPurchase.license_id &&
+        isProductCode(returnedPurchase.product_code)
+      ) {
+        checkoutProductCode = returnedPurchase.product_code;
+        const tier = PRODUCTS[returnedPurchase.product_code].tier as LicenseTier;
+        checkoutLicenseKey = licenseKeyForSession(
+          params.order_id,
+          tier,
+          serverEnv.licenseSigningSecret(),
         );
-        const productCode = session.metadata?.product_code;
-        if (
-          session.payment_status === "paid" &&
-          session.client_reference_id === user.id &&
-          isProductCode(productCode)
-        ) {
-          checkoutProductCode = productCode;
-          const tier = PRODUCTS[productCode].tier as LicenseTier | null;
-          if (tier) {
-            checkoutLicenseKey = licenseKeyForSession(
-              session.id,
-              tier,
-              serverEnv.licenseSigningSecret(),
-            );
-          }
-        }
-      } catch (error) {
-        console.error("Could not load checkout confirmation", error);
       }
     }
   }
@@ -119,7 +120,7 @@ export default async function AccountPage({
       {checkoutProductCode ? (
         <CheckoutAnalytics
           product={checkoutProductCode}
-          checkoutId={params.session_id || "unknown"}
+          checkoutId={params.order_id || "unknown"}
         />
       ) : null}
       <section className="page-hero">
@@ -142,10 +143,11 @@ export default async function AccountPage({
               production environment variables before launch.
             </div>
           ) : null}
-          {params.checkout === "success" && !checkoutLicenseKey ? (
+          {params.checkout === "return" && !checkoutLicenseKey ? (
             <div className="notice">
-              Payment received. License provisioning can take a few seconds;
-              refresh if it has not appeared yet.
+              Cashfree is confirming the payment. License provisioning can take
+              a few seconds; refresh if it has not appeared yet. GODFIN never
+              activates a license from the browser return alone.
             </div>
           ) : null}
           {params.error ? (
@@ -219,7 +221,15 @@ export default async function AccountPage({
                       <div className="purchase-entry" key={purchase.id}>
                         <strong>{purchase.product_code.replaceAll("_", " ")}</strong>
                         <div className="account-caption">
-                          ₹{(purchase.amount_total / 100).toLocaleString("en-IN")} ·{" "}
+                          {new Intl.NumberFormat(
+                            purchase.currency.toLowerCase() === "inr"
+                              ? "en-IN"
+                              : "en-US",
+                            {
+                              style: "currency",
+                              currency: purchase.currency.toUpperCase(),
+                            },
+                          ).format(purchase.amount_total / 100)} · {purchase.status} ·{" "}
                           {new Date(purchase.created_at).toLocaleDateString("en-IN")}
                         </div>
                       </div>

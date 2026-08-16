@@ -12,10 +12,10 @@ class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 5100
     API_V1_PREFIX: str = "/api/v1"
-    LICENSE_API_URL: str = "https://godfin.vercel.app/api/license/verify"
-    LICENSE_API_FALLBACK_URL: str = ""
+    LICENSE_API_URL: str = "https://godfin.dev/api/license/verify"
+    LICENSE_API_FALLBACK_URL: str = "https://godfin.vercel.app/api/license/verify"
     LICENSE_OFFLINE_GRACE_DAYS: int = 30
-    WEBSITE_URL: str = "https://godfin.vercel.app"
+    WEBSITE_URL: str = "https://godfin.dev"
 
     @property
     def database_path(self) -> Path:

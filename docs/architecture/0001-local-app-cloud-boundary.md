@@ -12,7 +12,7 @@ a public website for discovery, account access, payments, and licensing.
 
 The Electron application bundles React and FastAPI and stores ordinary app data
 in local SQLite. The app backend is never cloud-hosted. The Next.js website may
-use Vercel, Supabase Auth/license metadata, Stripe, and Resend, but receives no
+use Vercel, Supabase Auth/license metadata, Cashfree, and Resend, but receives no
 desktop statements, ledger, PIN, merchant memory, budgets, or net-worth data.
 Only a separately consented and locally redacted pilot contribution may cross
 the boundary.

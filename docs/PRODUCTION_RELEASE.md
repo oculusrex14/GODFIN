@@ -31,11 +31,11 @@ and Playwright jobs on the release commit.
 - Supabase migration applied; RLS policies manually verified with two test
   users.
 - Google OAuth consent, domain, callback, privacy page, and terms page verified.
-- Stripe products are one-time INR prices with exact server-side amounts.
-- Stripe webhook signature failure returns HTTP 400.
-- A Stripe test payment provisions exactly one purchase/license and one email,
+- Cashfree orders use exact server-side product amounts and never subscriptions.
+- Cashfree webhook signature failure returns HTTP 400.
+- A Cashfree sandbox payment provisions exactly one purchase/license and one email,
   including after webhook replay.
-- A credit-pack test payment increments the balance exactly once.
+- Partial/full refunds and lost/won disputes suspend, revoke, or restore exactly once.
 - Resend domain DKIM/SPF passes and delivery is tested on Gmail plus one other
   provider.
 - Production environment variables are present in Vercel and absent from git.
@@ -90,7 +90,8 @@ and Playwright jobs on the release commit.
 - Attach signed installers, blockmaps/update metadata, checksums, SBOM, and
   release notes to a private draft GitHub Release.
 - Point website download variables to those immutable release assets.
-- Run a final production payment with a low-value test product, then remove it.
+- Run a controlled production purchase only after Cashfree KYC, tax, refund,
+  email, and support procedures are approved.
 - Capture the final website and app screenshots from the shipped build.
 - Obtain explicit owner authorization.
 - Publish the website, GitHub Release, Homebrew cask, and prepared launch

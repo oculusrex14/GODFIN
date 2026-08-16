@@ -33,7 +33,7 @@ Desktop installation                         Website / account services
 ──────────────────────────────────────       ───────────────────────────────
 Electron shell                              Next.js on Vercel
 React renderer via godfin://app              Supabase website authentication
-FastAPI on loopback                          Stripe one-time checkout/webhooks
+FastAPI on loopback                          Cashfree one-time checkout/webhooks
 SQLite + local backups                       License/account metadata
 Optional local Ollama or user provider       Waitlist and transactional email
 
@@ -167,7 +167,7 @@ Do not add unverified community models or silently install external software.
 
 ## Website, payments, and licensing
 
-The website sells one-time lifetime licenses and separate one-time hosted-credit packs.
+The website sells one-time lifetime licenses. Pro and Max include no hosted AI credits, and GODFIN does not currently sell hosted-credit packs.
 No plan includes recurring hosted AI credits and no checkout uses subscription
 mode. Entitlements come from `shared/entitlements.json`; website builds fail if
 copy sells an unreleased entitlement.

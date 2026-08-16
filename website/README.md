@@ -26,17 +26,18 @@ license verification require the environment variables in `.env.example`.
    `supabase/migrations/` through the Supabase CLI. Do not cherry-pick only the
    first migration.
 2. Enable Google sign-in in Supabase Auth with a dedicated website OAuth client.
-   During the current pre-domain stage, configure:
-   - Site URL: `https://godfin.vercel.app`
-   - Redirect URL: `https://godfin.vercel.app/auth/callback`
-   Add the future exact `https://godfin.dev/auth/callback` URL only when the
-   custom domain is configured; do not remove the Vercel fallback prematurely.
-3. Create five Stripe **one-time** INR prices matching `src/lib/products.ts`.
-   Do not create recurring prices or subscription Checkout sessions.
-4. Add a Stripe webhook for the active website origin plus `/api/webhook` with
-   the complete event set required by the current webhook implementation and
-   refund/dispute revocation tests. Do not infer that checkout-only events are
-   sufficient.
+   Configure the canonical and fallback callbacks:
+   - Site URL: `https://godfin.dev`
+   - Redirect URL: `https://godfin.dev/auth/callback`
+   - Fallback: `https://godfin.vercel.app/auth/callback`
+3. Create a Cashfree Payment Gateway app. Keep `CASHFREE_ENVIRONMENT=sandbox`
+   and `CHECKOUT_ENABLED=false` until the complete payment test matrix passes.
+   GODFIN creates one-time orders from its server-side product catalog; it does
+   not create subscriptions.
+4. Add the Cashfree webhook `https://godfin.dev/api/webhook` and subscribe to
+   payment success/failure/user-dropped, refund/auto-refund, and dispute events.
+   The route verifies Cashfree's raw-body HMAC signature and re-fetches paid
+   orders server-to-server before it issues a license.
 5. Verify the final mail domain in Resend before using an `@godfin.dev` sender.
    The Vercel hostname is a website fallback, not an email domain.
 6. Set every `.env.example` value in Vercel. Generate
@@ -49,9 +50,10 @@ license verification require the environment variables in `.env.example`.
 
 ## Payment and license invariants
 
-- Checkout is always `mode: "payment"`.
-- Product codes, INR amounts, and Stripe price IDs are selected server-side.
+- Checkout always creates one Cashfree order for one lifetime license.
+- Product codes, currencies, and amounts are selected server-side.
 - Webhooks are verified against the raw body before fulfillment.
+- Browser return URLs never activate a license on their own.
 - Purchase provisioning is transactional and idempotent in Postgres.
 - Full license keys are never stored. Supabase stores only SHA-256 hashes and
   the final four characters.
@@ -67,6 +69,6 @@ npm run build
 npm audit --omit=dev
 ```
 
-Repository support does not prove deployed Google OAuth, Stripe KYC/prices,
+Repository support does not prove deployed Google OAuth, Cashfree KYC/webhooks,
 webhooks, Resend/DNS, RLS, or production environment values. Record those live
 checks in the private owner runbook.

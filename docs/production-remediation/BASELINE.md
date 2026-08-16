@@ -73,7 +73,7 @@ Unavailable or not configured at baseline:
 - macOS code-signing identity (`security find-identity` reported zero valid identities).
 - Windows signing certificate and native Windows host.
 - Linux native host/package execution evidence.
-- Production Stripe, production Google OAuth publication/verification, Resend/DNS, notarization, legal/privacy/tax review, and public-launch evidence are not assumed merely because source support exists.
+- Production Cashfree, production Google OAuth publication/verification, Resend/DNS, notarization, legal/privacy/tax review, and public-launch evidence are not assumed merely because source support exists.
 
 ## Platform limitations
 
@@ -87,7 +87,7 @@ Unavailable or not configured at baseline:
 - Primary findings: 54 (2 Critical, 27 High, 23 Medium, 1 Low, 1 Informational).
 - Supplemental validated findings to add: 8 (4 High and 4 Medium).
 - No finding is marked `Verified` at baseline solely because existing tests pass.
-- Strong controls to preserve: Electron isolation, hashed expiring sessions, encryption-key fail-closed behavior, Stripe raw-body signature verification, Supabase RLS source design, hash-pinned dependency intent, and controlled release-promotion workflows.
+- Strong controls to preserve: Electron isolation, hashed expiring sessions, encryption-key fail-closed behavior, Cashfree raw-body signature verification, Supabase RLS source design, hash-pinned dependency intent, and controlled release-promotion workflows.
 - The immediate Gmail UI error is confirmed to represent a missing external desktop OAuth client, not a frontend rendering failure. Repository OAuth and synchronization defects remain independently actionable under `GF-OAUTH-001`, `GF-GMAIL-001`, `GF-GMAIL-002`, and `GF-GMAIL-003`.
 
 ## Baseline verdict

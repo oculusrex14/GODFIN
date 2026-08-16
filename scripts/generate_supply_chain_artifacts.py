@@ -294,7 +294,7 @@ def _build_sbom(components: dict[str, Component]) -> dict[str, Any]:
         for component in sorted(components.values(), key=lambda item: item.purl)
     ]
     fingerprint = hashlib.sha256(_json_bytes(component_dicts)).hexdigest()
-    serial = uuid.uuid5(uuid.NAMESPACE_URL, f"https://godfin.vercel.app/sbom/{version}/{fingerprint}")
+    serial = uuid.uuid5(uuid.NAMESPACE_URL, f"https://godfin.dev/sbom/{version}/{fingerprint}")
     runtime_refs = sorted(
         component.bom_ref
         for component in components.values()

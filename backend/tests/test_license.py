@@ -120,8 +120,8 @@ def test_failed_activation_does_not_replace_current_license(
 def test_license_verification_falls_back_only_for_server_failure(
     auth_client, monkeypatch
 ):
-    primary = "https://godfin.vercel.app/api/license/verify"
-    fallback = "https://godfin.dev/api/license/verify"
+    primary = "https://godfin.dev/api/license/verify"
+    fallback = "https://godfin.vercel.app/api/license/verify"
     calls = []
 
     def fake_post(url, **kwargs):
@@ -150,8 +150,8 @@ def test_license_verification_falls_back_only_for_server_failure(
 
 
 def test_invalid_license_response_never_uses_fallback(auth_client, monkeypatch):
-    primary = "https://godfin.vercel.app/api/license/verify"
-    fallback = "https://godfin.dev/api/license/verify"
+    primary = "https://godfin.dev/api/license/verify"
+    fallback = "https://godfin.vercel.app/api/license/verify"
     calls = []
 
     def fake_post(url, **_kwargs):
@@ -430,8 +430,8 @@ def test_packaged_build_ignores_license_endpoint_overrides(monkeypatch):
     monkeypatch.setattr(settings, "LICENSE_API_FALLBACK_URL", "https://evil.invalid/verify")
 
     assert _license_verification_endpoints() == [
-        "https://godfin.vercel.app/api/license/verify",
         "https://godfin.dev/api/license/verify",
+        "https://godfin.vercel.app/api/license/verify",
     ]
 
 
@@ -443,8 +443,8 @@ def test_frozen_backend_ignores_license_endpoint_overrides(monkeypatch):
     monkeypatch.setattr(settings, "LICENSE_API_URL", "https://attacker.invalid/verify")
 
     assert license_module._license_verification_endpoints() == [
-        "https://godfin.vercel.app/api/license/verify",
         "https://godfin.dev/api/license/verify",
+        "https://godfin.vercel.app/api/license/verify",
     ]
 
 

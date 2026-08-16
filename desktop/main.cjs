@@ -23,8 +23,8 @@ const launchSecret = (
 const APP_ORIGIN = "godfin://app";
 const UPDATE_ORIGIN = "https://releases.godfin.dev";
 const WEBSITE_ORIGINS = new Set([
-  "https://godfin.vercel.app",
   "https://godfin.dev",
+  "https://godfin.vercel.app",
   "https://accounts.google.com",
   "https://ollama.com",
 ]);

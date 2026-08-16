@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start -p 5300",
     "lint": "next lint",
+    "test:cashfree": "node --import tsx --test src/lib/cashfree.test.ts",
     "verify:contracts": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs && node scripts/verify-supabase-migrations.mjs",
     "verify:migrations": "node scripts/verify-supabase-migrations.mjs"
   },
@@ -19,8 +20,7 @@
     "next": "15.5.22",
     "react": "19.1.9",
     "react-dom": "19.1.9",
-    "resend": "6.18.1",
-    "stripe": "22.3.2"
+    "resend": "6.18.1"
   },
   "devDependencies": {
     "@types/node": "22.10.2",
@@ -28,6 +28,7 @@
     "@types/react-dom": "19.1.11",
     "eslint": "8.57.1",
     "eslint-config-next": "15.5.22",
+    "tsx": "4.23.12",
     "typescript": "5.7.2"
   },
   "engines": {

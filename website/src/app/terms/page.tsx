@@ -59,7 +59,7 @@ export default function TermsPage() {
 
           <h2>5. Payments and refunds</h2>
           <p>
-            Payments are processed by Stripe. Taxes, invoices, and supported
+            Payments are processed by Cashfree. Taxes, invoices, and supported
             methods depend on location and checkout. Except where applicable law
             requires otherwise, digital license refunds may be limited after a
             key has been activated.

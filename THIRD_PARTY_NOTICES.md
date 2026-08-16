@@ -4,8 +4,8 @@
 
 ## Inventory summary
 
-- Exact unique components: 1008
-- Components used by a runtime surface: 427
+- Exact unique components: 1035
+- Components used by a runtime surface: 424
 - Components requiring conditional-license review: 35
 - Application license: PolyForm Noncommercial 1.0.0
 
@@ -62,31 +62,57 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | @emnapi/wasi-threads | 1.2.1 | npm | MIT | development | npm-website |
 | @emnapi/wasi-threads | 2.0.1 | npm | MIT | development | npm-website |
 | @esbuild/aix-ppc64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/aix-ppc64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/android-arm64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/android-arm64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/android-arm | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/android-arm | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/android-x64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/android-x64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/darwin-arm64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/darwin-arm64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/darwin-x64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/darwin-x64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/freebsd-arm64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/freebsd-arm64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/freebsd-x64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/freebsd-x64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/linux-arm64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/linux-arm64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/linux-arm | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/linux-arm | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/linux-ia32 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/linux-ia32 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/linux-loong64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/linux-loong64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/linux-mips64el | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/linux-mips64el | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/linux-ppc64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/linux-ppc64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/linux-riscv64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/linux-riscv64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/linux-s390x | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/linux-s390x | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/linux-x64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/linux-x64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/netbsd-arm64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/netbsd-arm64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/netbsd-x64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/netbsd-x64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/openbsd-arm64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/openbsd-arm64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/openbsd-x64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/openbsd-x64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/openharmony-arm64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/openharmony-arm64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/sunos-x64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/sunos-x64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/win32-arm64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/win32-arm64 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/win32-ia32 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/win32-ia32 | 0.28.2 | npm | MIT | development | npm-website |
 | @esbuild/win32-x64 | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| @esbuild/win32-x64 | 0.28.2 | npm | MIT | development | npm-website |
 | @eslint/config-array | 0.23.5 | npm | Apache-2.0 | development | npm-frontend |
 | @eslint/config-helpers | 0.7.0 | npm | Apache-2.0 | development | npm-frontend |
 | @eslint/core | 1.2.1 | npm | Apache-2.0 | development | npm-frontend |
@@ -249,7 +275,7 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | @types/keyv | 3.1.4 | npm | MIT | development | npm-desktop |
 | @types/mdast | 4.0.4 | npm | MIT | runtime | npm-frontend |
 | @types/ms | 2.1.0 | npm | MIT | development, runtime | npm-desktop, npm-frontend |
-| @types/node | 22.10.2 | npm | MIT | runtime | npm-website |
+| @types/node | 22.10.2 | npm | MIT | development | npm-website |
 | @types/node | 22.20.1 | npm | MIT | development | npm-desktop |
 | @types/node | 24.13.3 | npm | MIT | development | npm-desktop |
 | @types/react-dom | 19.1.11 | npm | MIT | development | npm-website |
@@ -439,6 +465,7 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | es-toolkit | 1.44.0 | npm | MIT | runtime | npm-frontend |
 | es6-error | 4.1.1 | npm | MIT | development | npm-desktop |
 | esbuild | 0.28.1 | npm | MIT | runtime | npm-frontend |
+| esbuild | 0.28.2 | npm | MIT | development | npm-website |
 | escalade | 3.2.0 | npm | MIT | development | npm-desktop, npm-frontend |
 | escape-string-regexp | 4.0.0 | npm | MIT | development | npm-desktop, npm-frontend, npm-website |
 | escape-string-regexp | 5.0.0 | npm | MIT | runtime | npm-frontend |
@@ -495,7 +522,7 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | fs-extra | 9.1.0 | npm | MIT | development | npm-desktop |
 | fs.realpath | 1.0.0 | npm | ISC | development | npm-desktop, npm-website |
 | fsevents | 2.3.2 | npm | MIT | development | npm-playwright |
-| fsevents | 2.3.3 | npm | MIT | runtime | npm-frontend |
+| fsevents | 2.3.3 | npm | MIT | development, runtime | npm-frontend, npm-website |
 | function-bind | 1.1.2 | npm | MIT | development | npm-desktop, npm-website |
 | function.prototype.name | 1.2.0 | npm | MIT | development | npm-website |
 | functions-have-names | 1.2.3 | npm | MIT | development | npm-website |
@@ -844,7 +871,6 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | strip-ansi | 6.0.1 | npm | MIT | development | npm-desktop, npm-website |
 | strip-bom | 3.0.0 | npm | MIT | development | npm-website |
 | strip-json-comments | 3.1.1 | npm | MIT | development | npm-website |
-| stripe | 22.3.2 | npm | MIT | runtime | npm-website |
 | style-to-js | 1.1.21 | npm | MIT | runtime | npm-frontend |
 | style-to-object | 1.0.14 | npm | MIT | runtime | npm-frontend |
 | styled-jsx | 5.1.6 | npm | MIT | runtime | npm-website |
@@ -871,6 +897,7 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | ts-api-utils | 2.5.0 | npm | MIT | development | npm-website |
 | tsconfig-paths | 3.15.0 | npm | MIT | development | npm-website |
 | tslib | 2.8.1 | npm | 0BSD | development, runtime | npm-desktop, npm-frontend, npm-website |
+| tsx | 4.23.12 | npm | MIT | development | npm-website |
 | tw-animate-css | 1.4.0 | npm | MIT | runtime | npm-frontend |
 | type-check | 0.4.0 | npm | MIT | development | npm-frontend, npm-website |
 | type-fest | 0.13.1 | npm | (MIT OR CC0-1.0) | development | npm-desktop |
@@ -881,7 +908,7 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | typed-array-length | 1.0.8 | npm | MIT | development | npm-website |
 | typescript | 5.7.2 | npm | Apache-2.0 | development | npm-website |
 | unbox-primitive | 1.1.0 | npm | MIT | development | npm-website |
-| undici-types | 6.20.0 | npm | MIT | runtime | npm-website |
+| undici-types | 6.20.0 | npm | MIT | development | npm-website |
 | undici-types | 6.21.0 | npm | MIT | development | npm-desktop |
 | undici-types | 7.18.2 | npm | MIT | development | npm-desktop |
 | undici | 6.28.0 | npm | MIT | development | npm-desktop |
@@ -1044,7 +1071,7 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | `playwright-tests/package-lock.json` | `de7d47eede06c4e557e72816924d371c0993405a30fb79a12618f5136a66d43b` |
 | `supply-chain/license-policy.json` | `695825706d9c47fb6645a503a03b10433695dcd8c027d77f5445a608e3fc72eb` |
 | `supply-chain/python-license-review.json` | `88b7f56709365645eb2d81c6eb6e654f302e7c9942b9858fedd0ba496e1b1da6` |
-| `website/package-lock.json` | `9ae304e307a524dc39e5f615b179f26642363cff6d2073df2252cbbc8ec5359a` |
+| `website/package-lock.json` | `710415f21da2f095b1761617bc714f3634002d65423c4cd7d10ec512794eaff9` |
 
 ## Release rule
 

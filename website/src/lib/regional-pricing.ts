@@ -42,7 +42,6 @@ export function regionalPrice(
   country: LicenseCountry;
   currency: string;
   amount: number;
-  priceEnv: string;
   priceVersion: string;
 } {
   if (!isLicenseProduct(product)) {
@@ -50,7 +49,6 @@ export function regionalPrice(
       country: "IN",
       currency: "inr",
       amount: 0,
-      priceEnv: "",
       priceVersion: PPP_PRICE_VERSION,
     };
   }
@@ -64,10 +62,6 @@ export function regionalPrice(
     country,
     currency: configured.currency,
     amount: configured.amount_minor,
-    priceEnv:
-      country === "US"
-        ? `STRIPE_PRICE_${product.toUpperCase()}_US`
-        : `STRIPE_PRICE_${product.toUpperCase()}`,
     priceVersion: PPP_PRICE_VERSION,
   };
 }
