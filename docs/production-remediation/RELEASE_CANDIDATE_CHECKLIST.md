@@ -14,10 +14,10 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 ## Deterministic app correctness
 
-- [x] Complete backend regression passes (880 at this evidence point).
+- [x] Complete backend regression passes (883 at this evidence point).
 - [x] Exact money, shared semantics, finalized periods, parser failure, report reconciliation, transfer, net-worth, subscription, goal, and behavior invariants pass.
 - [x] Backup, restore, migration, update-recovery, and destructive-reset tests pass.
-- [x] Gmail OAuth/sync tests pass; private owner live OAuth and initial sync pass.
+- [x] Gmail OAuth/sync/restart tests pass; private owner live OAuth and initial sync pass.
 - [x] Frontend lint/build/access-policy contracts pass at the current production baseline.
 - [x] Website contracts/lint/build and Cashfree unit tests pass at the current production baseline.
 - [x] Desktop privacy/integrity and release/update contract tests pass at the current production baseline.

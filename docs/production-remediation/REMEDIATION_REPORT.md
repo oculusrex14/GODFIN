@@ -15,12 +15,12 @@ Public launch, installer promotion, update-feed promotion, and a public reposito
 ## Baseline and scope
 
 - Starting source commit: `5900e984e516b181ce98475261349a7187d621b4`
-- Ending source commit represented by this report: `f5e538f` plus the documentation commit containing this file
+- Ending source commit represented by this report: `8dce936` plus the documentation commit containing this file
 - Branch: `codex/godfin-production-v5`
 - Remote: private `oculusrex14/GODFIN`
 - Host evidence: macOS arm64, Python 3.12.13
 - Baseline backend: 327 passing tests
-- Current backend: 880 passing tests
+- Current backend: 883 passing tests
 - Audit sources: immutable files under `docs/GODFIN_FINAL_AUDIT_PACKAGE/`
 
 The stable-ID disposition, exact evidence, changed files, tests, residual risk, external action, and implementation commit are authoritative in `REMEDIATION_FINDINGS_REGISTER.csv`.
@@ -65,6 +65,7 @@ Relevant IDs: `GF-AUTH-001`, `GF-AUTH-002`, `GF-AUTH-003`, `GF-NET-001`, `GF-PRI
 - Pagination, partial results, cursor safety, refresh/revocation states, idempotency, savepoints, background leases, and Gmail-only deletion are covered.
 - The owner installation completed live OAuth and a first safe sync on 16 August 2026.
 - Same-sender HDFC alerts now route from explicit message semantics and the account/card ending, not an unreliable sender-only assumption. Future no-match logs contain no mailbox identifiers.
+- Persisted OAuth expiry values are normalized to the exact UTC form expected by Google Auth, so a successful Gmail connection reloads after a complete desktop/backend restart.
 
 Relevant IDs: `OWNER-GMAIL-SETUP-001`, `GF-GMAIL-001`, `GF-GMAIL-002`, `GF-GMAIL-003`, `GF-OAUTH-001`.
 
@@ -104,8 +105,8 @@ See `MIGRATION_AND_ROLLBACK.md` and `DISASTER_RECOVERY_RUNBOOK.md`.
 
 | Surface | Result |
 | --- | --- |
-| Backend | 880 passed in 60.57 seconds |
-| Focused Gmail/parser/routing | 89 passed |
+| Backend | 883 passed in 65.63 seconds |
+| Focused Gmail/parser/routing/restart | 97 passed |
 | Frontend | lint and Vite production build passed at current production baseline |
 | Website | Cashfree tests, contracts, lint, dependency audit, and Next.js production build passed at current production baseline |
 | Desktop | privacy/integrity and update/release tests passed at current production baseline |

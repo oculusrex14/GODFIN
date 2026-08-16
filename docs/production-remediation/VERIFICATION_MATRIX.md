@@ -4,8 +4,8 @@ This matrix records the current executable evidence. “Not executed” is never
 
 | Domain | Command/evidence | Current result | Remaining limitation |
 | --- | --- | --- | --- |
-| Backend regression | `backend/venv/bin/python -m pytest backend/tests -q` | Passed: 880 in 60.57 s | Native packaged execution is separate |
-| Gmail/parser/routing | Focused email parser, ingestion, parser-plugin, classifier suite | Passed: 89 | Older unmatched mail requires an explicit date-range retry |
+| Backend regression | `backend/venv/bin/python -m pytest backend/tests -q` | Passed: 883 in 65.63 s | Native packaged execution is separate |
+| Gmail/parser/routing/restart | Focused Gmail service, email parser, and ingestion suites | Passed: 97, including stored-expiry reload after restart | Older unmatched mail requires an explicit date-range retry |
 | Financial/migration/recovery | Exact money, parser safety, restore, relationships, startup migrations | Passed in current backend suite; isolated owner-copy migration clean | Windows/Linux/native interruption drills pending |
 | API access policy | `python scripts/verify_api_access_policy.py` and contract tests | Passed at current production baseline | Browser rendering checked separately |
 | Test governance | `python scripts/verify_test_governance.py` | Passed at current production baseline | Selective mutation execution remains optional follow-up |
