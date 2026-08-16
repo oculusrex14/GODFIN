@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchHealth } from '../api/client';
+import { fetchHealth, isBackendAlive } from '../api/client';
 import { Activity } from 'lucide-react';
 
 export default function HealthCheck() {
@@ -20,7 +20,7 @@ export default function HealthCheck() {
           <p className="text-sm font-medium text-rose-400">Backend Offline</p>
         ) : (
           <p className="text-sm font-medium text-emerald-400">
-            {data.status === 'ok' ? 'Connected' : 'Error'} &middot; v{data.version}
+            {isBackendAlive(data) ? 'Connected' : 'Error'} &middot; v{data.version}
           </p>
         )}
       </div>

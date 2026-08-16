@@ -7,7 +7,7 @@ async function mockPinApi(page, authStatus, verifyResponse) {
     const url = new URL(route.request().url());
     const path = url.pathname.slice(API_PREFIX.length);
     if (path === '/health') {
-      return route.fulfill({ json: { status: 'ok' } });
+      return route.fulfill({ json: { status: 'alive', liveness: true, database: 'not_checked', version: '0.1.0' } });
     }
     if (path === '/auth/status') {
       return route.fulfill({ json: authStatus });
@@ -32,7 +32,7 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
     const url = new URL(route.request().url());
     const path = url.pathname.slice(API_PREFIX.length);
     const responses = {
-      '/health': { status: 'ok' },
+      '/health': { status: 'alive', liveness: true, database: 'not_checked', version: '0.1.0' },
       '/auth/status': { is_first_run: false, pin_length: 4 },
       '/auth/verify-pin': { authenticated: true, token: 'test-token' },
       '/onboarding': {
@@ -339,6 +339,7 @@ test('PIN boxes use the saved length and rate-limit countdown from the server', 
   );
 
   await page.goto('/pin');
+  await expect(page.getByText('Backend Online')).toBeVisible();
   const pinInput = page.getByLabel('Enter your PIN');
   const slots = page.locator('[data-pin-slots]');
   await expect(slots).toHaveAttribute('data-pin-slots', '6');

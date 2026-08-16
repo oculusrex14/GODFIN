@@ -111,6 +111,10 @@ export async function fetchHealth(options = {}) {
   return apiFetch('/health', { ...options, auth: false });
 }
 
+export function isBackendAlive(health) {
+  return health?.status === 'alive' && health?.liveness === true;
+}
+
 // Auth
 export function fetchAuthStatus() {
   return apiFetch('/auth/status', { auth: false });

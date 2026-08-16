@@ -27,7 +27,11 @@ async function mockIsolatedAccessibilityApp(page) {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname.slice('/api/v1'.length);
-    if (path === '/health') return route.fulfill({ json: { status: 'ok' } });
+    if (path === '/health') {
+      return route.fulfill({
+        json: { status: 'alive', liveness: true, database: 'not_checked', version: '0.1.0' },
+      });
+    }
     if (path === '/auth/status') {
       return route.fulfill({ json: { is_first_run: true, pin_length: null } });
     }

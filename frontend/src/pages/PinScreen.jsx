@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldCheck, ShieldAlert } from 'lucide-react';
 import PinInput from '../components/PinInput';
 import { useAuth } from '../context/AuthContext';
-import { fetchHealth, setPin, verifyPin } from '../api/client';
+import { fetchHealth, isBackendAlive, setPin, verifyPin } from '../api/client';
 import GodfinBrand from '../components/GodfinBrand';
 
 export default function PinScreen() {
@@ -21,7 +21,7 @@ export default function PinScreen() {
       try {
         const data = await fetchHealth({ signal: AbortSignal.timeout(3000) });
         if (cancelled) return;
-        const online = data.status === 'ok';
+        const online = isBackendAlive(data);
         setBackendOnline(prev => {
           if (!prev && online) {
             // Backend just came back online after being offline — reload to re-sync auth state

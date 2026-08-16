@@ -128,7 +128,7 @@ const subscriptions = [
 ];
 
 const baseResponses = {
-  '/health': { status: 'ok' },
+  '/health': { status: 'alive', liveness: true, database: 'not_checked', version: '0.1.0' },
   '/auth/status': { is_first_run: false, pin_length: 4 },
   '/auth/verify-pin': { authenticated: true, token: 'synthetic-capture-token' },
   '/onboarding': { completed: true, deferred: false, current_step: 10 },

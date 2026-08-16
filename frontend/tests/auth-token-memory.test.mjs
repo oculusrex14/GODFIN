@@ -49,6 +49,10 @@ test('auth token remains memory-only and reloads start locked', async () => {
 
   const client = await import(`../src/api/client.js?auth-memory=${Date.now()}`);
 
+  assert.equal(client.isBackendAlive({ status: 'alive', liveness: true }), true);
+  assert.equal(client.isBackendAlive({ status: 'ok' }), false);
+  assert.equal(client.isBackendAlive({ status: 'alive', liveness: false }), false);
+
   for (const key of ['godfin_auth_token', 'token', 'auth_token']) {
     assert.equal(localStorage.value(key), null);
     assert.equal(sessionStorage.value(key), null);
