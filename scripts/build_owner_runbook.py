@@ -473,7 +473,7 @@ def build_document() -> Document:
     document.add_page_break()
     document.add_heading("How to use this runbook", level=1)
     for item in (
-        "Complete sections in order. Each section ends with evidence that can be checked without revealing a secret.",
+        "Read the complete runbook once. Following the owner's preferred work order, finish local code, tests, documentation, and package checks first; then complete the provider/browser steps in Sections 1–4 as one final batch. Section 16 is always last.",
         "Use provider dashboards in your own browser. Store every secret only in the provider’s encrypted environment, GitHub Actions secret store, and your business password vault.",
         "Keep the desktop backend local. Supabase, Vercel, Cashfree, Resend, and R2 are website, licensing, email, and distribution services only; they must never become the application database.",
         "Do not enable checkout, the reward pilot, update-feed promotion, or public launch content until the matching sign-off gate is complete.",
