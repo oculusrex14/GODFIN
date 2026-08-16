@@ -34,6 +34,14 @@ def _client(policy: LocalApiPolicy) -> TestClient:
     def health():
         return {"status": "ok"}
 
+    @app.get("/api/v1/auth/gmail/callback")
+    def gmail_callback():
+        return {"status": "callback-reached"}
+
+    @app.post("/api/v1/auth/gmail/callback")
+    def gmail_callback_post():
+        return {"status": "unexpected-post"}
+
     return TestClient(app, base_url="http://127.0.0.1:5100")
 
 
@@ -86,6 +94,35 @@ def test_packaged_cors_is_exact_bounded_and_has_no_credentials_mode():
     assert "*" not in allowed_methods
     assert "GET" in allowed_methods
     assert "POST" in allowed_methods
+
+
+def test_packaged_policy_allows_only_exact_browser_oauth_callback_without_secret():
+    client = _client(LocalApiPolicy(RuntimeMode.PACKAGED, "launch-secret"))
+
+    callback = client.get(
+        "/api/v1/auth/gmail/callback?code=provider-code&state=one-time-state",
+    )
+    callback_post = client.post("/api/v1/auth/gmail/callback")
+    callback_suffix = client.get("/api/v1/auth/gmail/callback/extra")
+    untrusted_host = client.get(
+        "/api/v1/auth/gmail/callback",
+        headers={"Host": "localhost:5100"},
+    )
+    untrusted_origin = client.get(
+        "/api/v1/auth/gmail/callback",
+        headers={"Origin": "https://attacker.invalid"},
+    )
+
+    assert callback.status_code == 200
+    assert callback.json() == {"status": "callback-reached"}
+    assert callback_post.status_code == 403
+    assert callback_post.json()["code"] == "MISSING_LAUNCH_TRUST"
+    assert callback_suffix.status_code == 403
+    assert callback_suffix.json()["code"] == "MISSING_LAUNCH_TRUST"
+    assert untrusted_host.status_code == 403
+    assert untrusted_host.json()["code"] == "UNTRUSTED_LOCAL_HOST"
+    assert untrusted_origin.status_code == 403
+    assert untrusted_origin.json()["code"] == "UNTRUSTED_LOCAL_ORIGIN"
 
 
 def test_local_mode_rejects_dns_rebinding_and_unlisted_origins():

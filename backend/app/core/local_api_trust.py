@@ -39,6 +39,7 @@ _DEVELOPMENT_ORIGINS = (
 )
 _PACKAGED_ORIGIN = "godfin://app"
 _ALLOWED_BROWSER_PORTS = {5173, 5200}
+_GMAIL_OAUTH_CALLBACK_PATH = "/api/v1/auth/gmail/callback"
 
 
 def runtime_mode() -> RuntimeMode:
@@ -158,8 +159,20 @@ class LocalApiPolicy:
             and _private_or_loopback_ip(hostname)
         )
 
-    def launch_secret_allowed(self, supplied: str | None, method: str) -> bool:
+    def launch_secret_allowed(
+        self,
+        supplied: str | None,
+        method: str,
+        path: str,
+    ) -> bool:
         if method == "OPTIONS" or not self.launch_secret:
+            return True
+        # Google's installed-app flow returns through the user's default
+        # browser, which cannot possess Electron's per-launch secret. This
+        # single loopback GET remains protected by an expiring, one-time OAuth
+        # state bound to the active GODFIN session, the fixed redirect URI, and
+        # a PKCE verifier. Host and Origin checks above still apply.
+        if method == "GET" and path == _GMAIL_OAUTH_CALLBACK_PATH:
             return True
         # LAN mode is a separate, explicitly enabled bearer-authenticated API
         # policy. The Electron renderer still sends its secret, but supported
@@ -237,6 +250,7 @@ class LocalApiTrustMiddleware:
         if not self.policy.launch_secret_allowed(
             launch_secrets[0] if launch_secrets else None,
             scope.get("method", "GET"),
+            scope.get("path", ""),
         ):
             await self._reject(
                 scope,
