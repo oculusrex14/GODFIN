@@ -9,6 +9,7 @@
   "scripts": {
     "test": "playwright test",
     "test:smoke": "playwright test tests/production-smoke.test.js",
+    "test:website": "playwright test --config=playwright.website.config.js",
     "test:legacy": "playwright test --config=playwright.legacy.config.js"
   },
   "keywords": [],
