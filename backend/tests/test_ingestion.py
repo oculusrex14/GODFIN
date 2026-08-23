@@ -14,6 +14,7 @@ from app.core.ingestion import (
 from app.models.app_setting import AppSetting
 from app.models.audit_session import AuditSession
 from app.models.transaction import Transaction
+from tests.license_helpers import install_test_license
 from tests.fixtures.mock_emails import (
     ALL_MOCK_EMAILS,
     MOCK_BLACKLISTED_EMAIL,
@@ -314,8 +315,9 @@ def test_ingestion_cc_stores_correct_fields(db_session):
     assert txn.source == 'gmail'
 
 
-def test_ingestion_api_trigger(auth_client):
+def test_ingestion_api_trigger(auth_client, db_session):
     """Test the ingest endpoint returns error when Gmail not connected."""
+    install_test_license(db_session, "pro")
     # Ensure Gmail is disconnected first
     auth_client.post("/api/v1/auth/gmail/disconnect")
     resp = auth_client.post("/api/v1/ingest/gmail")
@@ -331,7 +333,12 @@ def test_ingestion_status_api(auth_client):
     assert "last_run" in data
 
 
-def test_gmail_setup_error_is_safe_and_nontechnical(auth_client, monkeypatch):
+def test_gmail_setup_error_is_safe_and_nontechnical(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    install_test_license(db_session, "pro")
     monkeypatch.setattr(
         "app.api.v1.endpoints.gmail.client_config_available",
         lambda: False,

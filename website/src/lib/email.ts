@@ -48,6 +48,44 @@ export async function sendLicenseEmail({
   if (error) throw new Error(error.message);
 }
 
+export async function sendPlanUpgradeEmail({
+  to,
+  idempotencyKey,
+}: {
+  to: string;
+  idempotencyKey: string;
+}) {
+  const resend = new Resend(serverEnv.resendApiKey());
+  const { supportEmail } = publicContactConfig();
+  const { error } = await resend.emails.send(
+    {
+      from: serverEnv.resendFromEmail(),
+      to,
+      ...(supportEmail ? { replyTo: supportEmail } : {}),
+      subject: "Your GODFIN lifetime license is now Max",
+      text: [
+        "Your existing GODFIN Pro lifetime license has been upgraded to Max.",
+        "",
+        "Keep using the same license key. In the desktop app, open Settings → License and choose Refresh license if Max does not appear automatically.",
+        `Manage your account: ${siteUrl()}/account`,
+        "",
+        "No subscription or recurring AI credits were added.",
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#07131f">
+          <p style="color:#087b6d;font-weight:700">GODFIN MAX</p>
+          <h1>Your lifetime license has been upgraded</h1>
+          <p>Keep using the same license key. In GODFIN, open Settings → License and choose <strong>Refresh license</strong> if Max does not appear automatically.</p>
+          <p style="margin-top:24px"><a href="${siteUrl()}/account">Manage your GODFIN account</a></p>
+          <p style="color:#667987;font-size:13px">No subscription or recurring AI credits were added.</p>
+        </div>
+      `,
+    },
+    { idempotencyKey },
+  );
+  if (error) throw new Error(error.message);
+}
+
 export async function sendWaitlistConfirmationEmail({
   to,
   confirmationUrl,

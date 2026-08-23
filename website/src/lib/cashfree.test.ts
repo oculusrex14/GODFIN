@@ -39,7 +39,7 @@ describe("Cashfree webhook verification", () => {
         rawBody,
         signature: signature(timestamp, rawBody),
         timestamp,
-        version: "2026-01-01",
+        version: "2025-01-01",
         now,
       }),
       true,
@@ -56,7 +56,7 @@ describe("Cashfree webhook verification", () => {
         rawBody: `${rawBody} `,
         signature: signed,
         timestamp,
-        version: "2026-01-01",
+        version: "2025-01-01",
         now,
       }),
       false,
@@ -77,7 +77,7 @@ describe("Cashfree webhook verification", () => {
         rawBody,
         signature: signature(staleTimestamp, rawBody),
         timestamp: staleTimestamp,
-        version: "2026-01-01",
+        version: "2025-01-01",
         now,
       }),
       false,
@@ -130,7 +130,7 @@ describe("Cashfree amount and order contracts", () => {
     assert.equal(requestUrl, "https://sandbox.cashfree.com/pg/orders");
     assert.equal(requestInit?.method, "POST");
     const headers = requestInit?.headers as Record<string, string>;
-    assert.equal(headers["x-api-version"], "2026-01-01");
+    assert.equal(headers["x-api-version"], "2025-01-01");
     assert.equal(
       headers["x-idempotency-key"],
       "00000000-0000-4000-8000-000000000001",

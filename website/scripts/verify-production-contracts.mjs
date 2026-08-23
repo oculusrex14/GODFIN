@@ -37,8 +37,26 @@ assert.equal(manifest.tiers.pro.price.IN.amount_minor, 499900);
 assert.equal(manifest.tiers.max.price.IN.amount_minor, 999900);
 assert.equal(manifest.tiers.pro.price.US.amount_minor, 9900);
 assert.equal(manifest.tiers.max.price.US.amount_minor, 19900);
+assert.equal(manifest.tiers.free.released_families.length, 12);
+assert.equal(manifest.tiers.pro.released_families.length, 15);
+assert.equal(manifest.tiers.max.released_families.length, 20);
 
 for (const tier of ["free", "pro", "max"]) {
+  const familyFeatures = manifest.tiers[tier].released_families.flatMap(
+    (family) => {
+      assert.equal(
+        manifest.families[family]?.status,
+        "released",
+        `${tier} advertises unreleased family ${family}`,
+      );
+      return manifest.families[family].grants;
+    },
+  );
+  assert.deepEqual(
+    familyFeatures,
+    manifest.tiers[tier].released_features,
+    `${tier} feature grants must exactly match its capability families`,
+  );
   for (const feature of manifest.tiers[tier].released_features) {
     assert.equal(
       manifest.features[feature]?.status,
@@ -171,7 +189,7 @@ assert.match(webhook, /billing_country_unverified/);
 assert.match(webhook, /provisioned\?\.license_status === "active"/);
 
 const cashfree = await text("src/lib/cashfree.ts");
-assert.match(cashfree, /CASHFREE_API_VERSION = "2026-01-01"/);
+assert.match(cashfree, /CASHFREE_API_VERSION = "2025-01-01"/);
 assert.match(cashfree, /"x-idempotency-key"/);
 assert.match(cashfree, /timestamp \+ rawBody/);
 assert.match(cashfree, /createHmac\("sha256", serverEnv\.cashfreeClientSecret\(\)\)/);
@@ -253,6 +271,28 @@ assert.doesNotMatch(
   /e\.provider_order_id = p_order_id\s*\)\s*;\s*v_license_status/,
   "Cashfree refunds must not map to a purchase by order ID alone.",
 );
+
+const cashfreeUpgradeMigration = await text(
+  "supabase/migrations/0007_cashfree_license_upgrades.sql",
+);
+for (const requiredSql of [
+  /purchase_kind text not null default 'base'/,
+  /product_code = 'pro_to_max'/,
+  /create unique index if not exists purchases_one_base_per_license_idx/,
+  /create or replace function private\.cashfree_purchase_state/,
+  /v_has_paid_upgrade/,
+  /v_desired_tier := case/,
+  /state_version = state_version \+ 1/,
+  /p_purchase_kind text/,
+  /p_upgrade_license_id uuid/,
+  /A purchase license already exists for this account/,
+  /grant execute on function public\.provision_cashfree_purchase[\s\S]*?to service_role/,
+]) {
+  assert.match(cashfreeUpgradeMigration, requiredSql);
+}
+assert.match(checkout, /resolveLicenseCheckout/);
+assert.match(checkout, /isPublicLicenseProduct/);
+assert.match(await text("src/lib/products.ts"), /pro_to_max/);
 
 const middleware = await text("src/middleware.ts");
 const nextConfig = await text("next.config.ts");

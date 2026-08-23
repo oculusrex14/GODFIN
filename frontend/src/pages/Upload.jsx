@@ -10,11 +10,12 @@ import {
 import {
   previewStatement, reconcileStatement, importStatement,
   createIncomeSource, fetchReviewQueue, resolveReviewItem, fetchCategories,
-  fetchAccounts,
+  fetchAccounts, fetchLicenseStatus,
 } from '../api/client';
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
 import MappedSpreadsheetImport from '../components/MappedSpreadsheetImport';
+import { openWebsite } from '../config/website';
 
 function formatINR(amount) {
   return new Intl.NumberFormat('en-IN', {
@@ -92,6 +93,13 @@ export default function UploadPage() {
   const [reviewSubcategory, setReviewSubcategory] = useState({});
 
   const queryClient = useQueryClient();
+  const { data: license } = useQuery({
+    queryKey: ['license'],
+    queryFn: fetchLicenseStatus,
+    staleTime: 5 * 60 * 1000,
+  });
+  const batchAvailable = license?.features?.includes('batch_statement_import') === true;
+  const mappedImportAvailable = license?.features?.includes('generic_mapped_import') === true;
 
   const updateAutomatic = (id, patch) => {
     setAutomaticQueue(current => current.map(item => (
@@ -201,9 +209,13 @@ export default function UploadPage() {
 
   function addAutomaticFiles(files) {
     const errors = [];
+    const acceptedFiles = batchAvailable ? files : files.slice(0, 1);
+    if (!batchAvailable && files.length > 1) {
+      errors.push('Core imports one statement at a time. Pro and Max add the guided batch queue.');
+    }
     const known = new Set(automaticQueue.map(item => item.id));
     const additions = [];
-    for (const candidate of files) {
+    for (const candidate of acceptedFiles) {
       const validation = validateFile(candidate);
       if (!validation.valid) {
         errors.push(`${candidate.name}: ${validation.error}`);
@@ -292,18 +304,22 @@ export default function UploadPage() {
           type="button"
           role="tab"
           aria-selected={importMode === 'guided'}
-          onClick={() => setImportMode('guided')}
+          onClick={() => (
+            mappedImportAvailable
+              ? setImportMode('guided')
+              : openWebsite('/pricing')
+          )}
           className={`rounded-[10px] px-4 py-2 text-[0.73rem] transition-colors ${
             importMode === 'guided'
               ? 'bg-cyan-400/[0.12] text-cyan-200/80'
               : 'text-white/35 hover:text-white/60'
           }`}
         >
-          Guided CSV / XLSX
+          Guided CSV / XLSX{mappedImportAvailable ? '' : ' · Pro'}
         </button>
       </div>
 
-      {importMode === 'guided' ? (
+      {importMode === 'guided' && mappedImportAvailable ? (
         <MappedSpreadsheetImport />
       ) : (
         <>
@@ -312,7 +328,9 @@ export default function UploadPage() {
           <div>
             <p className="text-[0.73rem] text-white/55">Statement queue</p>
             <p className="mt-0.5 text-[0.65rem] text-white/25">
-              Files are reviewed one at a time, so a large batch cannot overwhelm your computer.
+              {batchAvailable
+                ? 'Files are reviewed one at a time, so a large batch cannot overwhelm your computer.'
+                : 'Core imports one statement at a time. Pro and Max add a reviewed batch queue.'}
             </p>
           </div>
           <label className="cursor-pointer rounded-[10px] border border-cyan-400/20 bg-cyan-400/[0.06] px-3 py-2 text-[0.7rem] text-cyan-200/70 hover:bg-cyan-400/[0.1]">
@@ -320,7 +338,7 @@ export default function UploadPage() {
             <input
               type="file"
               accept=".pdf,.xls,.xlsx"
-              multiple
+              multiple={batchAvailable}
               className="hidden"
               onChange={(event) => {
                 addAutomaticFiles(Array.from(event.target.files || []));
@@ -460,7 +478,7 @@ export default function UploadPage() {
                       <input
                         type="file"
                         accept=".pdf,.xls,.xlsx"
-                        multiple
+                        multiple={batchAvailable}
                         onChange={(e) => {
                           addAutomaticFiles(Array.from(e.target.files || []));
                           e.target.value = '';
@@ -768,7 +786,7 @@ export default function UploadPage() {
                     <input
                       type="file"
                       accept=".pdf,.xls,.xlsx"
-                      multiple
+                      multiple={batchAvailable}
                       className="hidden"
                       onChange={(event) => {
                         addAutomaticFiles(Array.from(event.target.files || []));

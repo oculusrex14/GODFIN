@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.fx import (
@@ -45,6 +46,7 @@ from app.schemas.financial import (
 )
 
 router = APIRouter()
+REFERENCE_FX_ENTITLEMENT = require_entitlement("reference_fx")
 
 _FX_UNAVAILABLE_MESSAGE = "Verified exchange rates are temporarily unavailable."
 
@@ -462,7 +464,11 @@ async def get_subscription_stats(
     )
 
 
-@router.get("/exchange-rates", response_model=ExchangeRatesResponse)
+@router.get(
+    "/exchange-rates",
+    response_model=ExchangeRatesResponse,
+    dependencies=[Depends(REFERENCE_FX_ENTITLEMENT)],
+)
 async def get_exchange_rates(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -491,6 +497,7 @@ async def get_exchange_rates(
 @router.post(
     "/exchange-rates/refresh",
     response_model=ExchangeRateRefreshResponse,
+    dependencies=[Depends(REFERENCE_FX_ENTITLEMENT)],
 )
 async def refresh_exchange_rates(
     db: Session = Depends(get_db),

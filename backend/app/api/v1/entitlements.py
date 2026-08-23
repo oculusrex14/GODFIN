@@ -14,6 +14,7 @@ from typing import Any, TypeVar
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.errors import ApplicationError
 from app.core.feature_flags import FeatureDisabledError, require_feature_flag
@@ -59,7 +60,10 @@ def require_entitlement(
     fails if a mapped route loses its gate.
     """
 
-    def dependency(db: Session = Depends(get_db)) -> None:
+    def dependency(
+        _user: bool = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> None:
         if feature_flag:
             try:
                 require_feature_flag(db, feature_flag)

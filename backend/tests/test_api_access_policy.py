@@ -30,9 +30,13 @@ def test_route_policy_contains_paid_and_conditional_contracts():
 
     assert paid == {
         "advanced_reports",
+        "ai_advisor",
         "ai_classification",
         "behavior_insights",
-        "multi_bank",
+        "ca_tax_pack",
+        "gmail_sync",
+        "multiple_accounts",
         "net_worth",
+        "reference_fx",
     }
-    assert conditional == {"multi_bank"}
+    assert conditional == {"generic_mapped_import", "multiple_accounts"}

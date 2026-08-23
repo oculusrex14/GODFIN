@@ -17,7 +17,7 @@ select lives_ok(
     'cf_order_primary', 'cf_payment_primary', 'cf_customer_primary',
     '66666666-6666-4666-8666-666666666666', 'max', 999900, 'inr',
     'max', repeat('6', 64), '6666', 'IN', 'IN',
-    'world-bank-icp-2021-v1', true, null
+    'world-bank-icp-2021-v1', true, null, 'base', null
   )$$,
   'A valid Cashfree purchase is provisioned'
 );
@@ -35,7 +35,7 @@ select is(
 select ok(
   has_function_privilege(
     'service_role',
-    'public.provision_cashfree_purchase(text,text,text,text,uuid,text,bigint,text,text,text,text,text,text,text,boolean,text)',
+    'public.provision_cashfree_purchase(text,text,text,text,uuid,text,bigint,text,text,text,text,text,text,text,boolean,text,text,uuid)',
     'EXECUTE'
   ),
   'service_role can provision Cashfree purchases'
@@ -43,7 +43,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'anon',
-    'public.provision_cashfree_purchase(text,text,text,text,uuid,text,bigint,text,text,text,text,text,text,text,boolean,text)',
+    'public.provision_cashfree_purchase(text,text,text,text,uuid,text,bigint,text,text,text,text,text,text,text,boolean,text,text,uuid)',
     'EXECUTE'
   ),
   'anon cannot provision Cashfree purchases'
@@ -70,7 +70,7 @@ select lives_ok(
     'cf_order_primary', 'cf_payment_primary', 'cf_customer_primary',
     '66666666-6666-4666-8666-666666666666', 'max', 999900, 'inr',
     'max', repeat('6', 64), '6666', 'IN', 'IN',
-    'world-bank-icp-2021-v1', true, null
+    'world-bank-icp-2021-v1', true, null, 'base', null
   )$$,
   'Replaying purchase provisioning is safe'
 );
@@ -150,13 +150,23 @@ select is(
   'A full Cashfree refund revokes the license'
 );
 
+insert into auth.users (
+  instance_id, id, aud, role, email, encrypted_password,
+  email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data
+) values (
+  '00000000-0000-0000-0000-000000000000',
+  '67676767-6767-4676-8676-676767676767',
+  'authenticated', 'authenticated', 'cashfree-dispute@example.test', '',
+  now(), now(), now(), '{}'::jsonb, '{}'::jsonb
+);
+
 select lives_ok(
   $$select * from public.provision_cashfree_purchase(
     'godfin_00000000-0000-4000-8000-000000000002',
     'cf_order_dispute', 'cf_payment_dispute', 'cf_customer_primary',
-    '66666666-6666-4666-8666-666666666666', 'pro', 499900, 'inr',
+    '67676767-6767-4676-8676-676767676767', 'pro', 499900, 'inr',
     'pro', repeat('7', 64), '7777', 'IN', 'IN',
-    'world-bank-icp-2021-v1', true, null
+    'world-bank-icp-2021-v1', true, null, 'base', null
   )$$,
   'A second Cashfree purchase is provisioned for dispute tests'
 );

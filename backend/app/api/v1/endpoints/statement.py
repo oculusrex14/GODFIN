@@ -79,8 +79,6 @@ def _resolve_account_id(db: Session, statement_type: str, account_id: str = None
         acct = db.query(Account).filter_by(id=account_id, is_active=True).first()
         if not acct:
             raise HTTPException(status_code=400, detail="Invalid account_id")
-        if acct.bank.upper() != "HDFC":
-            enforce_feature(db, "multi_bank")
         return account_id
 
     bank, account_type = account_requirements(statement_type)
@@ -93,8 +91,6 @@ def _resolve_account_id(db: Session, statement_type: str, account_id: str = None
 
     if not acct:
         raise HTTPException(status_code=400, detail="No matching account found. Please specify account_id.")
-    if acct.bank.upper() != "HDFC":
-        enforce_feature(db, "multi_bank")
     return acct.id
 
 
@@ -169,7 +165,7 @@ def _mapped_mapping(mapping_json: str) -> MappedImportMapping:
 
 
 def _mapped_account(db: Session, account_id: str) -> Account:
-    enforce_feature(db, "multi_bank")
+    enforce_feature(db, "generic_mapped_import")
     account = (
         db.query(Account)
         .filter_by(id=account_id, is_active=True)
@@ -460,13 +456,13 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
     "/ingest/mapped/inspect",
     response_model=MappedInspectResponse,
 )
-@conditional_entitlement("multi_bank")
+@conditional_entitlement("generic_mapped_import")
 async def inspect_mapped_import(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    enforce_feature(db, "multi_bank")
+    enforce_feature(db, "generic_mapped_import")
     sheet = await _read_mapped_sheet(file)
     data_rows = sum(
         1
@@ -492,7 +488,7 @@ async def inspect_mapped_import(
     "/ingest/mapped/preview",
     response_model=MappedPreviewResponse,
 )
-@conditional_entitlement("multi_bank")
+@conditional_entitlement("generic_mapped_import")
 async def preview_mapped_import(
     file: UploadFile = File(...),
     account_id: str = Form(..., min_length=1, max_length=36),
@@ -567,7 +563,7 @@ async def preview_mapped_import(
     "/ingest/mapped/import",
     response_model=MappedImportResponse,
 )
-@conditional_entitlement("multi_bank")
+@conditional_entitlement("generic_mapped_import")
 async def import_mapped_spreadsheet(
     file: UploadFile = File(...),
     account_id: str = Form(..., min_length=1, max_length=36),
@@ -739,7 +735,6 @@ async def preview_statement(
     "/ingest/upload/reconcile",
     response_model=StatementReconcileResponse,
 )
-@conditional_entitlement("multi_bank")
 async def reconcile_statement_preview(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
@@ -819,7 +814,6 @@ async def reconcile_statement_preview(
     "/ingest/upload/import",
     response_model=StatementImportResponse,
 )
-@conditional_entitlement("multi_bank")
 async def import_statement(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),

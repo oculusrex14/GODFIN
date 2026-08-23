@@ -5,10 +5,9 @@ import {
 
 import { serverEnv, siteUrl } from "@/lib/env";
 
-export const CASHFREE_API_VERSION = "2026-01-01";
+export const CASHFREE_API_VERSION = "2025-01-01";
 const CASHFREE_WEBHOOK_VERSIONS = new Set([
   CASHFREE_API_VERSION,
-  "2025-01-01",
   "2023-08-01",
 ]);
 const WEBHOOK_CLOCK_SKEW_MS = 5 * 60 * 1000;

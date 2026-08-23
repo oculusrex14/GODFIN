@@ -17,7 +17,11 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from app.core.entitlements import entitlement_manifest, features_for_tier
+from app.core.entitlements import (
+    entitlement_manifest,
+    features_for_tier,
+    legacy_features_for_tier,
+)
 
 
 ENTITLEMENT_SCHEMA_VERSION = 1
@@ -224,15 +228,21 @@ def verify_entitlement_envelope(
             "The signed license contains an unknown plan.",
         )
     expected_features = features_for_tier(tier)
-    if features != expected_features:
+    entitlement_version = claims.get("entitlement_version")
+    current_version = entitlement_manifest().get("schema_version")
+    legacy_features = (
+        legacy_features_for_tier(entitlement_version, tier)
+        if isinstance(entitlement_version, int)
+        and not isinstance(entitlement_version, bool)
+        else None
+    )
+    if not (
+        (entitlement_version == current_version and features == expected_features)
+        or (legacy_features is not None and features == legacy_features)
+    ):
         raise EntitlementValidationError(
             "LICENSE_ENTITLEMENT_INVALID",
             "The signed license features do not match this app version.",
-        )
-    if claims.get("entitlement_version") != entitlement_manifest().get("schema_version"):
-        raise EntitlementValidationError(
-            "LICENSE_ENTITLEMENT_INVALID",
-            "The signed license entitlement version is not supported.",
         )
     if claims.get("installation_hash") != installation_hash(machine_id):
         raise EntitlementValidationError(
@@ -280,4 +290,12 @@ def verify_entitlement_envelope(
             "LICENSE_ENTITLEMENT_EXPIRED",
             "Reconnect to renew this signed license.",
         )
-    return claims
+    # A legacy envelope remains cryptographically tied to its exact historical
+    # feature list above. After that check, the signed tier is mapped to the
+    # current bundled grants so a desktop upgrade cannot strand paid users
+    # while the website rolls from one manifest version to the next.
+    return {
+        **claims,
+        "features": expected_features,
+        "entitlement_version": current_version,
+    }

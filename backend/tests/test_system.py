@@ -48,7 +48,7 @@ def test_embeddings_disabled_by_default(auth_client):
 
 
 def test_enable_embeddings_starts_on_demand(auth_client, db_session, monkeypatch):
-    install_test_license(db_session, "pro")
+    install_test_license(db_session, "max")
 
     monkeypatch.setattr(
         "app.core.embedding_service.start_embedding_setup",
@@ -78,8 +78,8 @@ def test_enable_embeddings_starts_on_demand(auth_client, db_session, monkeypatch
     assert setting.value == "true"
 
 
-def _activate_pro(db_session):
-    install_test_license(db_session, "pro")
+def _activate_max(db_session):
+    install_test_license(db_session, "max")
 
 
 def test_embedding_setup_requires_explicit_approval_and_current_pin(
@@ -87,7 +87,7 @@ def test_embedding_setup_requires_explicit_approval_and_current_pin(
     db_session,
     monkeypatch,
 ):
-    _activate_pro(db_session)
+    _activate_max(db_session)
     started = []
     monkeypatch.setattr(
         "app.core.embedding_service.start_embedding_setup",
@@ -118,7 +118,7 @@ def test_embedding_enable_is_single_flight_and_disable_cancels(
     db_session,
     monkeypatch,
 ):
-    _activate_pro(db_session)
+    _activate_max(db_session)
     monkeypatch.setattr(
         "app.core.embedding_service.start_embedding_setup",
         lambda: False,

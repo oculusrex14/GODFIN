@@ -22,7 +22,7 @@ export default function Advisor() {
     queryFn: fetchLicenseStatus,
   });
   const digestAvailable = license?.features?.includes('advanced_reports') === true;
-  const chatAvailable = license?.features?.includes('ai_classification') === true;
+  const chatAvailable = license?.features?.includes('ai_advisor') === true;
   const { data: digest, isFetching: digestLoading } = useQuery({
     queryKey: ['advisorDigest'],
     queryFn: fetchAdvisorDigest,

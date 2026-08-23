@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from app.core.encryption import decrypt, encrypt
+from app.core.entitlements import entitlement_manifest, features_for_tier
 from app.core.license import (
     LICENSE_FEATURES,
     license_status,
@@ -523,6 +524,46 @@ def test_signed_entitlement_rejects_modified_features_and_truncated_signature(
     assert license_status(db_session)["entitlement_integrity"] == (
         "LICENSE_SIGNATURE_INVALID"
     )
+
+
+def test_exact_legacy_signed_features_upgrade_to_current_tier_grants():
+    legacy = entitlement_manifest()["legacy_feature_sets"]["1"]["max"]
+    envelope = signed_entitlement(
+        "max",
+        machine_id="test-installation",
+        claim_overrides={
+            "entitlement_version": 1,
+            "features": legacy,
+        },
+    )
+
+    claims = verify_entitlement_envelope(
+        envelope,
+        machine_id="test-installation",
+    )
+
+    assert claims["features"] == features_for_tier("max")
+    assert claims["entitlement_version"] == entitlement_manifest()["schema_version"]
+
+
+def test_inexact_legacy_signed_features_are_rejected():
+    legacy = list(entitlement_manifest()["legacy_feature_sets"]["1"]["pro"])
+    legacy.pop()
+    envelope = signed_entitlement(
+        "pro",
+        machine_id="test-installation",
+        claim_overrides={
+            "entitlement_version": 1,
+            "features": legacy,
+        },
+    )
+
+    try:
+        verify_entitlement_envelope(envelope, machine_id="test-installation")
+    except EntitlementValidationError as exc:
+        assert exc.code == "LICENSE_ENTITLEMENT_INVALID"
+    else:
+        raise AssertionError("An incomplete legacy entitlement was accepted")
 
 
 def test_signed_entitlement_rejects_excessive_lifetime_and_noninteger_state():

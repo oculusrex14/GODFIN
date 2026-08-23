@@ -12,7 +12,17 @@ type Manifest = {
       name: string;
       activation_limit: number;
       price: Record<string, { currency: string; amount_minor: number }>;
+      released_families: string[];
       released_features: string[];
+    }
+  >;
+  families: Record<
+    string,
+    {
+      status: "released" | "planned";
+      label: string;
+      description: string;
+      grants: string[];
     }
   >;
   features: Record<
@@ -34,6 +44,12 @@ export function tierEntitlements(tier: LicenseTier) {
 export function releasedFeatures(tier: LicenseTier): string[] {
   return tierEntitlements(tier).released_features.filter(
     (code) => ENTITLEMENTS.features[code]?.status === "released",
+  );
+}
+
+export function releasedFamilies(tier: LicenseTier): string[] {
+  return tierEntitlements(tier).released_families.filter(
+    (code) => ENTITLEMENTS.families[code]?.status === "released",
   );
 }
 

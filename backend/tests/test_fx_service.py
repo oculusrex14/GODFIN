@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from tests.license_helpers import install_test_license
+
 
 class _Response:
     def __init__(self, payload, *, status_code: int = 200):
@@ -420,6 +422,7 @@ def test_expired_persisted_rate_is_not_used_as_a_fallback(
 def test_explicit_rate_refresh_persists_current_rates(
     auth_client, db_session, monkeypatch
 ):
+    install_test_license(db_session, "pro")
     from app.api.v1.endpoints import subscriptions as endpoint
     from app.core.fx import FxRateSnapshot
     from app.models.subscription import Subscription
@@ -461,6 +464,7 @@ def test_reference_fx_is_complete_without_foreign_subscriptions_and_survives_res
     db_session,
     monkeypatch,
 ):
+    install_test_license(db_session, "pro")
     from app.api.v1.endpoints import subscriptions as endpoint
     from app.core import fx
     from app.core.fx import FxRateSnapshot, FxRateUnavailable

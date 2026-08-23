@@ -213,14 +213,17 @@ def get_account_balance(
 
 
 @router.post("", response_model=AccountResponse, status_code=201)
-@conditional_entitlement("multi_bank")
+@conditional_entitlement("multiple_accounts")
 def create_account(
     body: AccountCreate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    if body.bank != "HDFC":
-        enforce_feature(db, "multi_bank")
+    active_account_count = (
+        db.query(Account).filter(Account.is_active.is_(True)).count()
+    )
+    if active_account_count >= 1:
+        enforce_feature(db, "multiple_accounts")
     duplicate = (
         db.query(Account)
         .filter_by(
@@ -260,7 +263,6 @@ def create_account(
 
 
 @router.patch("/{account_id}", response_model=AccountResponse)
-@conditional_entitlement("multi_bank")
 def update_account(
     account_id: str,
     body: AccountUpdate,
@@ -272,9 +274,6 @@ def update_account(
         raise HTTPException(status_code=404, detail="Account not found")
 
     values = body.model_dump(exclude_unset=True, exclude={"routing"})
-    next_bank = values.get("bank", account.bank)
-    if next_bank != "HDFC":
-        enforce_feature(db, "multi_bank")
     if "nickname" in values and values["nickname"]:
         values["nickname"] = values["nickname"].strip()
     for key, value in values.items():

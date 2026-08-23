@@ -24,7 +24,7 @@ export default function Transfers() {
     queryKey: ['license'],
     queryFn: fetchLicenseStatus,
   });
-  const enabled = license?.features?.includes('multi_bank') === true;
+  const enabled = license?.features?.includes('multiple_accounts') === true;
   const { data: matches = [], isLoading } = useQuery({
     queryKey: ['transferMatches'],
     queryFn: () => fetchTransferMatches(false),

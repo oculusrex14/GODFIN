@@ -11,6 +11,7 @@ from app.core.ingestion import run_ingestion
 from app.core.parsers import parse_registered_statement
 from app.models.account import Account
 from app.models.transaction import Transaction
+from tests.license_helpers import install_test_license
 
 
 def _hdfc_xlsx() -> bytes:
@@ -75,7 +76,8 @@ def test_registered_xlsx_parser_reads_hdfc_savings():
     assert result.transactions[1].txn_type == "debit"
 
 
-def test_account_crud_and_sender_mapping(auth_client):
+def test_account_crud_and_sender_mapping(auth_client, db_session):
+    install_test_license(db_session, "pro")
     create = auth_client.post(
         "/api/v1/accounts",
         json={
@@ -128,7 +130,8 @@ def test_account_crud_and_sender_mapping(auth_client):
     )
 
 
-def test_account_and_routing_are_created_atomically(auth_client):
+def test_account_and_routing_are_created_atomically(auth_client, db_session):
+    install_test_license(db_session, "pro")
     response = auth_client.post(
         "/api/v1/accounts",
         json={
@@ -152,7 +155,11 @@ def test_account_and_routing_are_created_atomically(auth_client):
     } in mappings
 
 
-def test_invalid_atomic_routing_rolls_back_account_and_update(auth_client):
+def test_invalid_atomic_routing_rolls_back_account_and_update(
+    auth_client,
+    db_session,
+):
+    install_test_license(db_session, "pro")
     before = auth_client.get("/api/v1/accounts?include_inactive=true").json()
     failed_create = auth_client.post(
         "/api/v1/accounts",
@@ -218,7 +225,8 @@ def test_invalid_atomic_routing_rolls_back_account_and_update(auth_client):
     )
 
 
-def test_atomic_routing_can_be_removed(auth_client):
+def test_atomic_routing_can_be_removed(auth_client, db_session):
+    install_test_license(db_session, "pro")
     created = auth_client.post(
         "/api/v1/accounts",
         json={

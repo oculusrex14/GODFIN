@@ -5,6 +5,8 @@ import logging
 import re
 from pathlib import Path
 
+from tests.license_helpers import install_test_license
+
 
 ENDPOINT_ROOT = Path(__file__).parents[1] / "app" / "api" / "v1" / "endpoints"
 REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
@@ -112,8 +114,10 @@ def test_backup_fault_is_safe_correlated_and_structured(
 
 def test_gmail_sync_fault_never_exposes_provider_or_path_details(
     auth_client,
+    db_session,
     monkeypatch,
 ):
+    install_test_license(db_session, "pro")
     leaked = "oauth token=mail-secret at /Users/private/token.json"
     monkeypatch.setattr("app.api.v1.endpoints.gmail.is_connected", lambda: True)
 

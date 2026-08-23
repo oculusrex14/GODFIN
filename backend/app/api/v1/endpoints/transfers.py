@@ -17,7 +17,7 @@ from app.core.product_depth import (
 from app.models.transfer_match import TransferMatch
 
 router = APIRouter()
-MULTI_BANK_ENTITLEMENT = require_entitlement("multi_bank")
+MULTI_BANK_ENTITLEMENT = require_entitlement("multiple_accounts")
 
 
 class TransferDecision(BaseModel):

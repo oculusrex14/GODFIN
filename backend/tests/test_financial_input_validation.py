@@ -549,8 +549,9 @@ def test_invalid_calendar_month_is_validation_error(auth_client, path):
     ],
 )
 def test_gmail_range_rejects_invalid_dates_before_connection_check(
-    auth_client, payload
+    auth_client, db_session, payload
 ):
+    install_test_license(db_session, "pro")
     response = auth_client.post("/api/v1/ingest/gmail/range", json=payload)
 
     assert response.status_code == 422, response.text

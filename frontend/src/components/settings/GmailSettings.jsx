@@ -17,8 +17,10 @@ import {
   fetchIngestionProgress,
   fetchIngestSettings,
   updateIngestSettings,
+  fetchLicenseStatus,
 } from '../../api/client';
 import { openExternalUrl } from '../../config/external';
+import { openWebsite } from '../../config/website';
 import DialogSurface from '../DialogSurface';
 
 function GmailSettings() {
@@ -37,6 +39,13 @@ function GmailSettings() {
   const [ingestFrequency, setIngestFrequency] = useState(15);
   const [ingestJustCompleted, setIngestJustCompleted] = useState(false);
   const [awaitingOAuth, setAwaitingOAuth] = useState(false);
+
+  const { data: license, isLoading: licenseLoading } = useQuery({
+    queryKey: ['license'],
+    queryFn: fetchLicenseStatus,
+    staleTime: 5 * 60 * 1000,
+  });
+  const gmailAvailable = license?.features?.includes('gmail_sync') === true;
 
   const getErrorMessage = (err) => {
     if (typeof err === 'string') return err;
@@ -251,6 +260,10 @@ function GmailSettings() {
   });
 
   const handleConnect = () => {
+    if (!gmailAvailable) {
+      openWebsite('/pricing');
+      return;
+    }
     authUrlMutation.mutate();
   };
 
@@ -396,8 +409,14 @@ function GmailSettings() {
 
           {!isConnected ? (
             <button
-              onClick={shouldRetry ? () => refetchGmailStatus() : handleConnect}
-              disabled={authUrlMutation.isPending || gmailStatusRefreshing}
+              onClick={
+                !gmailAvailable
+                  ? () => openWebsite('/pricing')
+                  : shouldRetry
+                  ? () => refetchGmailStatus()
+                  : handleConnect
+              }
+              disabled={licenseLoading || authUrlMutation.isPending || gmailStatusRefreshing}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors disabled:opacity-50 text-sm"
             >
               {authUrlMutation.isPending || gmailStatusRefreshing ? (
@@ -407,7 +426,13 @@ function GmailSettings() {
               ) : (
                 <ExternalLink className="h-4 w-4" />
               )}
-              {shouldRetry ? 'Retry Gmail' : shouldReconnect ? 'Reconnect Gmail' : 'Connect Gmail'}
+              {!gmailAvailable
+                ? 'View Pro and Max'
+                : shouldRetry
+                ? 'Retry Gmail'
+                : shouldReconnect
+                ? 'Reconnect Gmail'
+                : 'Connect Gmail'}
             </button>
           ) : (
             <button
@@ -421,8 +446,14 @@ function GmailSettings() {
         </div>
       </div>
 
+      {!gmailAvailable && !licenseLoading && (
+        <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm text-amber-100/70">
+          Gmail automation is included with GODFIN Pro and Max. Core statement import remains available without connecting an email account.
+        </div>
+      )}
+
       {/* Connected State - Sync Controls */}
-      {isConnected && (
+      {isConnected && gmailAvailable && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}

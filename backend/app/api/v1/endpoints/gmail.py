@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user, hash_token
 from app.core.background_jobs import (
     JobQueueFull,
@@ -40,6 +41,7 @@ from app.models.app_setting import AppSetting
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+GMAIL_SYNC_ENTITLEMENT = require_entitlement("gmail_sync")
 
 
 class GmailAuthURLResponse(BaseModel):
@@ -175,7 +177,11 @@ class IngestSettingsUpdateResponse(BaseModel):
 
 # --- Gmail OAuth ---
 
-@router.get("/auth/gmail/url", response_model=GmailAuthURLResponse)
+@router.get(
+    "/auth/gmail/url",
+    response_model=GmailAuthURLResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def get_gmail_auth_url(
     request: Request,
     db: Session = Depends(get_db),
@@ -341,7 +347,11 @@ def get_gmail_status(
 
 # --- Ingestion ---
 
-@router.post("/ingest/gmail", response_model=IngestionResultResponse)
+@router.post(
+    "/ingest/gmail",
+    response_model=IngestionResultResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def trigger_ingestion(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -488,6 +498,7 @@ def gmail_disconnect(
     "/ingest/gmail/initial",
     response_model=InitialSyncResponse,
     response_model_exclude_unset=True,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
 )
 def trigger_initial_sync(
     db: Session = Depends(get_db),
@@ -527,6 +538,7 @@ def trigger_initial_sync(
     "/ingest/gmail/initial/start",
     response_model=BackgroundIngestionStartResponse,
     response_model_exclude_unset=True,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
 )
 def start_initial_sync_background(
     db: Session = Depends(get_db),
@@ -676,6 +688,7 @@ class DateRangeRequest(BaseModel):
 @router.post(
     "/ingest/gmail/range",
     response_model=DateRangeIngestionResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
 )
 def trigger_ingestion_range(
     request: DateRangeRequest,
@@ -721,6 +734,7 @@ def trigger_ingestion_range(
 @router.post(
     "/ingest/gmail/range/start",
     response_model=BackgroundIngestionStartResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
 )
 def start_ingestion_range_background(
     request: DateRangeRequest,
@@ -945,7 +959,11 @@ class IngestSettingsRequest(BaseModel):
     frequency_minutes: int = 15
 
 
-@router.post("/ingest/settings", response_model=IngestSettingsUpdateResponse)
+@router.post(
+    "/ingest/settings",
+    response_model=IngestSettingsUpdateResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def update_ingest_settings(
     request: IngestSettingsRequest,
     db: Session = Depends(get_db),

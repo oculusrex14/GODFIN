@@ -10,6 +10,7 @@
     "start": "next start -p 5300",
     "lint": "next lint",
     "test:cashfree": "node --import tsx --test src/lib/cashfree.test.ts",
+    "test:upgrades": "node --import tsx --test src/lib/license-upgrades.test.ts",
     "verify:contracts": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs && node scripts/verify-supabase-migrations.mjs",
     "verify:migrations": "node scripts/verify-supabase-migrations.mjs"
   },

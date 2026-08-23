@@ -4,8 +4,9 @@ import { SignInButton, SignOutButton } from "@/components/auth-controls";
 import { CopyLicenseKey } from "@/components/copy-license-key";
 import { CheckoutAnalytics } from "@/components/privacy-analytics";
 import { DeviceActivations } from "@/components/device-activations";
+import { PurchaseButton } from "@/components/purchase-button";
 import { ResendLicenseButton } from "@/components/resend-license-button";
-import { serverEnv, supabasePublicConfig } from "@/lib/env";
+import { commerceConfigured, serverEnv, supabasePublicConfig } from "@/lib/env";
 import { licenseKeyForSession, type LicenseTier } from "@/lib/license";
 import { isProductCode, PRODUCTS } from "@/lib/products";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -53,6 +54,7 @@ export default async function AccountPage({
     license_id: string | null;
     payment_provider: string;
     provider_order_id: string | null;
+    purchase_kind: "base" | "upgrade";
     created_at: string;
   }> = [];
   let activations: Array<{
@@ -65,6 +67,7 @@ export default async function AccountPage({
   }> = [];
   let checkoutLicenseKey: string | null = null;
   let checkoutProductCode: string | null = null;
+  let checkoutUpgradeComplete = false;
 
   if (supabase && user) {
     const [licenseResult, purchaseResult, activationResult] = await Promise.all([
@@ -75,7 +78,7 @@ export default async function AccountPage({
       supabase
         .from("purchases")
         .select(
-          "id,product_code,amount_total,currency,status,license_id,payment_provider,provider_order_id,created_at",
+          "id,product_code,amount_total,currency,status,license_id,payment_provider,provider_order_id,purchase_kind,created_at",
         )
         .order("created_at", { ascending: false })
         .limit(20),
@@ -105,12 +108,16 @@ export default async function AccountPage({
         isProductCode(returnedPurchase.product_code)
       ) {
         checkoutProductCode = returnedPurchase.product_code;
-        const tier = PRODUCTS[returnedPurchase.product_code].tier as LicenseTier;
-        checkoutLicenseKey = licenseKeyForSession(
-          params.order_id,
-          tier,
-          serverEnv.licenseSigningSecret(),
-        );
+        if (returnedPurchase.purchase_kind === "upgrade") {
+          checkoutUpgradeComplete = true;
+        } else {
+          const tier = PRODUCTS[returnedPurchase.product_code].tier as LicenseTier;
+          checkoutLicenseKey = licenseKeyForSession(
+            params.order_id,
+            tier,
+            serverEnv.licenseSigningSecret(),
+          );
+        }
       }
     }
   }
@@ -170,6 +177,13 @@ export default async function AccountPage({
               {checkoutLicenseKey ? (
                 <CopyLicenseKey licenseKey={checkoutLicenseKey} />
               ) : null}
+              {checkoutUpgradeComplete ? (
+                <div className="notice">
+                  Your existing lifetime license is now GODFIN Max. Keep using
+                  the same key; choose Refresh license in the desktop app if the
+                  new plan does not appear automatically.
+                </div>
+              ) : null}
               <div className="inline-actions account-actions">
                 <div>
                   <strong>{user.email}</strong>
@@ -201,7 +215,22 @@ export default async function AccountPage({
                           {license.key_last4}
                         </p>
                         {license.kind === "purchase" ? (
-                          <ResendLicenseButton licenseId={license.id} />
+                          <>
+                            <ResendLicenseButton licenseId={license.id} />
+                            {license.status === "active" && license.tier === "pro" ? (
+                              <div className="account-upgrade-action">
+                                <PurchaseButton
+                                  product="max"
+                                  enabled={commerceConfigured()}
+                                >
+                                  Upgrade this license to Max
+                                </PurchaseButton>
+                                <p className="account-caption">
+                                  Pay only the current Pro-to-Max difference. Your key and device activations stay the same.
+                                </p>
+                              </div>
+                            ) : null}
+                          </>
                         ) : (
                           <p className="account-caption">
                             Private test entitlement. Uses the same three-device

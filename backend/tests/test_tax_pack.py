@@ -26,6 +26,10 @@ def _activate_pro(db):
     install_test_license(db, "pro")
 
 
+def _activate_max(db):
+    install_test_license(db, "max")
+
+
 def _transaction(
     db,
     *,
@@ -66,7 +70,13 @@ def _transaction(
     return transaction
 
 
-def test_tax_pack_requires_paid_license(auth_client):
+def test_tax_pack_requires_max_license(auth_client, db_session):
+    response = auth_client.post(
+        "/api/v1/reports/fy/pack",
+        json={"start_year": 2025, "passphrase": TAX_PACK_PASSPHRASE},
+    )
+    assert response.status_code == 403
+    _activate_pro(db_session)
     response = auth_client.post(
         "/api/v1/reports/fy/pack",
         json={"start_year": 2025, "passphrase": TAX_PACK_PASSPHRASE},
@@ -76,7 +86,7 @@ def test_tax_pack_requires_paid_license(auth_client):
 
 @pytest.mark.parametrize("passphrase", ["short", "Archive-Password-2026\n"])
 def test_tax_pack_rejects_unsafe_passphrase(auth_client, db_session, passphrase):
-    _activate_pro(db_session)
+    _activate_max(db_session)
     response = auth_client.post(
         "/api/v1/reports/fy/pack",
         json={"start_year": 2025, "passphrase": passphrase},
@@ -88,7 +98,7 @@ def test_tax_pack_contents_hashes_workbook_pdf_and_warnings(
     auth_client,
     db_session,
 ):
-    _activate_pro(db_session)
+    _activate_max(db_session)
     account = db_session.get(Account, SAVINGS_ACCOUNT_ID)
     assert account.nickname.startswith("Example ")
     _transaction(

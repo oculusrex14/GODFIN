@@ -8,8 +8,9 @@ import {
   createCashfreeOrder,
 } from "@/lib/cashfree";
 import { commerceConfigured, serverEnv } from "@/lib/env";
+import { resolveLicenseCheckout } from "@/lib/license-upgrades";
 import {
-  isProductCode,
+  isPublicLicenseProduct,
   isRetiredHostedCreditCode,
   PRODUCTS,
 } from "@/lib/products";
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
         { status: 410 },
       );
     }
-    if (!isProductCode(body.product)) {
+    if (!isPublicLicenseProduct(body.product)) {
       return NextResponse.json({ message: "Unknown product." }, { status: 400 });
     }
     if (
@@ -89,9 +90,26 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const product = PRODUCTS[body.product];
+    const { data: purchaseLicenses, error: licenseLookupError } = await supabase
+      .from("licenses")
+      .select("id,tier,status,kind")
+      .eq("kind", "purchase")
+      .order("issued_at", { ascending: true });
+    if (licenseLookupError) throw licenseLookupError;
+    const resolution = resolveLicenseCheckout(
+      body.product,
+      purchaseLicenses || [],
+    );
+    if (!resolution.ok) {
+      return NextResponse.json(
+        { message: resolution.message },
+        { status: resolution.status },
+      );
+    }
+    const { productCode, purchaseKind, upgradeLicenseId } = resolution;
+    const product = PRODUCTS[productCode];
     const pricingCountry = requestPricingCountry(request);
-    const licensePrice = regionalPrice(body.product, pricingCountry);
+    const licensePrice = regionalPrice(productCode, pricingCountry);
     const orderId = `godfin_${body.checkoutAttemptId}`;
     const customerId = `gf_${createHmac("sha256", serverEnv.abuseHashSecret())
       .update(`cashfree-customer:${user.id}`)
@@ -109,6 +127,11 @@ export async function POST(request: Request) {
         user_id: user.id,
         pricing_country: licensePrice.country,
         pricing_version: licensePrice.priceVersion,
+        purchase_kind: purchaseKind,
+        target_tier: product.tier,
+        ...(upgradeLicenseId
+          ? { upgrade_license_id: upgradeLicenseId }
+          : {}),
       },
     });
     if (!order.payment_session_id || order.order_id !== orderId) {
@@ -119,6 +142,8 @@ export async function POST(request: Request) {
       paymentSessionId: order.payment_session_id,
       orderId,
       mode: cashfreeMode(),
+      productCode,
+      purchaseKind,
     });
   } catch (error) {
     console.error("Checkout creation failed", error);

@@ -6,12 +6,15 @@ from app.core import database as database_module
 from app.core.gmail_service import GmailFetchResult
 from app.core.background_jobs import EnqueueResult
 from app.core.ingestion import run_scheduled_ingestion_background
+from tests.license_helpers import install_test_license
 
 
 def test_gmail_background_routes_enqueue_one_durable_single_flight_job(
     auth_client,
+    db_session,
     monkeypatch,
 ):
+    install_test_license(db_session, "pro")
     calls = []
 
     def enqueue(kind, **options):

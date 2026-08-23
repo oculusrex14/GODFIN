@@ -38,6 +38,8 @@ from app.schemas.financial import YearMonth
 
 router = APIRouter()
 ADVANCED_REPORTS_ENTITLEMENT = require_entitlement("advanced_reports")
+AI_REPORT_ENTITLEMENT = require_entitlement("ai_advisor")
+CA_TAX_PACK_ENTITLEMENT = require_entitlement("ca_tax_pack")
 AI_REPORT_CONSENT_VERSION = "2026-08-02"
 
 
@@ -399,7 +401,7 @@ def _ai_report_metadata(llm_config: LLMConfiguration) -> dict:
 
 @router.post(
     "/ai/insights",
-    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    dependencies=[Depends(AI_REPORT_ENTITLEMENT)],
     response_model=AIReportResponse,
     response_model_exclude_unset=True,
 )
@@ -631,7 +633,7 @@ def report_financial_year(
 
 @router.post(
     "/fy/pack",
-    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    dependencies=[Depends(CA_TAX_PACK_ENTITLEMENT)],
     response_class=Response,
     responses={
         200: {
@@ -670,7 +672,7 @@ def report_financial_year_pack(
 
 @router.post(
     "/pdf/detailed",
-    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    dependencies=[Depends(AI_REPORT_ENTITLEMENT)],
     response_class=Response,
     responses={
         200: {

@@ -10,7 +10,7 @@ import {
   type CashfreeOrder,
   type CashfreePayment,
 } from "@/lib/cashfree";
-import { sendLicenseEmail } from "@/lib/email";
+import { sendLicenseEmail, sendPlanUpgradeEmail } from "@/lib/email";
 import { serverEnv } from "@/lib/env";
 import {
   hashLicenseKey,
@@ -213,6 +213,9 @@ async function provisionCashfreePurchase(incoming: JsonRecord) {
   const userId = order.order_tags?.user_id;
   const pricingCountry = order.order_tags?.pricing_country;
   const pricingVersion = order.order_tags?.pricing_version || null;
+  const purchaseKind = order.order_tags?.purchase_kind;
+  const targetTier = order.order_tags?.target_tier;
+  const upgradeLicenseId = order.order_tags?.upgrade_license_id || null;
   if (
     !isProductCode(productCode) ||
     !isLicenseProduct(productCode) ||
@@ -220,6 +223,19 @@ async function provisionCashfreePurchase(incoming: JsonRecord) {
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)
   ) {
     throw new Error("Cashfree order metadata is incomplete.");
+  }
+  const isUpgrade = productCode === "pro_to_max";
+  if (
+    purchaseKind !== (isUpgrade ? "upgrade" : "base") ||
+    targetTier !== PRODUCTS[productCode].tier ||
+    (isUpgrade &&
+      (!upgradeLicenseId ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          upgradeLicenseId,
+        ))) ||
+    (!isUpgrade && upgradeLicenseId !== null)
+  ) {
+    throw new Error("Cashfree order upgrade metadata is invalid.");
   }
 
   const expected = regionalPrice(productCode, pricingCountry, false);
@@ -240,11 +256,13 @@ async function provisionCashfreePurchase(incoming: JsonRecord) {
   });
 
   const tier = PRODUCTS[productCode].tier as LicenseTier;
-  const licenseKey = licenseKeyForSession(
-    order.order_id,
-    tier,
-    serverEnv.licenseSigningSecret(),
-  );
+  const licenseKey = isUpgrade
+    ? null
+    : licenseKeyForSession(
+        order.order_id,
+        tier,
+        serverEnv.licenseSigningSecret(),
+      );
   const { data, error } = await admin.rpc("provision_cashfree_purchase", {
     p_order_id: order.order_id,
     p_cf_order_id: String(order.cf_order_id),
@@ -255,13 +273,15 @@ async function provisionCashfreePurchase(incoming: JsonRecord) {
     p_amount_total: expected.amount,
     p_currency: expected.currency,
     p_license_tier: tier,
-    p_license_hash: hashLicenseKey(licenseKey),
-    p_license_last4: licenseKey.slice(-4),
+    p_license_hash: licenseKey ? hashLicenseKey(licenseKey) : null,
+    p_license_last4: licenseKey ? licenseKey.slice(-4) : null,
     p_billing_country: expected.country === "IN" ? "IN" : null,
     p_pricing_country: expected.country,
     p_pricing_version: pricingVersion,
     p_pricing_verified: review.verified,
     p_pricing_review_reason: review.reason,
+    p_purchase_kind: purchaseKind,
+    p_upgrade_license_id: upgradeLicenseId,
   });
   if (error) throw error;
 
@@ -271,12 +291,19 @@ async function provisionCashfreePurchase(incoming: JsonRecord) {
     provisioned?.license_status === "active" &&
     !provisioned?.email_sent_at
   ) {
-    await sendLicenseEmail({
-      to: account.user.email,
-      licenseKey,
-      tier,
-      idempotencyKey: `cashfree-license:${order.order_id}`,
-    });
+    if (isUpgrade) {
+      await sendPlanUpgradeEmail({
+        to: account.user.email,
+        idempotencyKey: `cashfree-upgrade:${order.order_id}`,
+      });
+    } else if (licenseKey) {
+      await sendLicenseEmail({
+        to: account.user.email,
+        licenseKey,
+        tier,
+        idempotencyKey: `cashfree-license:${order.order_id}`,
+      });
+    }
     await admin
       .from("purchases")
       .update({ email_sent_at: new Date().toISOString() })

@@ -19,7 +19,7 @@ from app.models.app_setting import AppSetting
 from app.schemas.financial import ChatRole
 
 router = APIRouter()
-AI_CLASSIFICATION_ENTITLEMENT = require_entitlement("ai_classification")
+AI_ADVISOR_ENTITLEMENT = require_entitlement("ai_advisor")
 ADVANCED_REPORTS_ENTITLEMENT = require_entitlement("advanced_reports")
 
 
@@ -97,7 +97,7 @@ class DigestSendResponse(BaseModel):
 @router.post(
     "/chat",
     response_model=ChatResponse,
-    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+    dependencies=[Depends(AI_ADVISOR_ENTITLEMENT)],
 )
 def advisor_chat(
     body: ChatRequest,

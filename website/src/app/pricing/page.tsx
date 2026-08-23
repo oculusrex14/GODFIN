@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { PurchaseButton } from "@/components/purchase-button";
-import { ENTITLEMENTS } from "@/lib/entitlements";
+import { ENTITLEMENTS, releasedFamilies } from "@/lib/entitlements";
 import { commerceConfigured } from "@/lib/env";
 import { formattedLicensePrice } from "@/lib/regional-pricing";
 
@@ -17,12 +17,9 @@ const plans = [
     name: "Core",
     price: "Free",
     suffix: "forever",
-    features: [
-      ...ENTITLEMENTS.tiers.free.released_features.map(
-        (code) => ENTITLEMENTS.features[code].label,
-      ),
-      "No account or telemetry required",
-    ],
+    features: releasedFamilies("free").map(
+      (code) => ENTITLEMENTS.families[code].label,
+    ),
   },
   {
     name: "Pro",
@@ -32,9 +29,9 @@ const plans = [
     featured: true,
     features: [
       "Everything released in Core",
-      ...ENTITLEMENTS.tiers.pro.released_features
-        .filter((code) => !ENTITLEMENTS.tiers.free.released_features.includes(code))
-        .map((code) => ENTITLEMENTS.features[code].label),
+      ...releasedFamilies("pro")
+        .filter((code) => !releasedFamilies("free").includes(code))
+        .map((code) => ENTITLEMENTS.families[code].label),
       "Three active installations",
       "Zero recurring hosted AI credits",
     ],
@@ -46,9 +43,9 @@ const plans = [
     suffix: "one time",
     features: [
       "Everything released in Pro",
-      ...ENTITLEMENTS.tiers.max.released_features
-        .filter((code) => !ENTITLEMENTS.tiers.pro.released_features.includes(code))
-        .map((code) => ENTITLEMENTS.features[code].label),
+      ...releasedFamilies("max")
+        .filter((code) => !releasedFamilies("pro").includes(code))
+        .map((code) => ENTITLEMENTS.families[code].label),
       "Three active installations",
       "Zero recurring hosted AI credits",
     ],

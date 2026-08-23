@@ -12,15 +12,30 @@ from app.core.background_jobs import (
 )
 
 
+def _gmail_sync_enabled() -> bool:
+    from app.core import database as database_module
+    from app.core.license import license_status
+
+    db = database_module.SessionLocal()
+    try:
+        return "gmail_sync" in license_status(db)["features"]
+    finally:
+        db.close()
+
+
 def _initial_gmail_sync(context: JobContext, _payload: dict) -> dict:
     from app.core.ingestion import run_initial_sync_background
 
+    if not _gmail_sync_enabled():
+        return {"skipped": "license_inactive"}
     return run_initial_sync_background(job_context=context)
 
 
 def _date_range_gmail_sync(context: JobContext, payload: dict) -> dict:
     from app.core.ingestion import run_ingestion_with_dates_background
 
+    if not _gmail_sync_enabled():
+        return {"skipped": "license_inactive"}
     start_date = str(payload.get("start_date") or "")
     end_date = str(payload.get("end_date") or "")
     if not start_date or not end_date:
@@ -45,6 +60,10 @@ def _scheduled_gmail_sync(context: JobContext, _payload: dict) -> dict:
     try:
         if not _is_auto_ingestion_enabled(db):
             return {"skipped": "disabled"}
+        from app.core.license import license_status
+
+        if "gmail_sync" not in license_status(db)["features"]:
+            return {"skipped": "license_inactive"}
         if not is_connected():
             return {"skipped": "gmail_not_connected"}
         # End the settings read transaction before any Gmail network request.

@@ -67,7 +67,8 @@
       "access": "authenticated_free"
     },
     "GET /api/v1/auth/gmail/url": {
-      "access": "authenticated_free"
+      "access": "paid",
+      "feature": "gmail_sync"
     },
     "GET /api/v1/auth/status": {
       "access": "public"
@@ -232,7 +233,8 @@
       "access": "authenticated_free"
     },
     "GET /api/v1/subscriptions/exchange-rates": {
-      "access": "authenticated_free"
+      "access": "paid",
+      "feature": "reference_fx"
     },
     "GET /api/v1/subscriptions/reminders": {
       "access": "authenticated_free"
@@ -293,19 +295,18 @@
     },
     "GET /api/v1/transfers": {
       "access": "paid",
-      "feature": "multi_bank"
+      "feature": "multiple_accounts"
     },
     "PATCH /api/v1/accounts/{account_id}": {
-      "access": "conditional_paid",
-      "feature": "multi_bank"
+      "access": "authenticated_free"
     },
     "POST /api/v1/accounts": {
       "access": "conditional_paid",
-      "feature": "multi_bank"
+      "feature": "multiple_accounts"
     },
     "POST /api/v1/advisor/chat": {
       "access": "paid",
-      "feature": "ai_classification"
+      "feature": "ai_advisor"
     },
     "POST /api/v1/advisor/digest/send": {
       "access": "paid",
@@ -373,54 +374,58 @@
       "access": "authenticated_free"
     },
     "POST /api/v1/ingest/gmail": {
-      "access": "authenticated_free"
+      "access": "paid",
+      "feature": "gmail_sync"
     },
     "POST /api/v1/ingest/gmail/initial": {
-      "access": "authenticated_free"
+      "access": "paid",
+      "feature": "gmail_sync"
     },
     "POST /api/v1/ingest/gmail/initial/start": {
-      "access": "authenticated_free"
+      "access": "paid",
+      "feature": "gmail_sync"
     },
     "POST /api/v1/ingest/gmail/range": {
-      "access": "authenticated_free"
+      "access": "paid",
+      "feature": "gmail_sync"
     },
     "POST /api/v1/ingest/gmail/range/cancel": {
       "access": "authenticated_free"
     },
     "POST /api/v1/ingest/gmail/range/start": {
-      "access": "authenticated_free"
+      "access": "paid",
+      "feature": "gmail_sync"
     },
     "POST /api/v1/ingest/gmail/sync/cancel": {
       "access": "authenticated_free"
     },
     "POST /api/v1/ingest/mapped/import": {
       "access": "conditional_paid",
-      "feature": "multi_bank"
+      "feature": "generic_mapped_import"
     },
     "POST /api/v1/ingest/mapped/inspect": {
       "access": "conditional_paid",
-      "feature": "multi_bank"
+      "feature": "generic_mapped_import"
     },
     "POST /api/v1/ingest/mapped/preview": {
       "access": "conditional_paid",
-      "feature": "multi_bank"
+      "feature": "generic_mapped_import"
     },
     "POST /api/v1/ingest/settings": {
-      "access": "authenticated_free"
+      "access": "paid",
+      "feature": "gmail_sync"
     },
     "POST /api/v1/ingest/upload": {
       "access": "authenticated_free"
     },
     "POST /api/v1/ingest/upload/import": {
-      "access": "conditional_paid",
-      "feature": "multi_bank"
+      "access": "authenticated_free"
     },
     "POST /api/v1/ingest/upload/preview": {
       "access": "authenticated_free"
     },
     "POST /api/v1/ingest/upload/reconcile": {
-      "access": "conditional_paid",
-      "feature": "multi_bank"
+      "access": "authenticated_free"
     },
     "POST /api/v1/license/activate": {
       "access": "authenticated_free"
@@ -457,15 +462,15 @@
     },
     "POST /api/v1/reports/ai/insights": {
       "access": "paid",
-      "feature": "advanced_reports"
+      "feature": "ai_advisor"
     },
     "POST /api/v1/reports/fy/pack": {
       "access": "paid",
-      "feature": "advanced_reports"
+      "feature": "ca_tax_pack"
     },
     "POST /api/v1/reports/pdf/detailed": {
       "access": "paid",
-      "feature": "advanced_reports"
+      "feature": "ai_advisor"
     },
     "POST /api/v1/review/batch-resolve": {
       "access": "authenticated_free"
@@ -502,7 +507,8 @@
       "access": "authenticated_free"
     },
     "POST /api/v1/subscriptions/exchange-rates/refresh": {
-      "access": "authenticated_free"
+      "access": "paid",
+      "feature": "reference_fx"
     },
     "POST /api/v1/subscriptions/suggestions/scan": {
       "access": "authenticated_free"
@@ -540,11 +546,11 @@
     },
     "POST /api/v1/transfers/scan": {
       "access": "paid",
-      "feature": "multi_bank"
+      "feature": "multiple_accounts"
     },
     "POST /api/v1/transfers/{match_id}/decision": {
       "access": "paid",
-      "feature": "multi_bank"
+      "feature": "multiple_accounts"
     },
     "PUT /api/v1/accounts/sender-mappings": {
       "access": "authenticated_free"

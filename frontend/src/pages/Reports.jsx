@@ -154,7 +154,8 @@ export default function Reports() {
     queryFn: fetchLLMConfig,
     staleTime: 60 * 1000,
   });
-  const insightsEnabled = license?.features?.includes('advanced_reports') === true;
+  const insightsEnabled = license?.features?.includes('ai_advisor') === true;
+  const taxPackEnabled = license?.features?.includes('ca_tax_pack') === true;
   const llmConnected = Boolean(llmConfig?.is_active);
   const insightsMutation = useMutation({
     mutationFn: requestedMonth => generateReportInsights(requestedMonth),
@@ -329,7 +330,7 @@ export default function Reports() {
           </div>
         ) : !insightsEnabled ? (
           <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] p-4 text-center">
-            <p className="text-white/55 text-sm">Advanced insights are available with GODFIN Pro or Max.</p>
+            <p className="text-white/55 text-sm">AI-written insights are available with GODFIN Max.</p>
             <p className="text-white/30 text-xs mt-1">Your standard reports and local exports remain available.</p>
             <a
               href={websiteUrl('/pricing')}
@@ -701,15 +702,15 @@ export default function Reports() {
               </select>
               <button
                 onClick={() => setTaxPackOpen(true)}
-                disabled={!insightsEnabled}
+                disabled={!taxPackEnabled}
                 className="min-h-11 px-3 rounded-xl bg-cyan-400/[0.12] border border-cyan-300/[0.16] text-cyan-100/70 disabled:opacity-35 text-xs"
               >
                 Download CA Tax Pack
               </button>
             </div>
           </div>
-          {!insightsEnabled && !licenseLoading && (
-            <p className="mt-2 text-amber-200/45 text-xs">FY exports are included with GODFIN Pro and Max.</p>
+          {!taxPackEnabled && !licenseLoading && (
+            <p className="mt-2 text-amber-200/45 text-xs">The CA tax pack is included with GODFIN Max.</p>
           )}
         </div>
       </motion.div>

@@ -30,8 +30,8 @@ export function requestPricingCountry(request: Request): LicenseCountry {
 
 export function isLicenseProduct(
   product: ProductCode,
-): product is PaidLicenseTier {
-  return product === "pro" || product === "max";
+): boolean {
+  return product === "pro" || product === "max" || product === "pro_to_max";
 }
 
 export function regionalPrice(
@@ -57,7 +57,14 @@ export function regionalPrice(
   const pppEnabled =
     !respectFeatureFlag || process.env.PPP_CHECKOUT_ENABLED === "true";
   const country = pppEnabled ? requestedCountry : "IN";
-  const configured = ENTITLEMENTS.tiers[product].price[country];
+  const configured = product === "pro_to_max"
+    ? {
+        currency: ENTITLEMENTS.tiers.max.price[country].currency,
+        amount_minor:
+          ENTITLEMENTS.tiers.max.price[country].amount_minor
+          - ENTITLEMENTS.tiers.pro.price[country].amount_minor,
+      }
+    : ENTITLEMENTS.tiers[product].price[country];
   return {
     country,
     currency: configured.currency,
