@@ -20,6 +20,39 @@ class ImportRequest(BaseModel):
     import_possible: bool = False
 
 
+class MappedImportMapping(BaseModel):
+    date_column: int = Field(ge=0, le=49)
+    description_column: int = Field(ge=0, le=49)
+    debit_column: int = Field(ge=0, le=49)
+    credit_column: int = Field(ge=0, le=49)
+    value_date_column: Optional[int] = Field(default=None, ge=0, le=49)
+    reference_column: Optional[int] = Field(default=None, ge=0, le=49)
+    running_balance_column: Optional[int] = Field(default=None, ge=0, le=49)
+    account_identifier_column: Optional[int] = Field(default=None, ge=0, le=49)
+
+
+class MappedColumnResponse(BaseModel):
+    index: int
+    label: str
+
+
+class MappedInspectResponse(BaseModel):
+    file_format: str
+    source_fingerprint: str
+    header_signature: str
+    header_row: int
+    row_count: int
+    columns: list[MappedColumnResponse]
+    sample_rows: list[list[str]]
+    suggested_mapping: dict[str, Optional[int]]
+
+
+class MappedRowErrorResponse(BaseModel):
+    row: int
+    code: str
+    message: str
+
+
 class IncomeSourceCreate(BaseModel):
     source_name: str = Field(..., min_length=1, max_length=100)
     expected_amount: Optional[PositiveMoney] = None
@@ -51,6 +84,45 @@ class StatementPreviewTransaction(BaseModel):
     is_income: bool
     semantic_type: str
     merchant_name: Optional[str]
+
+
+class MappedPreviewResponse(BaseModel):
+    account_id: str
+    source_fingerprint: str
+    mapping_fingerprint: str
+    header_signature: str
+    parser_profile: str
+    mapping_version: str
+    total_rows: int
+    matched_count: int
+    possible_count: int
+    new_count: int
+    preview_rows: list[StatementPreviewTransaction]
+    preview_truncated: bool
+    total_debits: float
+    total_credits: float
+    running_balance_mapped: bool
+    balance_controls_verified: bool
+    opening_balance: Optional[float]
+    closing_balance: Optional[float]
+    status: str
+    errors: list[MappedRowErrorResponse]
+    account_identifiers: list[str]
+
+
+class MappedImportResponse(BaseModel):
+    source_fingerprint: str
+    mapping_fingerprint: str
+    total_parsed: int
+    imported: int
+    skipped_duplicate: int
+    possible_duplicate: int
+    classified: int
+    review_queue: int
+    balance_controls_verified: bool
+    balance_status: str
+    coverage_complete: bool
+    errors: list[MappedRowErrorResponse]
 
 
 class StatementPreviewResponse(BaseModel):

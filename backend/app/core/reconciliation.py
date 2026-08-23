@@ -8,11 +8,13 @@ import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import List, Optional, Tuple
 from difflib import SequenceMatcher
 
 from sqlalchemy.orm import Session
 
+from app.core.money import money_decimal
 from app.models.transaction import Transaction
 from app.core.transaction_semantics import (
     TransactionSemantic,
@@ -215,7 +217,9 @@ class ReconciliationService:
                 return 1.0, ['Exact reference number match']
 
         # Fast-path: exact amount + same date + same type = almost certain duplicate
-        exact_amount = (float(parsed_txn.amount) == float(existing.amount))
+        exact_amount = (
+            money_decimal(parsed_txn.amount) == money_decimal(existing.amount)
+        )
         same_type = (parsed_txn.type == existing.type)
         date_diff = abs((parsed_txn.date - existing.date).days)
 
@@ -258,18 +262,20 @@ class ReconciliationService:
         return total_score, reasons
 
     @staticmethod
-    def _match_amount(parsed_amount: float, existing_amount: float) -> float:
+    def _match_amount(parsed_amount: object, existing_amount: object) -> float:
         """Calculate amount match score"""
-        if parsed_amount == existing_amount:
+        parsed = money_decimal(parsed_amount)
+        existing = money_decimal(existing_amount)
+        if parsed == existing:
             return 1.0
 
-        # Allow small tolerance for floating point differences
-        diff_pct = abs(parsed_amount - existing_amount) / max(parsed_amount, existing_amount, 1)
-        if diff_pct <= ReconciliationService.AMOUNT_TOLERANCE:
+        denominator = max(abs(parsed), abs(existing), Decimal("1.00"))
+        diff_pct = abs(parsed - existing) / denominator
+        if diff_pct <= Decimal(str(ReconciliationService.AMOUNT_TOLERANCE)):
             return 0.95
 
         # Partial score for close amounts
-        if diff_pct <= 0.05:  # Within 5%
+        if diff_pct <= Decimal("0.05"):  # Within 5%
             return 0.7
 
         return 0.0

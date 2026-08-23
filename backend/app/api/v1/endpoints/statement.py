@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import multiprocessing
+import re
 import secrets
 import sys
 import threading
@@ -11,6 +12,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.api.v1.entitlements import conditional_entitlement, enforce_feature
@@ -25,6 +27,16 @@ from app.core.classifier import classify_transaction
 from app.core.database import get_db
 from app.core.errors import LocalOperationError, StateConflictError
 from app.core.merchant_memory_service import upsert_merchant_memory
+from app.core.import_postprocessing import postprocess_imported_transactions
+from app.core.mapped_import import (
+    GENERIC_MAPPING_VERSION,
+    MappedImportError,
+    inspect_mapped_sheet,
+    mapping_fingerprint,
+    parse_mapped_sheet,
+    sample_rows,
+    suggested_mapping,
+)
 from app.core.parsers import account_requirements, parse_registered_statement
 from app.core.reconciliation import (
     ReconciliationService,
@@ -45,6 +57,10 @@ from app.schemas.statement import (
     IncomeSourceResponse,
     IncomeSourceUpdate,
     IncomeSourceUpdatedResponse,
+    MappedImportMapping,
+    MappedImportResponse,
+    MappedInspectResponse,
+    MappedPreviewResponse,
     StatementImportResponse,
     StatementPreviewResponse,
     StatementReconcileResponse,
@@ -112,6 +128,90 @@ def _statement_balance_snapshot(
         "coverage_complete": result.coverage_complete,
         "missing_ranges": list(result.missing_ranges),
     }
+
+
+async def _read_mapped_sheet(file: UploadFile):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    if not file.filename.lower().endswith((".csv", ".xlsx")):
+        raise HTTPException(
+            status_code=400,
+            detail="Guided mapping supports CSV and XLSX files.",
+        )
+    contents_buffer = bytearray()
+    while True:
+        chunk = await file.read(STATEMENT_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        contents_buffer.extend(chunk)
+        if len(contents_buffer) > MAX_STATEMENT_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+    try:
+        return inspect_mapped_sheet(bytes(contents_buffer), file.filename)
+    except MappedImportError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "GODFIN could not safely read this spreadsheet. Check that it "
+                "is a single-sheet UTF-8 CSV or XLSX within the stated limits."
+            ),
+        ) from exc
+
+
+def _mapped_mapping(mapping_json: str) -> MappedImportMapping:
+    try:
+        return MappedImportMapping.model_validate_json(mapping_json)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected spreadsheet columns are incomplete or invalid.",
+        ) from exc
+
+
+def _mapped_account(db: Session, account_id: str) -> Account:
+    enforce_feature(db, "multi_bank")
+    account = (
+        db.query(Account)
+        .filter_by(id=account_id, is_active=True)
+        .first()
+    )
+    if not account:
+        raise HTTPException(status_code=400, detail="Select an active account.")
+    return account
+
+
+def _validate_mapped_account_identity(
+    account: Account,
+    identifiers: tuple[str, ...],
+) -> None:
+    for identifier in identifiers:
+        digits = re.sub(r"\D", "", identifier)
+        if len(digits) >= 4 and digits[-4:] != account.last_4_digits:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The mapped account identifier does not match the selected "
+                    "account's last four digits."
+                ),
+            )
+
+
+def _mapped_preview_rows(statement, limit: int = 100) -> list[dict[str, object]]:
+    return [
+        {
+            "date": str(transaction.date),
+            "description": transaction.description,
+            "amount": transaction.amount,
+            "type": transaction.txn_type,
+            "reference": transaction.ref_number,
+            "instrument": transaction.instrument,
+            "is_transfer": transaction.is_transfer,
+            "is_income": transaction.is_income,
+            "semantic_type": transaction.semantic_type,
+            "merchant_name": transaction.merchant_name,
+        }
+        for transaction in statement.transactions[:limit]
+    ]
 
 
 SUPPORTED_EXTENSIONS = ('.pdf', '.xls', '.xlsx')
@@ -352,6 +452,235 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
         )
 
     return parse_result
+
+
+# --- Guided CSV/XLSX mapping ---
+
+@router.post(
+    "/ingest/mapped/inspect",
+    response_model=MappedInspectResponse,
+)
+@conditional_entitlement("multi_bank")
+async def inspect_mapped_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    enforce_feature(db, "multi_bank")
+    sheet = await _read_mapped_sheet(file)
+    data_rows = sum(
+        1
+        for row in sheet.rows[sheet.header_row + 1 :]
+        if any(str(value or "").strip() for value in row)
+    )
+    return {
+        "file_format": sheet.file_format,
+        "source_fingerprint": sheet.source_fingerprint,
+        "header_signature": sheet.header_signature,
+        "header_row": sheet.header_row + 1,
+        "row_count": data_rows,
+        "columns": [
+            {"index": index, "label": label}
+            for index, label in enumerate(sheet.headers)
+        ],
+        "sample_rows": sample_rows(sheet),
+        "suggested_mapping": suggested_mapping(sheet.headers),
+    }
+
+
+@router.post(
+    "/ingest/mapped/preview",
+    response_model=MappedPreviewResponse,
+)
+@conditional_entitlement("multi_bank")
+async def preview_mapped_import(
+    file: UploadFile = File(...),
+    account_id: str = Form(..., min_length=1, max_length=36),
+    mapping_json: str = Form(..., min_length=2, max_length=2_000),
+    date_format: str = Form(
+        "dd/mm/yyyy",
+        pattern=r"^(auto|dd/mm/yyyy|dd-mm-yyyy|yyyy-mm-dd|mm/dd/yyyy)$",
+    ),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    account = _mapped_account(db, account_id)
+    sheet = await _read_mapped_sheet(file)
+    mapping = _mapped_mapping(mapping_json)
+    try:
+        parsed = parse_mapped_sheet(sheet, mapping, date_format=date_format)
+    except MappedImportError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The selected columns or date style cannot be used safely. "
+                "Review the mapping and try again."
+            ),
+        ) from exc
+    _validate_mapped_account_identity(account, parsed.identifiers)
+
+    reconciliation = None
+    if not parsed.errors:
+        reconciliation = ReconciliationService.reconcile(
+            db,
+            ParsedStatement.from_statement_result(parsed.statement),
+            account.id,
+        )
+    mapped_fingerprint = mapping_fingerprint(sheet, mapping, date_format)
+    return {
+        "account_id": account.id,
+        "source_fingerprint": sheet.source_fingerprint,
+        "mapping_fingerprint": mapped_fingerprint,
+        "header_signature": sheet.header_signature,
+        "parser_profile": "generic_mapped",
+        "mapping_version": GENERIC_MAPPING_VERSION,
+        "total_rows": len(parsed.statement.transactions) + len(parsed.errors),
+        "matched_count": (
+            len(reconciliation.duplicate_transactions) if reconciliation else 0
+        ),
+        "possible_count": (
+            len(reconciliation.potential_duplicates) if reconciliation else 0
+        ),
+        "new_count": reconciliation.total_new if reconciliation else 0,
+        "preview_rows": _mapped_preview_rows(parsed.statement),
+        "preview_truncated": len(parsed.statement.transactions) > 100,
+        "total_debits": parsed.statement.total_debits or 0,
+        "total_credits": parsed.statement.total_credits or 0,
+        "running_balance_mapped": mapping.running_balance_column is not None,
+        "balance_controls_verified": (
+            parsed.statement.reconciliation_status == "passed"
+        ),
+        "opening_balance": parsed.statement.opening_balance,
+        "closing_balance": parsed.statement.closing_balance,
+        "status": "needs_review" if parsed.errors else "ready",
+        "errors": [error.to_dict() for error in parsed.errors],
+        "account_identifiers": [
+            f"••••{re.sub(r'\D', '', value)[-4:]}"
+            if len(re.sub(r"\D", "", value)) >= 4
+            else "Present"
+            for value in parsed.identifiers
+        ],
+    }
+
+
+@router.post(
+    "/ingest/mapped/import",
+    response_model=MappedImportResponse,
+)
+@conditional_entitlement("multi_bank")
+async def import_mapped_spreadsheet(
+    file: UploadFile = File(...),
+    account_id: str = Form(..., min_length=1, max_length=36),
+    mapping_json: str = Form(..., min_length=2, max_length=2_000),
+    date_format: str = Form(
+        "dd/mm/yyyy",
+        pattern=r"^(auto|dd/mm/yyyy|dd-mm-yyyy|yyyy-mm-dd|mm/dd/yyyy)$",
+    ),
+    confirm_mapping: bool = Form(False),
+    accepted_fingerprint: str = Form(..., min_length=64, max_length=64),
+    accepted_mapping_fingerprint: str = Form(..., min_length=64, max_length=64),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    try:
+        if not confirm_mapping:
+            raise HTTPException(
+                status_code=400,
+                detail="Review the mapped rows and explicitly confirm before importing.",
+            )
+        account = _mapped_account(db, account_id)
+        sheet = await _read_mapped_sheet(file)
+        mapping = _mapped_mapping(mapping_json)
+        mapped_fingerprint = mapping_fingerprint(sheet, mapping, date_format)
+        if not secrets.compare_digest(
+            accepted_fingerprint.lower(), sheet.source_fingerprint
+        ) or not secrets.compare_digest(
+            accepted_mapping_fingerprint.lower(), mapped_fingerprint
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The file or its column mapping changed after review. "
+                    "Preview it again before importing."
+                ),
+            )
+        parsed = parse_mapped_sheet(sheet, mapping, date_format=date_format)
+        _validate_mapped_account_identity(account, parsed.identifiers)
+        if parsed.errors:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Fix every highlighted spreadsheet row before importing. "
+                    "No rows were saved."
+                ),
+            )
+
+        statement = ParsedStatement.from_statement_result(parsed.statement)
+        reconciliation = ReconciliationService.reconcile(
+            db, statement, account.id
+        )
+        imported = import_new_transactions(
+            db,
+            reconciliation.new_transactions,
+            account.id,
+            source="mapped_import",
+        )
+        postprocess = postprocess_imported_transactions(
+            db,
+            imported,
+            reconciliation.new_transactions,
+        )
+        controls_verified = parsed.statement.reconciliation_status == "passed"
+        if controls_verified and not reconciliation.potential_duplicates:
+            record_verified_statement_controls(db, account.id, parsed.statement)
+        db.commit()
+        balance_snapshot = _statement_balance_snapshot(
+            db, account.id, parsed.statement
+        )
+        return {
+            "source_fingerprint": sheet.source_fingerprint,
+            "mapping_fingerprint": mapped_fingerprint,
+            "total_parsed": reconciliation.total_parsed,
+            "imported": len(imported),
+            "skipped_duplicate": len(reconciliation.duplicate_transactions),
+            "possible_duplicate": len(reconciliation.potential_duplicates),
+            "classified": postprocess.classified,
+            "review_queue": postprocess.review_queue,
+            "balance_controls_verified": controls_verified,
+            "balance_status": balance_snapshot["balance_status"],
+            "coverage_complete": bool(balance_snapshot["coverage_complete"]),
+            "errors": [],
+        }
+    except FinalizedPeriodError as exc:
+        db.rollback()
+        raise StateConflictError(
+            code="FINALIZED_PERIOD_READ_ONLY",
+            message=(
+                "This spreadsheet includes a finalized month that is read-only. "
+                "Reopen the month before importing."
+            ),
+            hint="Reopen that month before importing these transactions.",
+        ) from exc
+    except HTTPException:
+        db.rollback()
+        raise
+    except MappedImportError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The reviewed spreadsheet mapping is no longer valid. "
+                "Preview the file again before importing."
+            ),
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        raise LocalOperationError(
+            code="MAPPED_IMPORT_FAILED",
+            message="GODFIN could not complete this spreadsheet import.",
+            hint="No partial import was kept. Review the mapping and try again.",
+            status_code=503,
+        ) from exc
 
 
 # --- Statement Upload (3-step flow) ---

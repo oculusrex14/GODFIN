@@ -10,9 +10,11 @@ import {
 import {
   previewStatement, reconcileStatement, importStatement,
   createIncomeSource, fetchReviewQueue, resolveReviewItem, fetchCategories,
+  fetchAccounts,
 } from '../api/client';
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
+import MappedSpreadsheetImport from '../components/MappedSpreadsheetImport';
 
 function formatINR(amount) {
   return new Intl.NumberFormat('en-IN', {
@@ -45,14 +47,44 @@ function isExcelFile(file) {
   return name.endsWith('.xls') || name.endsWith('.xlsx');
 }
 
+function automaticFileId(file) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+function automaticQueueEntry(file) {
+  return {
+    id: automaticFileId(file),
+    file,
+    step: 1,
+    status: 'waiting',
+    password: '',
+    accountId: '',
+    reconcileData: null,
+    importResult: null,
+    error: '',
+  };
+}
+
+function automaticAccountLabel(account) {
+  return account.nickname
+    || `${account.bank} ${account.account_type.replaceAll('_', ' ')} ••••${account.last_4_digits}`;
+}
+
 export default function UploadPage() {
-  // Wizard state
-  const [step, setStep] = useState(1);
-  const [file, setFile] = useState(null);
+  const [importMode, setImportMode] = useState('automatic');
+  const [automaticQueue, setAutomaticQueue] = useState([]);
+  const [activeAutomaticId, setActiveAutomaticId] = useState(null);
+  const [reviewAllFirst, setReviewAllFirst] = useState(true);
   const [fileError, setFileError] = useState('');
-  const [password, setPassword] = useState('');
-  const [reconcileData, setReconcileData] = useState(null);
-  const [importResult, setImportResult] = useState(null);
+
+  const activeAutomatic = automaticQueue.find(item => item.id === activeAutomaticId)
+    || automaticQueue[0]
+    || null;
+  const step = activeAutomatic?.step || 1;
+  const file = activeAutomatic?.file || null;
+  const password = activeAutomatic?.password || '';
+  const reconcileData = activeAutomatic?.reconcileData || null;
+  const importResult = activeAutomatic?.importResult || null;
 
   // Review panel state
   const [expandedReviewId, setExpandedReviewId] = useState(null);
@@ -61,47 +93,84 @@ export default function UploadPage() {
 
   const queryClient = useQueryClient();
 
+  const updateAutomatic = (id, patch) => {
+    setAutomaticQueue(current => current.map(item => (
+      item.id === id ? { ...item, ...patch } : item
+    )));
+  };
+
+  const { data: importAccounts = [] } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: fetchAccounts,
+  });
+
   // Step 1: Preview
   const previewMutation = useMutation({
-    mutationFn: () => previewStatement(file, password || null),
-    onSuccess: () => {
-      setStep(2);
+    mutationFn: entry => previewStatement(entry.file, entry.password || null),
+    onMutate: entry => updateAutomatic(entry.id, { status: 'parsing', error: '' }),
+    onSuccess: (_, entry) => {
+      updateAutomatic(entry.id, { step: 2, status: 'reconciling' });
       // Auto-trigger reconcile
-      reconcileMutation.mutate();
+      reconcileMutation.mutate(entry);
     },
+    onError: (error, entry) => updateAutomatic(entry.id, {
+      status: 'failed',
+      error: error?.message || 'GODFIN could not read this statement.',
+    }),
   });
 
   // Step 2: Reconcile
   const reconcileMutation = useMutation({
-    mutationFn: () => reconcileStatement(file, null, password || null),
-    onSuccess: (data) => {
-      setReconcileData(data);
-    },
+    mutationFn: entry => reconcileStatement(
+      entry.file,
+      entry.accountId || null,
+      entry.password || null,
+    ),
+    onSuccess: (data, entry) => updateAutomatic(entry.id, {
+      step: 2,
+      status: 'reviewed',
+      reconcileData: data,
+      accountId: data.account_id || entry.accountId,
+      error: '',
+    }),
+    onError: (error, entry) => updateAutomatic(entry.id, {
+      step: 2,
+      status: 'failed',
+      error: error?.message || 'GODFIN could not reconcile this statement.',
+    }),
   });
 
   // Step 3: Import
   const importMutation = useMutation({
-    mutationFn: () => importStatement(file, reconcileData?.account_id, {
-      password: password || null,
+    mutationFn: entry => importStatement(entry.file, entry.reconcileData?.account_id, {
+      password: entry.password || null,
       importNew: true,
       detectIncome: true,
       confirmReconciled: true,
-      acceptedFingerprint: reconcileData?.parse_fingerprint,
+      acceptedFingerprint: entry.reconcileData?.parse_fingerprint,
     }),
-    onSuccess: (data) => {
-      setImportResult(data);
-      setStep(3);
+    onMutate: entry => updateAutomatic(entry.id, { status: 'importing', error: '' }),
+    onSuccess: (data, entry) => {
+      updateAutomatic(entry.id, {
+        importResult: data,
+        step: 3,
+        status: 'complete',
+      });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
       queryClient.invalidateQueries({ queryKey: ['reviewStats'] });
       queryClient.invalidateQueries({ queryKey: ['reviewQueue'] });
     },
+    onError: (error, entry) => updateAutomatic(entry.id, {
+      status: 'reviewed',
+      error: error?.message || 'No transactions were imported.',
+    }),
   });
 
   // Review panel queries
   const { data: uploadReviewData } = useQuery({
     queryKey: ['uploadReviewQueue'],
-    queryFn: () => fetchReviewQueue({ source: 'statement_upload', page_size: 50 }),
+    queryFn: () => fetchReviewQueue({ page_size: 50 }),
     refetchInterval: 10000,
   });
 
@@ -127,37 +196,201 @@ export default function UploadPage() {
 
   function handleDrop(e) {
     e.preventDefault();
-    const droppedFile = e.dataTransfer.files[0];
-    const validation = validateFile(droppedFile);
-    if (!validation.valid) {
-      setFileError(validation.error);
+    addAutomaticFiles(Array.from(e.dataTransfer.files));
+  }
+
+  function addAutomaticFiles(files) {
+    const errors = [];
+    const known = new Set(automaticQueue.map(item => item.id));
+    const additions = [];
+    for (const candidate of files) {
+      const validation = validateFile(candidate);
+      if (!validation.valid) {
+        errors.push(`${candidate.name}: ${validation.error}`);
+        continue;
+      }
+      const entry = automaticQueueEntry(candidate);
+      if (!known.has(entry.id)) {
+        known.add(entry.id);
+        additions.push(entry);
+      }
+    }
+    setAutomaticQueue(current => [...current, ...additions]);
+    if (
+      additions.length
+      && (!activeAutomaticId || activeAutomatic?.status === 'complete')
+    ) {
+      setActiveAutomaticId(additions[0].id);
+    }
+    setFileError(errors.join(' '));
+  }
+
+  function resetResults(id = activeAutomatic?.id) {
+    if (!id) return;
+    updateAutomatic(id, {
+      step: 1,
+      status: 'waiting',
+      reconcileData: null,
+      importResult: null,
+      error: '',
+    });
+  }
+
+  function removeAutomatic(id = activeAutomatic?.id) {
+    if (!id || previewMutation.isPending || reconcileMutation.isPending || importMutation.isPending) return;
+    const index = automaticQueue.findIndex(item => item.id === id);
+    const remaining = automaticQueue.filter(item => item.id !== id);
+    setAutomaticQueue(remaining);
+    if (activeAutomaticId === id) {
+      setActiveAutomaticId(remaining[Math.min(index, remaining.length - 1)]?.id || null);
+    }
+  }
+
+  function handleNextFile() {
+    const next = automaticQueue.find(item => item.status !== 'complete');
+    if (next) {
+      setActiveAutomaticId(next.id);
       return;
     }
-    setFileError('');
-    setFile(droppedFile);
-    resetResults();
-  }
-
-  function resetResults() {
-    setStep(1);
-    setReconcileData(null);
-    setImportResult(null);
-  }
-
-  function handleReset() {
-    setFile(null);
-    setPassword('');
-    resetResults();
+    setActiveAutomaticId(null);
   }
 
   const isProcessing = previewMutation.isPending || reconcileMutation.isPending || importMutation.isPending;
+  const allAutomaticReviewed = automaticQueue.length > 0 && automaticQueue.every(
+    item => ['reviewed', 'complete'].includes(item.status),
+  );
+  const automaticComplete = automaticQueue.filter(item => item.status === 'complete').length;
+  const automaticFailed = automaticQueue.filter(item => item.status === 'failed').length;
+  const automaticTotals = automaticQueue.reduce((totals, item) => ({
+    imported: totals.imported + (item.importResult?.new_imported || 0),
+    duplicates: totals.duplicates + (item.importResult?.matched || 0),
+    review: totals.review + (item.importResult?.review_queue || 0),
+  }), { imported: 0, duplicates: 0, review: 0 });
 
   return (
     <div>
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
         <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Upload Statement</h1>
-        <p className="text-white/30 text-[0.8rem]">Import transactions from bank statements</p>
+        <p className="text-white/30 text-[0.8rem]">Import transactions from a recognized statement or map a spreadsheet safely</p>
       </motion.div>
+
+      <div className="mb-5 inline-flex rounded-[14px] border border-white/[0.1] bg-white/[0.04] p-1" role="tablist" aria-label="Statement import method">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={importMode === 'automatic'}
+          onClick={() => setImportMode('automatic')}
+          className={`rounded-[10px] px-4 py-2 text-[0.73rem] transition-colors ${
+            importMode === 'automatic'
+              ? 'bg-cyan-400/[0.12] text-cyan-200/80'
+              : 'text-white/35 hover:text-white/60'
+          }`}
+        >
+          Recognized HDFC statement
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={importMode === 'guided'}
+          onClick={() => setImportMode('guided')}
+          className={`rounded-[10px] px-4 py-2 text-[0.73rem] transition-colors ${
+            importMode === 'guided'
+              ? 'bg-cyan-400/[0.12] text-cyan-200/80'
+              : 'text-white/35 hover:text-white/60'
+          }`}
+        >
+          Guided CSV / XLSX
+        </button>
+      </div>
+
+      {importMode === 'guided' ? (
+        <MappedSpreadsheetImport />
+      ) : (
+        <>
+      <section className="mb-5 rounded-[16px] border border-white/[0.1] bg-white/[0.04] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[0.73rem] text-white/55">Statement queue</p>
+            <p className="mt-0.5 text-[0.65rem] text-white/25">
+              Files are reviewed one at a time, so a large batch cannot overwhelm your computer.
+            </p>
+          </div>
+          <label className="cursor-pointer rounded-[10px] border border-cyan-400/20 bg-cyan-400/[0.06] px-3 py-2 text-[0.7rem] text-cyan-200/70 hover:bg-cyan-400/[0.1]">
+            <Plus size={12} className="mr-1 inline" /> Add statements
+            <input
+              type="file"
+              accept=".pdf,.xls,.xlsx"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                addAutomaticFiles(Array.from(event.target.files || []));
+                event.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+        {automaticQueue.length > 0 && (
+          <>
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+              {automaticQueue.map(item => (
+                <div
+                  key={item.id}
+                  className={`flex min-w-[180px] max-w-[260px] items-center rounded-[10px] border ${
+                    activeAutomatic?.id === item.id
+                      ? 'border-cyan-400/25 bg-cyan-400/[0.07]'
+                      : 'border-white/[0.07] bg-white/[0.025]'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={() => setActiveAutomaticId(item.id)}
+                    className="min-w-0 flex-1 px-3 py-2 text-left disabled:cursor-not-allowed"
+                  >
+                    <span className="block truncate text-[0.68rem] text-white/60">{item.file.name}</span>
+                    <span className={`block text-[0.58rem] capitalize ${
+                      item.status === 'complete'
+                        ? 'text-emerald-300/65'
+                        : item.status === 'failed'
+                          ? 'text-rose-300/70'
+                          : 'text-white/25'
+                    }`}>{item.status}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${item.file.name}`}
+                    disabled={isProcessing}
+                    onClick={() => removeAutomatic(item.id)}
+                    className="mr-2 rounded p-1 text-white/20 hover:text-rose-300/70 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-2">
+              <label className="flex items-center gap-2 text-[0.66rem] text-white/35">
+                <input
+                  type="checkbox"
+                  checked={reviewAllFirst}
+                  onChange={event => setReviewAllFirst(event.target.checked)}
+                  className="accent-cyan-400"
+                />
+                Review every file before importing any of them
+              </label>
+              <span className="text-[0.63rem] text-white/25">
+                {automaticComplete} complete · {automaticFailed} failed · {automaticQueue.length} total
+              </span>
+            </div>
+            {(automaticComplete > 0 || automaticFailed > 0) && (
+              <p className="mt-2 text-[0.63rem] text-white/28">
+                Batch summary: {automaticTotals.imported} imported · {automaticTotals.duplicates} duplicates skipped · {automaticTotals.review} need category review · {automaticFailed} failed
+              </p>
+            )}
+          </>
+        )}
+        {fileError && <p className="mt-2 text-[0.68rem] text-rose-300/75">{fileError}</p>}
+      </section>
 
       {/* Step indicator */}
       <div className="flex items-center gap-2 mb-5">
@@ -215,28 +448,22 @@ export default function UploadPage() {
                         <p className="text-white/80 text-[0.85rem]">{file.name}</p>
                         <p className="text-white/30 text-[0.7rem]">{(file.size / 1024).toFixed(1)} KB</p>
                       </div>
-                      <button onClick={() => { setFile(null); resetResults(); }} className="ml-2 text-white/30 hover:text-rose-400/70" aria-label={`Remove selected file ${file.name}`}>
+                      <button onClick={() => removeAutomatic()} className="ml-2 text-white/30 hover:text-rose-400/70" aria-label={`Remove selected file ${file.name}`}>
                         <Trash2 size={15} />
                       </button>
                     </div>
                   ) : (
                     <label className="cursor-pointer">
                       <UploadIcon className="h-9 w-9 text-white/20 mx-auto mb-3" />
-                      <p className="text-white/40 text-[0.85rem] mb-1">Drop a PDF or Excel file here, or click to browse</p>
+                      <p className="text-white/40 text-[0.85rem] mb-1">Drop one or more PDF or Excel files here, or click to browse</p>
                       <p className="text-white/20 text-[0.7rem]">HDFC Savings or Credit Card statement (PDF, XLS, XLSX)</p>
                       <input
                         type="file"
                         accept=".pdf,.xls,.xlsx"
+                        multiple
                         onChange={(e) => {
-                          setFileError('');
-                          const selectedFile = e.target.files[0];
-                          const validation = validateFile(selectedFile);
-                          if (!validation.valid) {
-                            setFileError(validation.error);
-                            return;
-                          }
-                          setFile(selectedFile);
-                          resetResults();
+                          addAutomaticFiles(Array.from(e.target.files || []));
+                          e.target.value = '';
                         }}
                         className="hidden"
                       />
@@ -250,13 +477,37 @@ export default function UploadPage() {
 
                 {!isExcelFile(file) && (
                   <div className="mt-4">
-                    <GlassInput type="password" placeholder="PDF password (if protected)" value={password} onChange={(e) => setPassword(e.target.value)} />
+                    <GlassInput
+                      type="password"
+                      placeholder="PDF password (if protected)"
+                      value={password}
+                      onChange={(e) => updateAutomatic(activeAutomatic.id, { password: e.target.value })}
+                    />
                   </div>
+                )}
+
+                {file && (
+                  <label className="mt-4 grid gap-1.5">
+                    <span className="text-[0.68rem] text-white/35">Import into account</span>
+                    <select
+                      value={activeAutomatic?.accountId || ''}
+                      onChange={event => updateAutomatic(activeAutomatic.id, { accountId: event.target.value })}
+                      className="rounded-[10px] border border-white/[0.12] bg-[#15294a] px-3 py-2 text-[0.75rem] text-white/70 focus:border-cyan-400/40 focus:outline-none"
+                    >
+                      <option value="">Detect from the statement</option>
+                      {importAccounts.filter(account => account.is_active !== false).map(account => (
+                        <option key={account.id} value={account.id}>{automaticAccountLabel(account)}</option>
+                      ))}
+                    </select>
+                    <span className="text-[0.62rem] leading-relaxed text-white/22">
+                      Choose an account when you have more than one matching account. GODFIN still verifies the statement before import.
+                    </span>
+                  </label>
                 )}
 
                 <div className="mt-4">
                   <GlassButton
-                    onClick={() => previewMutation.mutate()}
+                    onClick={() => previewMutation.mutate(activeAutomatic)}
                     disabled={!file || isProcessing}
                     className="w-full justify-center"
                   >
@@ -268,9 +519,9 @@ export default function UploadPage() {
                   </GlassButton>
                 </div>
 
-                {previewMutation.isError && (
+                {activeAutomatic?.status === 'failed' && activeAutomatic?.error && (
                   <div className="mt-3 p-3 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px]">
-                    <p className="text-rose-400/70 text-[0.8rem]">{previewMutation.error.message}</p>
+                    <p className="text-rose-400/70 text-[0.8rem]">{activeAutomatic.error}</p>
                   </div>
                 )}
               </motion.div>
@@ -289,7 +540,7 @@ export default function UploadPage() {
 
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Reconciliation Review</h2>
-                  <button onClick={handleReset} className="text-white/30 hover:text-white/60 text-[0.7rem] flex items-center gap-1 transition-colors">
+                  <button onClick={() => resetResults()} className="text-white/30 hover:text-white/60 text-[0.7rem] flex items-center gap-1 transition-colors">
                     <ArrowLeft size={12} /> Start Over
                   </button>
                 </div>
@@ -299,12 +550,12 @@ export default function UploadPage() {
                     <Loader2 size={28} className="animate-spin text-cyan-400/60" />
                     <p className="text-white/40 text-[0.85rem]">Reconciling against existing records...</p>
                   </div>
-                ) : reconcileMutation.isError ? (
+                ) : activeAutomatic?.status === 'failed' ? (
                   <div className="p-4 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px]">
                     <p className="text-rose-400/70 text-[0.8rem] flex items-center gap-2">
-                      <XCircle size={14} /> {reconcileMutation.error.message}
+                      <XCircle size={14} /> {activeAutomatic?.error}
                     </p>
-                    <button onClick={handleReset} className="mt-2 text-white/40 text-[0.75rem] hover:text-white/60">
+                    <button onClick={() => resetResults()} className="mt-2 text-white/40 text-[0.75rem] hover:text-white/60">
                       Try again
                     </button>
                   </div>
@@ -316,6 +567,9 @@ export default function UploadPage() {
                       </p>
                       <p className="mt-1 text-[0.68rem] leading-relaxed text-white/35">
                         GODFIN recognized {reconcileData.parser_profile?.replaceAll('_', ' ')} and verified the statement&apos;s explicit amount columns{reconcileData.reconciliation_method === 'explicit_columns_and_running_balance' ? ' against its running balances' : ''}. Import starts only after you confirm below.
+                      </p>
+                      <p className="mt-1 text-[0.62rem] text-white/25">
+                        Parser {reconcileData.parser_profile?.replaceAll('_', ' ')} · reviewed file {reconcileData.parse_fingerprint?.slice(0, 12)}…
                       </p>
                     </div>
                     {/* Summary counters */}
@@ -408,21 +662,23 @@ export default function UploadPage() {
                       </div>
                     ) : (
                       <GlassButton
-                        onClick={() => importMutation.mutate()}
-                        disabled={reconcileData.new_count === 0}
+                        onClick={() => importMutation.mutate(activeAutomatic)}
+                        disabled={reconcileData.new_count === 0 || (reviewAllFirst && !allAutomaticReviewed)}
                         className="w-full justify-center mt-2"
                       >
                         {reconcileData.new_count === 0 ? (
                           <>No new transactions to import</>
+                        ) : reviewAllFirst && !allAutomaticReviewed ? (
+                          <>Review the remaining queued files first</>
                         ) : (
                           <><ArrowRight size={15} /> Import {reconcileData.new_count} New Transactions</>
                         )}
                       </GlassButton>
                     )}
 
-                    {importMutation.isError && (
+                    {activeAutomatic?.error && (
                       <div className="mt-3 p-3 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px]">
-                        <p className="text-rose-400/70 text-[0.8rem]">{importMutation.error.message}</p>
+                        <p className="text-rose-400/70 text-[0.8rem]">{activeAutomatic.error}</p>
                       </div>
                     )}
                   </>
@@ -502,9 +758,25 @@ export default function UploadPage() {
                   </div>
                 )}
 
-                <GlassButton onClick={handleReset} className="w-full justify-center mt-2">
-                  <UploadIcon size={15} /> Upload Another Statement
-                </GlassButton>
+                {automaticQueue.some(item => item.status !== 'complete') ? (
+                  <GlassButton onClick={handleNextFile} className="w-full justify-center mt-2">
+                    <UploadIcon size={15} /> Continue With Next Statement
+                  </GlassButton>
+                ) : (
+                  <label className="mt-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-[12px] border border-cyan-400/20 bg-cyan-400/[0.08] px-4 py-2.5 text-[0.75rem] text-cyan-200/75 hover:bg-cyan-400/[0.12]">
+                    <UploadIcon size={15} /> Add Another Statement
+                    <input
+                      type="file"
+                      accept=".pdf,.xls,.xlsx"
+                      multiple
+                      className="hidden"
+                      onChange={(event) => {
+                        addAutomaticFiles(Array.from(event.target.files || []));
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -641,6 +913,8 @@ export default function UploadPage() {
           )}
         </motion.div>
       </div>
+        </>
+      )}
     </div>
   );
 }

@@ -460,6 +460,42 @@ export async function importStatement(file, accountId, options = {}) {
   });
 }
 
+export async function inspectMappedSpreadsheet(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiFetch('/ingest/mapped/inspect', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function previewMappedSpreadsheet(file, accountId, mapping, dateFormat) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('account_id', accountId);
+  formData.append('mapping_json', JSON.stringify(mapping));
+  formData.append('date_format', dateFormat);
+  return apiFetch('/ingest/mapped/preview', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function importMappedSpreadsheet(file, accountId, mapping, dateFormat, reviewed) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('account_id', accountId);
+  formData.append('mapping_json', JSON.stringify(mapping));
+  formData.append('date_format', dateFormat);
+  formData.append('confirm_mapping', 'true');
+  formData.append('accepted_fingerprint', reviewed.source_fingerprint);
+  formData.append('accepted_mapping_fingerprint', reviewed.mapping_fingerprint);
+  return apiFetch('/ingest/mapped/import', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
 // Legacy upload (backward compat)
 export async function uploadStatement(file, password) {
   return previewStatement(file, password);

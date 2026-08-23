@@ -418,7 +418,7 @@ def test_openapi_documents_one_error_envelope_and_success_status_per_operation()
                 assert error_schema == {
                     "$ref": "#/components/schemas/APIErrorResponse"
                 }
-    assert len(operation_ids) == 183
+    assert len(operation_ids) == 186
     # Freeze the audited legacy debt: a new route may not add another generic
     # success body. Precise success schemas are being reduced separately while
     # every error/status/auth contract is enforced now.

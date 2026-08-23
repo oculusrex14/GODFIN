@@ -375,6 +375,18 @@
     "POST /api/v1/ingest/gmail/sync/cancel": {
       "access": "authenticated_free"
     },
+    "POST /api/v1/ingest/mapped/import": {
+      "access": "conditional_paid",
+      "feature": "multi_bank"
+    },
+    "POST /api/v1/ingest/mapped/inspect": {
+      "access": "conditional_paid",
+      "feature": "multi_bank"
+    },
+    "POST /api/v1/ingest/mapped/preview": {
+      "access": "conditional_paid",
+      "feature": "multi_bank"
+    },
     "POST /api/v1/ingest/settings": {
       "access": "authenticated_free"
     },
