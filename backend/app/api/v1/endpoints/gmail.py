@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import json
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
@@ -25,6 +25,7 @@ from app.core.database import get_db
 from app.core.errors import IntegrationUnavailableError, StateConflictError
 from app.core.gmail_service import (
     GmailConfigurationError,
+    GmailDisconnectOutcome,
     GmailError,
     GmailOAuthStateError,
     OAUTH_REDIRECT_URI,
@@ -100,6 +101,9 @@ class GmailDisconnectResponse(BaseModel):
     message: str
     deleted_transactions: int
     backup_filename: str | None
+    operation_state: str = "completed"
+    credentials_removed: bool = True
+    remote_revocation_pending: bool = False
 
 
 class InitialSyncResponse(BaseModel):
@@ -398,6 +402,82 @@ class GmailDisconnectRequest(BaseModel):
     confirmation: Optional[str] = Field(default=None, max_length=50)
 
 
+GMAIL_DISCONNECT_STATE_KEY = "gmail_disconnect_operation_state"
+GMAIL_DISCONNECT_DELETED_KEY = "gmail_disconnect_deleted_transactions"
+GMAIL_DISCONNECT_BACKUP_KEY = "gmail_disconnect_backup_filename"
+GMAIL_DISCONNECT_REMOTE_KEY = "gmail_disconnect_remote_revocation_pending"
+GMAIL_DISCONNECT_UPDATED_KEY = "gmail_disconnect_updated_at"
+GMAIL_DISCONNECT_PENDING_STATES = {
+    "credentials_pending",
+    "data_cleared_credentials_pending",
+}
+
+
+def _set_app_setting(db: Session, key: str, value: str) -> None:
+    setting = db.query(AppSetting).filter_by(key=key).first()
+    if setting is None:
+        db.add(AppSetting(key=key, value=value))
+    else:
+        setting.value = value
+
+
+def _disconnect_operation(db: Session) -> dict[str, object]:
+    keys = {
+        GMAIL_DISCONNECT_STATE_KEY,
+        GMAIL_DISCONNECT_DELETED_KEY,
+        GMAIL_DISCONNECT_BACKUP_KEY,
+        GMAIL_DISCONNECT_REMOTE_KEY,
+        GMAIL_DISCONNECT_UPDATED_KEY,
+    }
+    values = {
+        row.key: row.value
+        for row in db.query(AppSetting).filter(AppSetting.key.in_(keys)).all()
+    }
+    try:
+        deleted_transactions = max(
+            0,
+            int(values.get(GMAIL_DISCONNECT_DELETED_KEY) or 0),
+        )
+    except (TypeError, ValueError):
+        deleted_transactions = 0
+    return {
+        "state": values.get(GMAIL_DISCONNECT_STATE_KEY),
+        "deleted_transactions": deleted_transactions,
+        "backup_filename": values.get(GMAIL_DISCONNECT_BACKUP_KEY) or None,
+        "remote_revocation_pending": (
+            values.get(GMAIL_DISCONNECT_REMOTE_KEY) == "true"
+        ),
+        "updated_at": values.get(GMAIL_DISCONNECT_UPDATED_KEY) or None,
+    }
+
+
+def _record_disconnect_operation(
+    db: Session,
+    *,
+    state: str,
+    deleted_transactions: int,
+    backup_filename: str | None,
+    remote_revocation_pending: bool = False,
+) -> None:
+    _set_app_setting(db, GMAIL_DISCONNECT_STATE_KEY, state)
+    _set_app_setting(
+        db,
+        GMAIL_DISCONNECT_DELETED_KEY,
+        str(max(0, deleted_transactions)),
+    )
+    _set_app_setting(db, GMAIL_DISCONNECT_BACKUP_KEY, backup_filename or "")
+    _set_app_setting(
+        db,
+        GMAIL_DISCONNECT_REMOTE_KEY,
+        "true" if remote_revocation_pending else "false",
+    )
+    _set_app_setting(
+        db,
+        GMAIL_DISCONNECT_UPDATED_KEY,
+        datetime.now(UTC).replace(microsecond=0).isoformat(),
+    )
+
+
 def _delete_gmail_transactions(db: Session) -> int:
     """Delete Gmail-derived rows only, in reviewed foreign-key order."""
     from app.models.transaction import Transaction
@@ -421,10 +501,22 @@ def gmail_disconnect(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Disconnect credentials and optionally delete only Gmail-derived data."""
+    """Disconnect Gmail with durable, retryable partial-operation state."""
     try:
-        deleted_count = 0
-        backup_filename = None
+        previous_operation = _disconnect_operation(db)
+        previous_state = previous_operation["state"]
+        resuming_pending = previous_state in GMAIL_DISCONNECT_PENDING_STATES
+        data_already_cleared = previous_state == "data_cleared_credentials_pending"
+        deleted_count = (
+            int(previous_operation["deleted_transactions"])
+            if data_already_cleared
+            else 0
+        )
+        backup_filename = (
+            previous_operation["backup_filename"]
+            if data_already_cleared
+            else None
+        )
         if body.clear_data:
             require_current_pin(
                 db,
@@ -438,57 +530,139 @@ def gmail_disconnect(
                     detail="Type DELETE GMAIL DATA to confirm Gmail-data deletion.",
                 )
 
-            backup_setting = db.query(AppSetting).filter_by(
-                key="backup_directory"
-            ).first()
-            backup_dir = backup_setting.value if backup_setting else "./backups"
-            try:
-                backup_filename = create_backup(
-                    str(app_config.database_path),
-                    backup_dir,
-                )
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Gmail data was not deleted because the safety backup failed.",
-                ) from exc
-            deleted_count = _delete_gmail_transactions(db)
+            if not data_already_cleared:
+                backup_setting = db.query(AppSetting).filter_by(
+                    key="backup_directory"
+                ).first()
+                backup_dir = backup_setting.value if backup_setting else "./backups"
+                try:
+                    backup_filename = create_backup(
+                        str(app_config.database_path),
+                        backup_dir,
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Gmail data was not deleted because the safety backup failed.",
+                    ) from exc
+                deleted_count = _delete_gmail_transactions(db)
 
-        # Clear ingestion settings
-        for key in ['last_gmail_history_id', 'last_ingestion_run',
-                    'initial_sync_date_range', 'initial_sync_completed',
-                    'last_manual_ingestion_range', 'last_manual_ingestion_date',
-                    'last_auto_ingest_date', 'auto_ingestion_enabled',
-                    'auto_ingestion_frequency', 'sync_result', 'sync_status',
-                    'sync_error', 'sync_progress_processed', 'sync_progress_total']:
-            setting = db.query(AppSetting).filter_by(key=key).first()
-            if setting:
-                db.delete(setting)
-        db.commit()
+        if not resuming_pending:
+            # Clear ingestion settings and durably record the recovery point in the
+            # same transaction as any Gmail-derived data deletion.
+            for key in ['last_gmail_history_id', 'last_ingestion_run',
+                        'initial_sync_date_range', 'initial_sync_completed',
+                        'last_manual_ingestion_range', 'last_manual_ingestion_date',
+                        'last_auto_ingest_date', 'auto_ingestion_enabled',
+                        'auto_ingestion_frequency', 'sync_result', 'sync_status',
+                        'sync_error', 'sync_progress_processed', 'sync_progress_total']:
+                setting = db.query(AppSetting).filter_by(key=key).first()
+                if setting:
+                    db.delete(setting)
+            _record_disconnect_operation(
+                db,
+                state=(
+                    "data_cleared_credentials_pending"
+                    if body.clear_data
+                    else "credentials_pending"
+                ),
+                deleted_transactions=deleted_count,
+                backup_filename=backup_filename,
+            )
+            db.commit()
 
-        # Revoke credentials
-        success = gmail_service.disconnect()
+        outcome = gmail_service.disconnect()
+        if isinstance(outcome, GmailDisconnectOutcome):
+            credentials_removed = outcome.local_credentials_removed
+            remote_revocation_pending = outcome.remote_revocation_pending
+        else:
+            # Compatibility for tests and older injected service doubles.
+            credentials_removed = bool(outcome)
+            remote_revocation_pending = False
 
-        if success:
-            message = "Gmail disconnected successfully"
+        if credentials_removed:
+            operation_state = (
+                "completed_remote_revocation_unconfirmed"
+                if remote_revocation_pending
+                else "completed"
+            )
+            _record_disconnect_operation(
+                db,
+                state=operation_state,
+                deleted_transactions=deleted_count,
+                backup_filename=backup_filename,
+                remote_revocation_pending=remote_revocation_pending,
+            )
+            db.commit()
+            message = "Gmail disconnected from this computer"
             if body.clear_data:
                 message += f". {deleted_count} transactions removed."
+            if remote_revocation_pending:
+                message += (
+                    " Google could not confirm remote permission revocation; "
+                    "remove GODFIN from your Google Account connections if needed."
+                )
             return {
                 "success": True,
                 "message": message,
                 "deleted_transactions": deleted_count,
                 "backup_filename": backup_filename,
+                "operation_state": operation_state,
+                "credentials_removed": True,
+                "remote_revocation_pending": remote_revocation_pending,
             }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to disconnect Gmail")
-    except HTTPException:
+
+        pending_state = (
+            "data_cleared_credentials_pending"
+            if data_already_cleared or body.clear_data
+            else "credentials_pending"
+        )
+        _record_disconnect_operation(
+            db,
+            state=pending_state,
+            deleted_transactions=deleted_count,
+            backup_filename=backup_filename,
+        )
+        db.commit()
+        if pending_state == "data_cleared_credentials_pending":
+            raise IntegrationUnavailableError(
+                code="GMAIL_DATA_CLEARED_CREDENTIALS_PENDING",
+                message=(
+                    "Gmail-imported data was cleared, but saved Gmail permission "
+                    "could not be removed yet."
+                ),
+                hint="Choose Disconnect again to retry credential removal.",
+                status_code=503,
+            )
+        raise IntegrationUnavailableError(
+            code="GMAIL_CREDENTIAL_REMOVAL_PENDING",
+            message="Saved Gmail permission could not be removed yet.",
+            hint="Choose Disconnect again to retry. No Gmail transactions were deleted.",
+            status_code=503,
+        )
+    except (HTTPException, IntegrationUnavailableError):
         raise
     except Exception as exc:
         db.rollback()
         logger.exception("Gmail disconnect failed")
-        raise HTTPException(
-            status_code=500,
-            detail="Gmail could not be disconnected. No data was changed.",
+        operation = _disconnect_operation(db)
+        data_was_cleared = (
+            operation["state"] == "data_cleared_credentials_pending"
+        )
+        raise IntegrationUnavailableError(
+            code=(
+                "GMAIL_DATA_CLEARED_CREDENTIALS_PENDING"
+                if data_was_cleared
+                else "GMAIL_DISCONNECT_FAILED"
+            ),
+            message=(
+                "Gmail-imported data was cleared, but saved Gmail permission "
+                "still needs removal."
+                if data_was_cleared
+                else "Gmail could not be disconnected. No Gmail transactions were deleted."
+            ),
+            hint="Choose Disconnect again to retry.",
+            status_code=503,
         ) from exc
 
 

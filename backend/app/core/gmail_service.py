@@ -132,6 +132,22 @@ class GmailConnectionHealth:
         }
 
 
+@dataclass(frozen=True)
+class GmailDisconnectOutcome:
+    """Support-safe result for local credential removal and remote revocation."""
+
+    local_credentials_removed: bool
+    remote_revocation_status: str
+    safe_reason_code: str
+
+    @property
+    def remote_revocation_pending(self) -> bool:
+        return self.remote_revocation_status == "unconfirmed"
+
+    def __bool__(self) -> bool:
+        return self.local_credentials_removed
+
+
 def _utcnow_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -933,21 +949,37 @@ class GmailService:
         ).execute()
         return True
 
-    def disconnect(self) -> bool:
-        """Remove stored credentials."""
+    def disconnect(self) -> GmailDisconnectOutcome:
+        """Remove local credentials and report remote revocation separately."""
+        remote_revocation_status = "not_required"
         try:
             if self._credentials:
-                # Try to revoke the token
+                # Remote revocation is best-effort. Local credential removal must still
+                # complete when Google is temporarily unavailable.
                 import requests
+                revocation_token = (
+                    self._credentials.refresh_token or self._credentials.token
+                )
+                remote_revocation_status = "unconfirmed"
                 try:
-                    requests.post(
+                    response = requests.post(
                         'https://oauth2.googleapis.com/revoke',
-                        params={'token': self._credentials.token},
+                        params={'token': revocation_token},
                         headers={'content-type': 'application/x-www-form-urlencoded'},
                         timeout=10,
                     )
+                    if response.status_code == 200:
+                        remote_revocation_status = "revoked"
+                    else:
+                        logger.warning(
+                            "Gmail token revocation was not confirmed (HTTP %s)",
+                            response.status_code,
+                        )
                 except Exception as e:
-                    logger.warning(f"Failed to revoke token: {e}")
+                    logger.warning(
+                        "Gmail token revocation could not be confirmed: %s",
+                        type(e).__name__,
+                    )
 
             self._credentials = None
             self.service = None
@@ -959,10 +991,22 @@ class GmailService:
                 message="Gmail is disconnected.",
                 action_required="connect",
             )
-            return True
+            return GmailDisconnectOutcome(
+                local_credentials_removed=True,
+                remote_revocation_status=remote_revocation_status,
+                safe_reason_code=(
+                    "remote_revocation_unconfirmed"
+                    if remote_revocation_status == "unconfirmed"
+                    else "credentials_removed"
+                ),
+            )
         except Exception as e:
-            logger.error(f"Failed to disconnect: {e}")
-            return False
+            logger.error("Failed to remove Gmail credentials: %s", type(e).__name__)
+            return GmailDisconnectOutcome(
+                local_credentials_removed=False,
+                remote_revocation_status=remote_revocation_status,
+                safe_reason_code="local_credential_removal_failed",
+            )
 
     def fetch_messages(self, history_id: Optional[str] = None, max_results: int = 100,
                        after_date: Optional[str] = None,

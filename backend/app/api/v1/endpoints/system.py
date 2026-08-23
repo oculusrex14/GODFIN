@@ -322,6 +322,10 @@ def download_support_diagnostics(
         "backup_job_failure_code",
         "backup_job_next_retry_at",
         "backup_job_failure_count",
+        "gmail_disconnect_operation_state",
+        "gmail_disconnect_deleted_transactions",
+        "gmail_disconnect_remote_revocation_pending",
+        "gmail_disconnect_updated_at",
     }
     values = {
         setting.key: setting.value
@@ -356,6 +360,22 @@ def download_support_diagnostics(
 
     jobs = job_queue_summary(db)
     readiness = readiness_snapshot(request, db)
+    gmail_health = gmail_service.connection_health().to_dict()
+    try:
+        gmail_deleted_count = max(
+            0,
+            int(values.get("gmail_disconnect_deleted_transactions") or 0),
+        )
+    except (TypeError, ValueError):
+        gmail_deleted_count = 0
+    gmail_health["disconnect_operation"] = {
+        "state": values.get("gmail_disconnect_operation_state") or "none",
+        "deleted_transactions": gmail_deleted_count,
+        "remote_revocation_pending": (
+            values.get("gmail_disconnect_remote_revocation_pending") == "true"
+        ),
+        "updated_at": values.get("gmail_disconnect_updated_at") or None,
+    }
     payload = {
         "schema_version": 2,
         "generated_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
@@ -364,7 +384,7 @@ def download_support_diagnostics(
             "api_status": "operational",
             "build": build_identity(),
         },
-        "gmail": gmail_service.connection_health().to_dict(),
+        "gmail": gmail_health,
         "backup_protection": {
             "status": protection_status,
             "scheduler_status": scheduler_status,

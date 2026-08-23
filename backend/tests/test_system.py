@@ -325,3 +325,31 @@ def test_support_diagnostics_include_backup_health_without_sensitive_state(
     assert "/Users/private/financial/backups" not in serialized
     assert "godfin_backup_private_name.db" not in serialized
     assert "must-never-appear" not in serialized
+
+
+def test_support_diagnostics_include_safe_gmail_disconnect_recovery_state(
+    auth_client,
+    db_session,
+):
+    values = {
+        "gmail_disconnect_operation_state": "data_cleared_credentials_pending",
+        "gmail_disconnect_deleted_transactions": "3",
+        "gmail_disconnect_remote_revocation_pending": "false",
+        "gmail_disconnect_updated_at": "2026-08-24T04:00:00+00:00",
+        "gmail_disconnect_backup_filename": "private-backup-name.db",
+    }
+    for key, value in values.items():
+        db_session.merge(AppSetting(key=key, value=value))
+    db_session.commit()
+
+    response = auth_client.get("/api/v1/system/diagnostics")
+
+    assert response.status_code == 200
+    operation = response.json()["gmail"]["disconnect_operation"]
+    assert operation == {
+        "state": "data_cleared_credentials_pending",
+        "deleted_transactions": 3,
+        "remote_revocation_pending": False,
+        "updated_at": "2026-08-24T04:00:00+00:00",
+    }
+    assert "private-backup-name.db" not in response.text

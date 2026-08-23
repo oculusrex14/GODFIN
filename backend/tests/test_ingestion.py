@@ -475,6 +475,105 @@ def test_gmail_data_deletion_stops_when_safety_backup_fails(
     assert disconnect_calls == []
 
 
+def test_gmail_data_clear_records_partial_state_and_retries_without_redeleting(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    from app.models.app_setting import AppSetting
+    from app.models.transaction import Transaction
+
+    transaction = _source_transaction(
+        db_session,
+        source="gmail",
+        suffix="disconnect-retry",
+    )
+    transaction_id = transaction.id
+    backup_calls = []
+    disconnect_results = iter((False, True))
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.create_backup",
+        lambda *_args: backup_calls.append(True) or "godfin_backup_retry.db",
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: next(disconnect_results),
+    )
+
+    payload = {
+        "clear_data": True,
+        "pin": "4826",
+        "confirmation": "DELETE GMAIL DATA",
+    }
+    first = auth_client.post("/api/v1/auth/gmail/disconnect", json=payload)
+
+    assert first.status_code == 503
+    assert first.json()["code"] == "GMAIL_DATA_CLEARED_CREDENTIALS_PENDING"
+    db_session.expire_all()
+    assert db_session.query(Transaction).filter_by(id=transaction_id).one_or_none() is None
+    assert (
+        db_session.query(AppSetting)
+        .filter_by(key="gmail_disconnect_operation_state")
+        .one()
+        .value
+        == "data_cleared_credentials_pending"
+    )
+
+    retry = auth_client.post("/api/v1/auth/gmail/disconnect", json=payload)
+
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["operation_state"] == "completed"
+    assert retry.json()["deleted_transactions"] == 1
+    assert retry.json()["backup_filename"] == "godfin_backup_retry.db"
+    assert backup_calls == [True]
+    db_session.expire_all()
+    assert (
+        db_session.query(AppSetting)
+        .filter_by(key="gmail_disconnect_operation_state")
+        .one()
+        .value
+        == "completed"
+    )
+
+
+def test_gmail_disconnect_reports_unconfirmed_remote_revocation(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    from app.core.gmail_service import GmailDisconnectOutcome
+    from app.models.app_setting import AppSetting
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: GmailDisconnectOutcome(
+            local_credentials_removed=True,
+            remote_revocation_status="unconfirmed",
+            safe_reason_code="remote_revocation_unconfirmed",
+        ),
+    )
+
+    response = auth_client.post("/api/v1/auth/gmail/disconnect", json={})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["credentials_removed"] is True
+    assert response.json()["remote_revocation_pending"] is True
+    assert response.json()["operation_state"] == (
+        "completed_remote_revocation_unconfirmed"
+    )
+    assert "could not confirm remote permission revocation" in response.json()[
+        "message"
+    ]
+    db_session.expire_all()
+    assert (
+        db_session.query(AppSetting)
+        .filter_by(key="gmail_disconnect_operation_state")
+        .one()
+        .value
+        == "completed_remote_revocation_unconfirmed"
+    )
+
+
 def test_retired_manual_oauth_endpoint_is_absent(auth_client):
     response = auth_client.post(
         "/api/v1/auth/gmail/manual-code",

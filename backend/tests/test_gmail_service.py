@@ -14,6 +14,7 @@ from app.core import gmail_service as gmail_module
 from app.core.encryption import encrypt
 from app.core.gmail_service import (
     GMAIL_READONLY_SCOPE,
+    GmailDisconnectOutcome,
     GmailFetchResult,
     GmailOAuthStateError,
     GmailService,
@@ -67,6 +68,35 @@ class FakeFlow:
 
     def fetch_token(self, **kwargs):
         self.fetch_kwargs = kwargs
+
+
+def test_disconnect_removes_local_credentials_when_remote_revocation_is_unavailable(
+    monkeypatch,
+    tmp_path,
+):
+    token_file = tmp_path / "gmail_token.json"
+    token_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(gmail_module, "TOKEN_FILE", token_file)
+
+    class UnavailableResponse:
+        status_code = 503
+
+    import requests
+
+    monkeypatch.setattr(requests, "post", lambda *_args, **_kwargs: UnavailableResponse())
+    service = GmailService()
+    service._credentials = FakeCredentials()
+    service.service = object()
+
+    outcome = service.disconnect()
+
+    assert isinstance(outcome, GmailDisconnectOutcome)
+    assert outcome.local_credentials_removed is True
+    assert outcome.remote_revocation_pending is True
+    assert outcome.safe_reason_code == "remote_revocation_unconfirmed"
+    assert service._credentials is None
+    assert service.service is None
+    assert not token_file.exists()
 
 
 @pytest.fixture
