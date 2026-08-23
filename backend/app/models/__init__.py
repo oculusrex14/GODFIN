@@ -30,6 +30,7 @@ from app.models.behavior_insight import BehaviorInsightPreference
 from app.models.reward_pilot import RewardPilotSubmission
 from app.models.gmail_oauth_attempt import GmailOAuthAttempt
 from app.models.background_job import BackgroundJob
+from app.models.account_balance import AccountBalanceAnchor, AccountStatementCoverage
 
 __all__ = [
     "Account", "Transaction", "TransactionSplit", "MerchantMemory",
@@ -42,4 +43,5 @@ __all__ = [
     "BehaviorInsightPreference", "RewardPilotSubmission",
     "GmailOAuthAttempt",
     "BackgroundJob",
+    "AccountBalanceAnchor", "AccountStatementCoverage",
 ]

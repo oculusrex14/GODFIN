@@ -270,6 +270,12 @@ def test_import_requires_review_confirmation_and_matching_file(auth_client):
     )
     assert accepted.status_code == 200
     assert accepted.json()["imported"] == 2
+    assert accepted.json()["balance_status"] == "verified"
+    assert accepted.json()["coverage_complete"] is True
+    assert accepted.json()["computed_balance"] == accepted.json()[
+        "statement_closing_balance"
+    ]
+    assert accepted.json()["balance_discrepancy"] == 0
 
 
 def test_legacy_one_step_import_is_retired(auth_client):

@@ -15,6 +15,10 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.entitlements import conditional_entitlement, enforce_feature
 from app.core.auth import get_current_user
+from app.core.account_balances import (
+    balance_at_date,
+    record_verified_statement_controls,
+)
 from app.core.api_errors import APIErrorResponse
 from app.core.audit import FinalizedPeriodError
 from app.core.classifier import classify_transaction
@@ -31,8 +35,6 @@ from app.core.statement_parser import ParsedStatement
 from app.core.transaction_semantics import (
     TransactionSemantic,
     apply_category_semantic,
-    ledger_credit_clause,
-    ledger_debit_clause,
 )
 from app.models.account import Account
 from app.models.income_source import IncomeSource
@@ -78,6 +80,38 @@ def _resolve_account_id(db: Session, statement_type: str, account_id: str = None
     if acct.bank.upper() != "HDFC":
         enforce_feature(db, "multi_bank")
     return acct.id
+
+
+def _statement_balance_snapshot(
+    db: Session,
+    account_id: str,
+    parse_result,
+) -> dict[str, object]:
+    statement_balance = parse_result.closing_balance
+    if parse_result.period_end is None:
+        return {
+            "statement_closing_balance": statement_balance,
+            "computed_balance": None,
+            "balance_discrepancy": None,
+            "balance_status": "unverified_no_anchor",
+            "coverage_complete": False,
+            "missing_ranges": [],
+        }
+    result = balance_at_date(db, account_id, parse_result.period_end)
+    computed = float(result.balance) if result.balance is not None else None
+    discrepancy = (
+        round(float(statement_balance) - computed, 2)
+        if statement_balance is not None and computed is not None
+        else None
+    )
+    return {
+        "statement_closing_balance": statement_balance,
+        "computed_balance": computed,
+        "balance_discrepancy": discrepancy,
+        "balance_status": result.status,
+        "coverage_complete": result.coverage_complete,
+        "missing_ranges": list(result.missing_ranges),
+    }
 
 
 SUPPORTED_EXTENSIONS = ('.pdf', '.xls', '.xlsx')
@@ -393,40 +427,9 @@ async def reconcile_statement_preview(
     recon_result = ReconciliationService.reconcile(db, parsed, resolved_account_id)
     income_txns = ReconciliationService.detect_income_sources(db, parsed)
 
-    # Balance reconciliation
-    statement_closing_balance = None
-    computed_balance = None
-    balance_discrepancy = None
-
-    # Get closing balance from the last transaction in sorted order
-    sorted_txns = sorted(parsed.transactions, key=lambda t: t.date)
-    if sorted_txns and sorted_txns[-1].balance is not None:
-        statement_closing_balance = sorted_txns[-1].balance
-
-        # Compute system balance for this account up to statement period end
-        from sqlalchemy import func as sa_func
-
-        period_end = parse_result.period_end
-        if not period_end and sorted_txns:
-            from datetime import timedelta
-            period_end = sorted_txns[-1].date + timedelta(days=1)
-
-        if period_end:
-            bal_query = db.query(Transaction).filter(
-                Transaction.account_id == resolved_account_id,
-                Transaction.date < period_end,
-                Transaction.status != 'deleted',
-            )
-            credit_sum = bal_query.filter(
-                ledger_credit_clause(Transaction),
-            ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
-
-            debit_sum = bal_query.filter(
-                ledger_debit_clause(Transaction),
-            ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
-
-            computed_balance = round(float(credit_sum) - float(debit_sum), 2)
-            balance_discrepancy = round(statement_closing_balance - computed_balance, 2)
+    balance_snapshot = _statement_balance_snapshot(
+        db, resolved_account_id, parse_result
+    )
 
     return {
         "account_id": resolved_account_id,
@@ -446,9 +449,7 @@ async def reconcile_statement_preview(
         "possible_count": len(recon_result.potential_duplicates),
         "new_count": recon_result.total_new,
         "income_count": len(income_txns),
-        "statement_closing_balance": statement_closing_balance,
-        "computed_balance": computed_balance,
-        "balance_discrepancy": balance_discrepancy,
+        **balance_snapshot,
         "new_transactions": [
             {
                 "date": str(t.date),
@@ -624,40 +625,17 @@ async def import_statement(
                 for t in income_txns
             ]
 
+        if import_new and not recon_result.potential_duplicates:
+            record_verified_statement_controls(
+                db,
+                resolved_account_id,
+                parse_result,
+            )
+
         db.commit()
-
-        # Balance reconciliation
-        statement_closing_balance = None
-        computed_balance = None
-        balance_discrepancy = None
-
-        sorted_txns = sorted(parsed.transactions, key=lambda t: t.date)
-        if sorted_txns and sorted_txns[-1].balance is not None:
-            statement_closing_balance = sorted_txns[-1].balance
-
-            from sqlalchemy import func as sa_func
-
-            period_end = parse_result.period_end
-            if not period_end and sorted_txns:
-                from datetime import timedelta
-                period_end = sorted_txns[-1].date + timedelta(days=1)
-
-            if period_end:
-                bal_query = db.query(Transaction).filter(
-                    Transaction.account_id == resolved_account_id,
-                    Transaction.date < period_end,
-                    Transaction.status != 'deleted',
-                )
-                credit_sum = bal_query.filter(
-                    ledger_credit_clause(Transaction),
-                ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
-
-                debit_sum = bal_query.filter(
-                    ledger_debit_clause(Transaction),
-                ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
-
-                computed_balance = round(float(credit_sum) - float(debit_sum), 2)
-                balance_discrepancy = round(statement_closing_balance - computed_balance, 2)
+        balance_snapshot = _statement_balance_snapshot(
+            db, resolved_account_id, parse_result
+        )
 
         return {
             "statement_type": parse_result.statement_type,
@@ -672,9 +650,7 @@ async def import_statement(
             "errors": [],
             "income_detected": len(income_items),
             "income_items": income_items,
-            "statement_closing_balance": statement_closing_balance,
-            "computed_balance": computed_balance,
-            "balance_discrepancy": balance_discrepancy,
+            **balance_snapshot,
         }
     except FinalizedPeriodError as exc:
         db.rollback()

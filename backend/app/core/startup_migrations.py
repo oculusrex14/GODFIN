@@ -26,7 +26,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 19
+CURRENT_SCHEMA_REVISION = 20
 
 
 class SchemaMigrationError(RuntimeError):
@@ -1814,6 +1814,173 @@ def _validate_revision_19(connection: sqlite3.Connection) -> None:
             )
 
 
+def _apply_revision_20(connection: sqlite3.Connection) -> None:
+    """Add exact balance anchors and verified statement-coverage intervals."""
+    connection.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS account_balance_anchors (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            account_id VARCHAR(36) NOT NULL,
+            as_of_date DATE NOT NULL,
+            boundary_date DATE NOT NULL,
+            balance_minor INTEGER NOT NULL,
+            currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+            anchor_type VARCHAR(32) NOT NULL,
+            source_fingerprint VARCHAR(64) NOT NULL,
+            parser_profile VARCHAR(80) NOT NULL,
+            parser_version VARCHAR(32) NOT NULL,
+            statement_period_start DATE NOT NULL,
+            statement_period_end DATE NOT NULL,
+            verified BOOLEAN NOT NULL DEFAULT 1,
+            conflict BOOLEAN NOT NULL DEFAULT 0,
+            verification_method VARCHAR(100) NOT NULL,
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_account_balance_anchor_source UNIQUE (
+                account_id, source_fingerprint, anchor_type, boundary_date
+            ),
+            CONSTRAINT ck_account_balance_anchor_amount CHECK (
+                balance_minor BETWEEN {-_MAX_MONEY_MINOR} AND {_MAX_MONEY_MINOR}
+            ),
+            CONSTRAINT ck_account_balance_anchor_type CHECK (
+                anchor_type IN (
+                    'statement_opening','statement_closing','manual_verified'
+                )
+            ),
+            CONSTRAINT ck_account_balance_anchor_currency CHECK (
+                length(currency) = 3 AND currency = upper(currency)
+            ),
+            CONSTRAINT ck_account_balance_anchor_trust CHECK (
+                NOT (verified = 1 AND conflict = 1)
+            ),
+            FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS "
+        "ix_account_balance_anchors_account_boundary "
+        "ON account_balance_anchors(account_id, boundary_date)"
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS account_statement_coverages (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            account_id VARCHAR(36) NOT NULL,
+            source_fingerprint VARCHAR(64) NOT NULL,
+            period_start DATE NOT NULL,
+            period_end DATE NOT NULL,
+            parser_profile VARCHAR(80) NOT NULL,
+            parser_version VARCHAR(32) NOT NULL,
+            verified_controls BOOLEAN NOT NULL DEFAULT 1,
+            contains_running_balance BOOLEAN NOT NULL DEFAULT 0,
+            transaction_count INTEGER NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'verified',
+            opening_anchor_id VARCHAR(36),
+            closing_anchor_id VARCHAR(36),
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_account_statement_coverage_source UNIQUE (
+                account_id, source_fingerprint
+            ),
+            CONSTRAINT ck_account_statement_coverage_period CHECK (
+                period_end >= period_start
+            ),
+            CONSTRAINT ck_account_statement_coverage_status CHECK (
+                status IN ('verified','conflict')
+            ),
+            CONSTRAINT ck_account_statement_coverage_transaction_count CHECK (
+                transaction_count >= 0
+            ),
+            FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+            FOREIGN KEY(opening_anchor_id) REFERENCES account_balance_anchors(id)
+                ON DELETE SET NULL,
+            FOREIGN KEY(closing_anchor_id) REFERENCES account_balance_anchors(id)
+                ON DELETE SET NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS "
+        "ix_account_statement_coverages_account_period "
+        "ON account_statement_coverages(account_id, period_start, period_end)"
+    )
+
+
+def _validate_revision_20(connection: sqlite3.Connection) -> None:
+    required = {
+        "account_balance_anchors": {
+            "id",
+            "account_id",
+            "as_of_date",
+            "boundary_date",
+            "balance_minor",
+            "currency",
+            "anchor_type",
+            "source_fingerprint",
+            "parser_profile",
+            "parser_version",
+            "statement_period_start",
+            "statement_period_end",
+            "verified",
+            "conflict",
+            "verification_method",
+            "created_at",
+        },
+        "account_statement_coverages": {
+            "id",
+            "account_id",
+            "source_fingerprint",
+            "period_start",
+            "period_end",
+            "parser_profile",
+            "parser_version",
+            "verified_controls",
+            "contains_running_balance",
+            "transaction_count",
+            "status",
+            "opening_anchor_id",
+            "closing_anchor_id",
+            "created_at",
+        },
+    }
+    for table, columns in required.items():
+        if columns.difference(_table_columns(connection, table)):
+            raise SchemaMigrationError(
+                f"The {table} balance-provenance table is incomplete."
+            )
+
+    index_names = {
+        row[1]
+        for table in required
+        for row in connection.execute(f'PRAGMA index_list("{table}")')
+    }
+    expected_indexes = {
+        "ix_account_balance_anchors_account_boundary",
+        "ix_account_statement_coverages_account_period",
+    }
+    if expected_indexes.difference(index_names):
+        raise SchemaMigrationError(
+            "A required balance-provenance lookup index is missing."
+        )
+
+    invalid_anchors = connection.execute(
+        "SELECT COUNT(*) FROM account_balance_anchors WHERE "
+        f"balance_minor NOT BETWEEN {-_MAX_MONEY_MINOR} AND {_MAX_MONEY_MINOR} "
+        "OR anchor_type NOT IN ("
+        "'statement_opening','statement_closing','manual_verified') "
+        "OR length(currency) <> 3 OR currency <> upper(currency) "
+        "OR (verified = 1 AND conflict = 1)"
+    ).fetchone()[0]
+    invalid_coverages = connection.execute(
+        "SELECT COUNT(*) FROM account_statement_coverages WHERE "
+        "period_end < period_start OR transaction_count < 0 "
+        "OR status NOT IN ('verified','conflict')"
+    ).fetchone()[0]
+    if invalid_anchors or invalid_coverages:
+        raise SchemaMigrationError(
+            "The balance-provenance tables contain invalid rows."
+        )
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -1868,6 +2035,12 @@ MIGRATION_REGISTRY = (
         name="apply_legacy_foreign_key_delete_actions",
         apply=_apply_revision_19,
         validate=_validate_revision_19,
+    ),
+    SchemaMigration(
+        revision=20,
+        name="add_verified_balance_anchors_and_statement_coverage",
+        apply=_apply_revision_20,
+        validate=_validate_revision_20,
     ),
 )
 

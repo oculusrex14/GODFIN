@@ -8,10 +8,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.account_balances import aggregate_balance_at_date
 from app.core.database import get_db
 from app.core.transaction_semantics import (
-    ledger_credit_clause,
-    ledger_debit_clause,
     spending_clause,
     verified_income_clause,
 )
@@ -130,28 +129,27 @@ def dashboard_stats(
         Transaction.category == None,
     ).count()
 
-    # Account balance: all-time credits minus debits up to end of selected month
-    balance_query = db.query(Transaction).filter(
-        Transaction.date < end_date,
-        Transaction.status != "deleted",
-    )
-
-    credits_total = balance_query.filter(
-        ledger_credit_clause(Transaction),
-    ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
-
-    debits_total = balance_query.filter(
-        ledger_debit_clause(Transaction),
-    ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
-
-    account_balance = round(float(credits_total) - float(debits_total), 2)
+    balance = aggregate_balance_at_date(db, end_date - date.resolution)
 
     return DashboardStats(
         month_spend=round(month_spend, 2),
         month_income=round(month_income, 2),
         savings_rate=savings_rate,
         review_queue_count=review_count,
-        account_balance=account_balance,
+        account_balance=(
+            round(float(balance.balance), 2)
+            if balance.balance is not None
+            else None
+        ),
+        account_balance_status=balance.status,
+        account_balance_as_of=balance.as_of.isoformat(),
+        account_balance_anchor_as_of=(
+            balance.anchor_as_of.isoformat() if balance.anchor_as_of else None
+        ),
+        account_balance_coverage_complete=balance.coverage_complete,
+        account_balance_missing_ranges=list(balance.missing_ranges),
+        account_balance_account_count=balance.account_count,
+        account_balance_verified_account_count=balance.verified_account_count,
     )
 
 

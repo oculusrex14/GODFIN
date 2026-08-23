@@ -92,7 +92,8 @@ def test_confirmed_transfer_pair_has_zero_income_spend_and_net_movement(
     assert response.status_code == 200
     assert response.json()["month_income"] == 0
     assert response.json()["month_spend"] == 0
-    assert response.json()["account_balance"] == 0
+    assert response.json()["account_balance"] is None
+    assert response.json()["account_balance_status"] == "unverified_no_anchor"
 
 
 def test_transfer_confirmation_cannot_mutate_a_finalized_period(

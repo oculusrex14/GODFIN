@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.api.v1.entitlements import conditional_entitlement, enforce_feature
 from app.core.account_mapping import load_sender_mappings, save_sender_mappings
 from app.core.auth import get_current_user
+from app.core.account_balances import balance_at_date
 from app.core.database import get_db
 from app.core.errors import InvalidOperationError
 from app.core.parsers import supported_parser_profiles
@@ -78,6 +80,19 @@ class ParserProfileResponse(BaseModel):
     account_type: str
     statement_type: str
     formats: list[str]
+
+
+class AccountBalanceResponse(BaseModel):
+    balance: Optional[float]
+    currency: str
+    as_of: str
+    status: str
+    anchor_as_of: Optional[str]
+    coverage_complete: bool
+    source: Optional[str]
+    missing_ranges: list[str]
+    account_count: int
+    verified_account_count: int
 
 
 def _account_dict(account: Account) -> dict:
@@ -176,6 +191,25 @@ def replace_account_sender_mappings(
         ) from exc
     db.commit()
     return mappings
+
+
+@router.get("/{account_id}/balance", response_model=AccountBalanceResponse)
+def get_account_balance(
+    account_id: str,
+    as_of: date | None = Query(default=None),
+    allow_estimate: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return balance_at_date(
+        db,
+        account_id,
+        as_of or date.today(),
+        allow_estimate=allow_estimate,
+    ).to_dict()
 
 
 @router.post("", response_model=AccountResponse, status_code=201)

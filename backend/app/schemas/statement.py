@@ -102,6 +102,9 @@ class StatementReconcileResponse(BaseModel):
     statement_closing_balance: Optional[float]
     computed_balance: Optional[float]
     balance_discrepancy: Optional[float]
+    balance_status: str
+    coverage_complete: bool
+    missing_ranges: list[str]
     new_transactions: list[ReconciledTransactionSummary]
     potential_duplicates: list[PotentialDuplicateResponse]
     income_detected: list[ReconciledTransactionSummary]
@@ -123,6 +126,9 @@ class StatementImportResponse(BaseModel):
     statement_closing_balance: Optional[float]
     computed_balance: Optional[float]
     balance_discrepancy: Optional[float]
+    balance_status: str
+    coverage_complete: bool
+    missing_ranges: list[str]
 
 
 class IncomeSourceResponse(BaseModel):

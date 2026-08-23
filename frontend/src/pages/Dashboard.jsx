@@ -36,6 +36,19 @@ function formatINR(amount) {
   }).format(amount);
 }
 
+function balanceStatusText(stats) {
+  if (stats?.account_balance_status === 'verified') {
+    return `Verified through ${stats.account_balance_as_of}`;
+  }
+  if (stats?.account_balance_status === 'conflict') {
+    return 'Statement balances need review';
+  }
+  if (stats?.account_balance_status === 'unverified_gap') {
+    return 'Some statement dates are missing';
+  }
+  return 'Import a statement that shows balances';
+}
+
 // Compact INR formatter for axis ticks (shows ₹ symbol)
 function formatINRAbbreviated(v) {
   if (v >= 10000000) return `₹${(v / 10000000).toFixed(1)}Cr`;
@@ -228,9 +241,13 @@ export default function Dashboard() {
             )}
           </div>
           <p className="text-white/90 text-[1.4rem] tracking-tight" style={{ fontWeight: 300 }}>
-            {statsLoading ? '--' : showBalance ? formatINR(stats?.account_balance) : 'Tap to reveal'}
+            {statsLoading ? '--' : showBalance
+              ? stats?.account_balance == null ? 'Unavailable' : formatINR(stats.account_balance)
+              : 'Tap to reveal'}
           </p>
-          {!showBalance && <p className="text-white/30 text-[0.7rem] mt-0.5">Hidden for privacy</p>}
+          <p className="text-white/30 text-[0.7rem] mt-0.5">
+            {showBalance ? balanceStatusText(stats) : 'Hidden for privacy'}
+          </p>
         </motion.div>
         <StatCard
           title="Month Spend"
