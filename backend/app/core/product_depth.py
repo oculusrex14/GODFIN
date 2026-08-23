@@ -330,6 +330,41 @@ def sync_subscription_suggestions(
     return created
 
 
+def subscription_suggestion_scan_summary(db: Session) -> dict[str, int]:
+    """Run the conservative detector and return privacy-safe aggregate reasons."""
+
+    from app.core.recurring import detect_recurring_patterns
+    from app.models.recurring_pattern import RecurringPattern
+
+    detection = detect_recurring_patterns(db)
+    existing_pattern_ids = {
+        row[0]
+        for row in db.query(SubscriptionSuggestion.recurring_pattern_id).all()
+    }
+    active_pattern_ids = {
+        row[0]
+        for row in db.query(RecurringPattern.id)
+        .filter(RecurringPattern.detection_status == "active")
+        .all()
+    }
+    created = sync_subscription_suggestions(db, run_detection=False)
+    return {
+        "transactions_considered": detection.transactions_considered,
+        "merchant_groups_scanned": detection.merchant_groups_scanned,
+        "active_patterns": detection.active_patterns,
+        "candidate_patterns": detection.candidate_patterns,
+        "created_suggestions": created,
+        "updated_patterns": detection.updated,
+        "retired_patterns": detection.retired_patterns,
+        "already_suggested": len(active_pattern_ids & existing_pattern_ids),
+        "insufficient_evidence": detection.insufficient_evidence,
+        "irregular_interval": detection.irregular_interval,
+        "high_amount_variability": detection.high_amount_variability,
+        "missing_merchant_identity": detection.missing_merchant_identity,
+        "excluded_non_spend": detection.excluded_non_spend,
+    }
+
+
 def decide_subscription_suggestion(
     db: Session,
     suggestion: SubscriptionSuggestion,

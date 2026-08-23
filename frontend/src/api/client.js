@@ -854,6 +854,10 @@ export function scanSubscriptionSuggestions() {
   return apiFetch('/subscriptions/suggestions/scan', { method: 'POST' });
 }
 
+export function fetchRecurringCandidates() {
+  return apiFetch('/subscriptions/suggestions/candidates');
+}
+
 export function fetchSubscriptionSuggestions(includeResolved = false) {
   return apiFetch(`/subscriptions/suggestions?include_resolved=${includeResolved}`);
 }

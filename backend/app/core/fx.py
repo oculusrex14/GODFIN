@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import threading
 import time
@@ -10,6 +11,7 @@ from typing import Iterable
 
 import httpx
 
+from app.models.app_setting import AppSetting
 from app.core.time import utcnow_naive
 
 FRANKFURTER_RATES_URL = "https://api.frankfurter.dev/v2/rates"
@@ -18,6 +20,8 @@ SUPPORTED_CURRENCIES = frozenset({"INR", "USD", "EUR", "GBP"})
 CACHE_TTL_SECONDS = 6 * 60 * 60
 STALE_AFTER_DAYS = 4
 MAX_RATE_AGE_DAYS = 10
+FX_REFERENCE_CACHE_KEY = "fx_reference_snapshot_v1"
+MAX_REFERENCE_CACHE_BYTES = 8_192
 
 
 class FxRateUnavailable(RuntimeError):
@@ -256,6 +260,109 @@ def unavailable_fx_metadata(reason: str, currencies: Iterable[str]) -> dict:
         "privacy": "Currency codes only; no amounts or transaction data leave this computer.",
         "unavailable_reason": reason,
     }
+
+
+def store_reference_snapshot(
+    db,
+    snapshot: FxRateSnapshot,
+    *,
+    fetched_at: datetime | None = None,
+) -> None:
+    """Persist only public reference-rate provenance for offline restart use."""
+
+    if snapshot.provider != FX_PROVIDER or snapshot.source_url != FRANKFURTER_RATES_URL:
+        raise FxRateUnavailable("The currency-rate provenance is not trusted.")
+    observed_at = fetched_at or utcnow_naive()
+    payload = json.dumps(
+        {
+            "schema": 1,
+            "rates_to_inr": snapshot.rates_to_inr,
+            "rate_dates": {
+                currency: value.isoformat()
+                for currency, value in (snapshot.rate_dates_to_inr or {}).items()
+            },
+            "as_of": snapshot.as_of.isoformat(),
+            "provider": snapshot.provider,
+            "source_url": snapshot.source_url,
+            "fetched_at": observed_at.isoformat(),
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    if len(payload.encode("utf-8")) > MAX_REFERENCE_CACHE_BYTES:
+        raise FxRateUnavailable("The currency-rate cache is unexpectedly large.")
+    setting = db.query(AppSetting).filter_by(key=FX_REFERENCE_CACHE_KEY).first()
+    if setting:
+        setting.value = payload
+    else:
+        db.add(AppSetting(key=FX_REFERENCE_CACHE_KEY, value=payload))
+    db.flush()
+
+
+def load_reference_snapshot(
+    db,
+    *,
+    today: date | None = None,
+    now: datetime | None = None,
+) -> FxRateSnapshot | None:
+    """Load a bounded, provenance-checked reference snapshot after restart."""
+
+    reference_day = today or date.today()
+    reference_time = now or utcnow_naive()
+    setting = db.query(AppSetting).filter_by(key=FX_REFERENCE_CACHE_KEY).first()
+    if not setting or len(setting.value.encode("utf-8")) > MAX_REFERENCE_CACHE_BYTES:
+        return None
+    try:
+        payload = json.loads(setting.value)
+        if payload.get("schema") != 1:
+            return None
+        if payload.get("provider") != FX_PROVIDER:
+            return None
+        if payload.get("source_url") != FRANKFURTER_RATES_URL:
+            return None
+        as_of = date.fromisoformat(payload["as_of"])
+        fetched_at = datetime.fromisoformat(payload["fetched_at"])
+        raw_rates = payload["rates_to_inr"]
+        if not isinstance(raw_rates, dict):
+            return None
+        rates = {str(key).upper(): float(value) for key, value in raw_rates.items()}
+        if not SUPPORTED_CURRENCIES.issubset(rates):
+            return None
+        if any(
+            currency not in SUPPORTED_CURRENCIES
+            or not math.isfinite(rate)
+            or rate <= 0
+            for currency, rate in rates.items()
+        ):
+            return None
+        if not math.isclose(rates["INR"], 1.0, rel_tol=0, abs_tol=1e-12):
+            return None
+        rate_dates = {
+            str(currency).upper(): date.fromisoformat(str(value))
+            for currency, value in payload.get("rate_dates", {}).items()
+        }
+    except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
+        return None
+    age_days = (reference_day - as_of).days
+    fetched_age_seconds = (reference_time - fetched_at).total_seconds()
+    if age_days < 0 or age_days > MAX_RATE_AGE_DAYS:
+        return None
+    if fetched_age_seconds < -300 or fetched_age_seconds > MAX_RATE_AGE_DAYS * 86_400:
+        return None
+    stale = age_days > STALE_AFTER_DAYS
+    return FxRateSnapshot(
+        rates_to_inr={key: rates[key] for key in sorted(SUPPORTED_CURRENCIES)},
+        as_of=as_of,
+        provider=FX_PROVIDER,
+        source_url=FRANKFURTER_RATES_URL,
+        age_days=age_days,
+        stale=stale,
+        status="stale" if stale else "stored",
+        rate_dates_to_inr={
+            currency: rate_dates.get(currency, as_of)
+            for currency in SUPPORTED_CURRENCIES - {"INR"}
+        },
+    )
 
 
 def clear_subscription_fx(subscription) -> None:

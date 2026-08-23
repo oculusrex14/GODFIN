@@ -237,6 +237,9 @@
     "GET /api/v1/subscriptions/suggestions": {
       "access": "authenticated_free"
     },
+    "GET /api/v1/subscriptions/suggestions/candidates": {
+      "access": "authenticated_free"
+    },
     "GET /api/v1/subscriptions/{sub_id}": {
       "access": "authenticated_free"
     },

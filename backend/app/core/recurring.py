@@ -17,8 +17,8 @@ from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
 from app.core.transaction_semantics import (
     TransactionSemantic,
+    is_spending,
     semantic_type_for,
-    spending_clause,
 )
 
 _EXCLUDED_STATUSES = {"deleted", "reversed", "reversal", "voided"}
@@ -32,6 +32,16 @@ class DetectionSummary:
     updated: int = 0
     deactivated: int = 0
     scanned: int = 0
+    transactions_considered: int = 0
+    merchant_groups_scanned: int = 0
+    active_patterns: int = 0
+    candidate_patterns: int = 0
+    retired_patterns: int = 0
+    insufficient_evidence: int = 0
+    irregular_interval: int = 0
+    high_amount_variability: int = 0
+    missing_merchant_identity: int = 0
+    excluded_non_spend: int = 0
 
     @property
     def detected(self) -> int:
@@ -246,14 +256,8 @@ def detect_recurring_patterns(
 ) -> DetectionSummary:
     requested_keys = set(merchant_keys or [])
     reference_date = as_of or date.today()
-    transaction_query = (
-        db.query(Transaction)
-        .filter(
-            Transaction.status.notin_(_EXCLUDED_STATUSES),
-            spending_clause(Transaction),
-            Transaction.merchant_normalized.isnot(None),
-        )
-    )
+    active_filter = Transaction.status.notin_(_EXCLUDED_STATUSES)
+    transaction_query = db.query(Transaction).filter(active_filter)
     if requested_keys:
         transaction_query = transaction_query.filter(
             or_(
@@ -266,7 +270,7 @@ def detect_recurring_patterns(
                 ]
             )
         )
-    transactions = (
+    active_transactions = (
         transaction_query.order_by(
             Transaction.merchant_normalized,
             Transaction.account_id,
@@ -275,6 +279,14 @@ def detect_recurring_patterns(
         )
         .all()
     )
+    spending_transactions = [
+        transaction for transaction in active_transactions if is_spending(transaction)
+    ]
+    transactions = [
+        transaction
+        for transaction in spending_transactions
+        if transaction.merchant_normalized is not None
+    ]
     grouped: dict[tuple[str, str | None], list[Transaction]] = {}
     for transaction in transactions:
         if _is_reversal(transaction):
@@ -289,7 +301,18 @@ def detect_recurring_patterns(
     if requested_keys:
         scanned_keys |= requested_keys
 
-    summary = DetectionSummary(scanned=len(scanned_keys))
+    summary = DetectionSummary(
+        scanned=len(scanned_keys),
+        transactions_considered=len(transactions),
+        merchant_groups_scanned=(
+            len(requested_keys) if requested_keys else len(grouped)
+        ),
+        insufficient_evidence=sum(
+            1 for values in grouped.values() if len(values) < 2
+        ),
+        missing_merchant_identity=len(spending_transactions) - len(transactions),
+        excluded_non_spend=len(active_transactions) - len(spending_transactions),
+    )
     supported_pattern_ids: set[str] = set()
     existing_query = db.query(RecurringPattern)
     if requested_keys:
@@ -317,6 +340,7 @@ def detect_recurring_patterns(
         analysis = _analyze_pattern(txns)
         existing = existing_by_key.get((merchant, account_id))
         if analysis is None:
+            summary.irregular_interval += 1
             if existing and existing.detection_status in {"active", "candidate"}:
                 was_active = existing.is_active
                 existing.is_active = False
@@ -325,9 +349,13 @@ def detect_recurring_patterns(
                 existing.detection_version = DETECTION_VERSION
                 existing.evidence_transaction_ids_json = "[]"
                 existing.evidence_count = 0
+                summary.retired_patterns += 1
                 if was_active:
                     summary.deactivated += 1
             continue
+
+        if analysis.amount_variability > 0.5:
+            summary.high_amount_variability += 1
 
         last_date = txns[-1].date
         stale = _is_stale(
@@ -335,6 +363,11 @@ def detect_recurring_patterns(
             analysis.frequency,
             as_of=reference_date,
         )
+        if not stale:
+            if analysis.is_active:
+                summary.active_patterns += 1
+            else:
+                summary.candidate_patterns += 1
         if stale and existing is None:
             continue
         category = next(
@@ -382,6 +415,8 @@ def detect_recurring_patterns(
             if not stale:
                 supported_pattern_ids.add(existing.id)
             if stale:
+                if was_supported:
+                    summary.retired_patterns += 1
                 if was_active:
                     summary.deactivated += 1
             elif was_supported:
@@ -430,6 +465,7 @@ def detect_recurring_patterns(
             stale.evidence_count = 0
             stale.evidence_transaction_ids_json = "[]"
             stale.detection_version = DETECTION_VERSION
+            summary.retired_patterns += 1
 
     db.flush()
     return summary

@@ -434,7 +434,7 @@ def test_explicit_rate_refresh_persists_current_rates(
     db_session.add(subscription)
     db_session.commit()
     snapshot = FxRateSnapshot(
-        rates_to_inr={"INR": 1.0, "USD": 81.25},
+        rates_to_inr={"INR": 1.0, "USD": 81.25, "EUR": 95.5, "GBP": 110.75},
         as_of=date.today(),
         provider="European Central Bank reference rates via Frankfurter",
         source_url="https://api.frankfurter.dev/v2/rates",
@@ -454,6 +454,107 @@ def test_explicit_rate_refresh_persists_current_rates(
     db_session.refresh(subscription)
     assert float(subscription.fx_rate_to_inr) == 81.25
     assert subscription.fx_rate_as_of == date.today()
+
+
+def test_reference_fx_is_complete_without_foreign_subscriptions_and_survives_restart(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    from app.api.v1.endpoints import subscriptions as endpoint
+    from app.core import fx
+    from app.core.fx import FxRateSnapshot, FxRateUnavailable
+    from app.models.app_setting import AppSetting
+
+    requested: list[set[str]] = []
+    snapshot = FxRateSnapshot(
+        rates_to_inr={"INR": 1.0, "USD": 81.25, "EUR": 95.5, "GBP": 110.75},
+        rate_dates_to_inr={
+            "USD": date.today(),
+            "EUR": date.today(),
+            "GBP": date.today(),
+        },
+        as_of=date.today(),
+        provider=fx.FX_PROVIDER,
+        source_url=fx.FRANKFURTER_RATES_URL,
+        age_days=0,
+        stale=False,
+        status="available",
+    )
+
+    async def verified_rates(currencies, **_kwargs):
+        requested.append(set(currencies))
+        return snapshot
+
+    monkeypatch.setattr(endpoint, "_fetch_exchange_rates", verified_rates)
+    response = auth_client.post("/api/v1/subscriptions/exchange-rates/refresh")
+
+    assert response.status_code == 200, response.text
+    assert requested == [set(fx.SUPPORTED_CURRENCIES)]
+    assert response.json()["updated"] == 0
+    assert response.json()["fx"]["status"] == "available"
+    assert db_session.query(AppSetting).filter_by(key=fx.FX_REFERENCE_CACHE_KEY).one()
+
+    current = auth_client.get("/api/v1/subscriptions/exchange-rates")
+    assert current.status_code == 200, current.text
+    assert current.json()["rates"] == {
+        "EUR": 95.5,
+        "GBP": 110.75,
+        "INR": 1.0,
+        "USD": 81.25,
+    }
+
+    fx.clear_fx_cache()
+
+    async def unavailable(_currencies, **_kwargs):
+        raise FxRateUnavailable("offline")
+
+    monkeypatch.setattr(endpoint, "_fetch_exchange_rates", unavailable)
+    restored = auth_client.get("/api/v1/subscriptions/exchange-rates")
+
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["rates"]["USD"] == 81.25
+    assert restored.json()["fx"]["status"] == "stored"
+
+
+@pytest.mark.parametrize("mode", ["tampered", "expired", "future"])
+def test_untrusted_reference_fx_cache_fails_closed(db_session, mode):
+    from app.core import fx
+    from app.core.fx import FxRateSnapshot
+    from app.models.app_setting import AppSetting
+
+    reference_day = date(2026, 8, 24)
+    as_of = reference_day
+    fetched_at = datetime(2026, 8, 24, 8, 0)
+    if mode == "expired":
+        as_of = reference_day - timedelta(days=11)
+        fetched_at -= timedelta(days=11)
+    elif mode == "future":
+        as_of = reference_day + timedelta(days=1)
+
+    snapshot = FxRateSnapshot(
+        rates_to_inr={"INR": 1.0, "USD": 81.25, "EUR": 95.5, "GBP": 110.75},
+        as_of=as_of,
+        provider=fx.FX_PROVIDER,
+        source_url=fx.FRANKFURTER_RATES_URL,
+        age_days=0,
+        stale=False,
+        status="available",
+    )
+    fx.store_reference_snapshot(db_session, snapshot, fetched_at=fetched_at)
+    db_session.commit()
+    if mode == "tampered":
+        setting = db_session.query(AppSetting).filter_by(
+            key=fx.FX_REFERENCE_CACHE_KEY
+        ).one()
+        setting.value = setting.value.replace(fx.FX_PROVIDER, "Untrusted provider")
+        db_session.commit()
+
+    assert fx.load_reference_snapshot(
+        db_session,
+        today=reference_day,
+        now=datetime(2026, 8, 24, 9, 0),
+    ) is None
 
 
 def test_incomplete_persisted_rate_provenance_is_never_used():

@@ -9,8 +9,8 @@ import {
 import {
   fetchSubscriptions, createSubscription, updateSubscription, deleteSubscription,
   fetchSubscriptionStats, fetchSubscriptionSuggestions, scanSubscriptionSuggestions,
-  decideSubscriptionSuggestion, fetchSubscriptionReminders, refreshExchangeRates,
-  restoreSubscription,
+  decideSubscriptionSuggestion, fetchSubscriptionReminders, fetchExchangeRates,
+  fetchRecurringCandidates, refreshExchangeRates, restoreSubscription,
 } from '../api/client';
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
@@ -45,6 +45,7 @@ export default function Subscriptions() {
   const { addToast: showToast } = useToast();
   const [addOpen, setAddOpen] = useState(false);
   const [editSub, setEditSub] = useState(null);
+  const [scanSummary, setScanSummary] = useState(null);
   const [recentDeletion, setRecentDeletion] = useState(null);
   const undoRef = useRef(null);
   const { confirm, ConfirmDialog: ConfirmDialogComponent } = useConfirm();
@@ -70,6 +71,16 @@ export default function Subscriptions() {
     queryFn: () => fetchSubscriptionSuggestions(false),
   });
 
+  const { data: recurringCandidates = [] } = useQuery({
+    queryKey: ['recurringCandidates'],
+    queryFn: fetchRecurringCandidates,
+  });
+
+  const { data: fxReference, isLoading: fxLoading } = useQuery({
+    queryKey: ['referenceFx'],
+    queryFn: fetchExchangeRates,
+  });
+
   const { data: reminderData } = useQuery({
     queryKey: ['subscriptionReminders'],
     queryFn: () => fetchSubscriptionReminders(7),
@@ -79,11 +90,23 @@ export default function Subscriptions() {
     queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
     queryClient.invalidateQueries({ queryKey: ['subscriptionStats'] });
     queryClient.invalidateQueries({ queryKey: ['subscriptionReminders'] });
+    queryClient.invalidateQueries({ queryKey: ['referenceFx'] });
   };
 
   const scanMutation = useMutation({
     mutationFn: scanSubscriptionSuggestions,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['subscriptionSuggestions'] }),
+    onSuccess: (result) => {
+      setScanSummary(result);
+      queryClient.invalidateQueries({ queryKey: ['subscriptionSuggestions'] });
+      queryClient.invalidateQueries({ queryKey: ['recurringCandidates'] });
+      if (result.created_suggestions > 0) {
+        showToast(`Found ${result.created_suggestions} subscription${result.created_suggestions === 1 ? '' : 's'} for you to review.`);
+      } else if (result.candidate_patterns > 0) {
+        showToast(`Found ${result.candidate_patterns} possible recurring payment${result.candidate_patterns === 1 ? '' : 's'} that need more evidence.`, 'info');
+      } else {
+        showToast(`No recurring pattern found in ${result.transactions_considered} eligible transaction${result.transactions_considered === 1 ? '' : 's'}.`, 'info');
+      }
+    },
   });
 
   const rateRefreshMutation = useMutation({
@@ -91,11 +114,11 @@ export default function Subscriptions() {
     onSuccess: (result) => {
       invalidate();
       if (result?.fx?.status === 'unavailable') {
-        showToast('Could not refresh rates while offline. Saved rates remain unchanged.', 'error');
-      } else if (result?.fx?.status === 'not_required') {
-        showToast('No foreign-currency subscriptions need rates');
+        showToast('Live reference rates are unavailable, so GODFIN did not estimate them.', 'error');
+      } else if (result?.fx?.status === 'stored' || result?.fx?.status === 'stale') {
+        showToast('Could not reach the rate provider. The last verified reference rates are still shown.', 'info');
       } else {
-        showToast(`Saved verified rates for ${result?.updated || 0} subscription${result?.updated === 1 ? '' : 's'}`);
+        showToast('Reference rates refreshed and saved on this computer.');
       }
     },
     onError: (err) => showToast(err?.message || 'Could not refresh currency rates', 'error'),
@@ -185,16 +208,29 @@ export default function Subscriptions() {
   const activeSubs = subs.filter(s => s.is_active);
   const inactiveSubs = subs.filter(s => !s.is_active);
 
-  // Get exchange rates from stats response
-  const exchangeRates = stats?.exchange_rates || {};
+  const exchangeRates = fxReference?.rates || {};
   const usdRate = exchangeRates.USD;
-  const fx = stats?.fx;
+  const fx = fxReference?.fx;
   const rateSummary = [
     usdRate ? `$1 = ${formatINR(usdRate)}` : null,
     exchangeRates.EUR ? `€1 = ${formatINR(exchangeRates.EUR)}` : null,
     exchangeRates.GBP ? `£1 = ${formatINR(exchangeRates.GBP)}` : null,
   ].filter(Boolean).join(' · ');
-  const rateWarning = fx?.status === 'unavailable' || fx?.stale;
+  const rateWarning = !fx || fx?.status === 'unavailable' || fx?.stale;
+
+  const addCandidate = (candidate) => {
+    setForm({
+      name: candidate.merchant,
+      amount: String(candidate.avg_amount),
+      currency: 'INR',
+      frequency: candidate.frequency,
+      category: candidate.category || '',
+      subcategory: '',
+      next_payment_date: candidate.next_expected || '',
+      notes: `Possible recurring payment based on ${candidate.evidence_count} transactions.`,
+    });
+    setAddOpen(true);
+  };
 
   return (
     <div>
@@ -243,43 +279,53 @@ export default function Subscriptions() {
         </motion.div>
       )}
 
-      {/* Exchange Rate Banner */}
-      {fx && fx.status !== 'not_required' && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.07 }}
-          className={`flex items-start gap-2 mb-4 px-4 py-2 rounded-[12px] border ${
-            rateWarning
-              ? 'bg-amber-400/[0.06] border-amber-400/[0.12]'
-              : 'bg-blue-400/[0.06] border-blue-400/[0.1]'
-          }`}
-        >
-          <ArrowRightLeft size={13} className={rateWarning ? 'mt-0.5 text-amber-200/60' : 'mt-0.5 text-blue-400/60'} />
-          {fx?.status === 'unavailable' ? (
-            <span className="flex-1 text-amber-100/50 text-[0.7rem] leading-relaxed">
-              Currency conversion is temporarily unavailable. INR totals are hidden instead of estimated. {fx.unavailable_reason}
-            </span>
-          ) : (
-            <span className={`flex-1 text-[0.7rem] leading-relaxed ${rateWarning ? 'text-amber-100/50' : 'text-white/40'}`}>
-              {fx.status === 'stored' ? 'Saved verified rates' : 'Verified reference rates'}{rateSummary && `: ${rateSummary}`}
-              {fx?.as_of && <> · As of {fx.as_of}</>}
-              {fx?.provider && <> · {fx.provider}</>}
-              {fx?.stale && <> · Older rate—refresh when online</>}
-            </span>
-          )}
+      {/* Reference rates are useful even before a foreign subscription exists. */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.07 }}
+        className={`mb-4 rounded-[16px] border px-4 py-3 ${
+          rateWarning
+            ? 'bg-amber-400/[0.06] border-amber-400/[0.12]'
+            : 'bg-blue-400/[0.06] border-blue-400/[0.1]'
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          <ArrowRightLeft size={14} className={rateWarning ? 'mt-0.5 text-amber-200/60' : 'mt-0.5 text-blue-400/60'} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[0.72rem] font-medium uppercase tracking-wider text-white/55">Reference FX</div>
+            {fxLoading ? (
+              <p className="mt-1 text-[0.7rem] text-white/35">Checking verified USD, EUR, and GBP reference rates…</p>
+            ) : fx?.status === 'unavailable' || !fx ? (
+              <p className="mt-1 text-[0.7rem] leading-relaxed text-amber-100/50">
+                Currency reference rates are temporarily unavailable. GODFIN hides converted totals instead of guessing.
+              </p>
+            ) : (
+              <>
+                <p className={`mt-1 text-[0.72rem] leading-relaxed ${rateWarning ? 'text-amber-100/55' : 'text-white/50'}`}>
+                  {rateSummary || 'No reference rates returned'}
+                </p>
+                <p className="mt-1 text-[0.64rem] leading-relaxed text-white/30">
+                  {fx.status === 'stored' ? 'Last verified and saved on this computer' : fx.status === 'stale' ? 'Saved rate is older—refresh when online' : 'Live verified reference'}
+                  {fx.as_of && ` · As of ${fx.as_of}`}
+                  {fx.provider && ` · ${fx.provider}`}
+                </p>
+              </>
+            )}
+            <p className="mt-1 text-[0.62rem] text-white/25">Only currency codes are sent to the public rate provider; no financial records leave GODFIN.</p>
+          </div>
           <button
             type="button"
-            aria-label="Refresh currency rates"
+            aria-label="Refresh reference currency rates"
             onClick={() => rateRefreshMutation.mutate()}
             disabled={rateRefreshMutation.isPending}
             className="min-h-9 shrink-0 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2.5 text-[0.68rem] text-white/45 transition hover:bg-white/[0.08] hover:text-white/70 disabled:opacity-40"
           >
             <RefreshCw size={12} className={`mr-1 inline ${rateRefreshMutation.isPending ? 'animate-spin' : ''}`} />
-            Refresh rates
+            Refresh
           </button>
-        </motion.div>
-      )}
+        </div>
+      </motion.div>
 
       {/* Upcoming reminders */}
       {reminderData?.reminders?.length > 0 && (
@@ -318,6 +364,19 @@ export default function Subscriptions() {
             Detect
           </button>
         </div>
+        {scanSummary && (
+          <div role="status" className="mb-3 rounded-[14px] border border-cyan-300/10 bg-cyan-300/[0.04] px-4 py-3 text-xs leading-relaxed text-white/40">
+            Checked {scanSummary.transactions_considered} eligible transaction{scanSummary.transactions_considered === 1 ? '' : 's'} across {scanSummary.merchant_groups_scanned} merchant group{scanSummary.merchant_groups_scanned === 1 ? '' : 's'}.{' '}
+            {scanSummary.created_suggestions > 0
+              ? `${scanSummary.created_suggestions} new subscription review ${scanSummary.created_suggestions === 1 ? 'item was' : 'items were'} created.`
+              : scanSummary.candidate_patterns > 0
+                ? `${scanSummary.candidate_patterns} possible recurring ${scanSummary.candidate_patterns === 1 ? 'payment needs' : 'payments need'} more evidence.`
+                : 'No supported recurring payment pattern was found.'}
+            {(scanSummary.excluded_non_spend > 0 || scanSummary.insufficient_evidence > 0) && (
+              <> {scanSummary.excluded_non_spend} non-spend row{scanSummary.excluded_non_spend === 1 ? ' was' : 's were'} excluded; {scanSummary.insufficient_evidence} group{scanSummary.insufficient_evidence === 1 ? ' had' : 's had'} too little evidence.</>
+            )}
+          </div>
+        )}
         {suggestions.length === 0 ? (
           <div className="rounded-[16px] bg-white/[0.04] border border-white/[0.09] p-4 text-white/30 text-sm">
             No detected subscriptions need review.
@@ -358,6 +417,32 @@ export default function Subscriptions() {
           </div>
         )}
       </motion.div>
+
+      {recurringCandidates.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+          <h2 className="mb-3 text-[0.7rem] uppercase tracking-wider text-white/40">Possible recurring payments</h2>
+          <p className="mb-3 text-xs leading-relaxed text-white/30">These look regular but do not yet have enough evidence to become subscriptions automatically. Nothing is added unless you choose it.</p>
+          <div className="space-y-2">
+            {recurringCandidates.map(candidate => (
+              <div key={candidate.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[16px] border border-amber-300/[0.12] bg-amber-300/[0.04] p-4">
+                <div>
+                  <div className="text-sm text-white/65">{candidate.merchant}</div>
+                  <div className="mt-1 text-xs text-white/30">
+                    {formatINR(candidate.avg_amount)} · {FREQUENCY_LABELS[candidate.frequency] || candidate.frequency} · {candidate.evidence_count} payments · {candidate.amount_behavior} amount
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => addCandidate(candidate)}
+                  className="min-h-11 rounded-xl border border-amber-200/20 bg-amber-200/[0.06] px-3 text-xs text-amber-100/70 hover:bg-amber-200/[0.1]"
+                >
+                  Add manually
+                </button>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       {/* Category Breakdown */}
       {stats?.by_category && Object.keys(stats.by_category).length > 0 && (

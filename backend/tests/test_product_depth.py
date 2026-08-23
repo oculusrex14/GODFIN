@@ -205,6 +205,45 @@ def test_subscription_confirmation_and_reminder(auth_client, db_session):
     assert response.json()["reminders"][0]["days_until"] == 3
 
 
+def test_subscription_scan_explains_candidates_without_auto_creating_them(
+    auth_client,
+    db_session,
+):
+    account = db_session.query(Account).first()
+    today = date.today()
+    for offset in (31, 0):
+        _transaction(
+            db_session,
+            account_id=account.id,
+            txn_date=today - timedelta(days=offset),
+            amount=749,
+            txn_type="debit",
+            merchant="Possible Stream",
+        )
+    db_session.commit()
+
+    response = auth_client.post("/api/v1/subscriptions/suggestions/scan")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["transactions_considered"] >= 2
+    assert payload["merchant_groups_scanned"] >= 1
+    assert payload["candidate_patterns"] >= 1
+    assert payload["created_suggestions"] == 0
+
+    candidates = auth_client.get(
+        "/api/v1/subscriptions/suggestions/candidates"
+    )
+    assert candidates.status_code == 200, candidates.text
+    candidate = next(
+        item for item in candidates.json() if item["merchant"] == "POSSIBLE STREAM"
+    )
+    assert candidate["evidence_count"] == 2
+    assert candidate["amount_behavior"] == "fixed"
+    assert candidate["recurring_kind"] == "subscription_candidate"
+    assert db_session.query(Subscription).filter_by(name="Possible Stream").first() is None
+
+
 def test_financial_year_export_csv_and_json(auth_client, db_session):
     _activate_pro(db_session)
     account = db_session.query(Account).first()

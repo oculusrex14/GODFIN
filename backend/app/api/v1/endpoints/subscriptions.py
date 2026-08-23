@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import date
 from typing import Any, List, Literal, Optional
@@ -20,17 +21,21 @@ from app.core.fx import (
     apply_snapshot_to_subscription,
     clear_subscription_fx,
     get_inr_rates,
+    load_reference_snapshot,
     saved_subscription_snapshot,
+    store_reference_snapshot,
     unavailable_fx_metadata,
 )
 from app.core.product_depth import (
     decide_subscription_suggestion,
-    sync_subscription_suggestions,
+    subscription_suggestion_scan_summary,
     upcoming_subscription_reminders,
 )
 from app.core.time import utcnow_naive
 from app.models.subscription import Subscription
+from app.models.recurring_pattern import RecurringPattern
 from app.models.subscription_suggestion import SubscriptionSuggestion
+from app.models.transaction import Transaction
 from app.schemas.financial import (
     PositiveMoney,
     SubscriptionDecision,
@@ -185,7 +190,38 @@ class SubscriptionSuggestionResponse(BaseModel):
 
 
 class SubscriptionSuggestionScanResponse(BaseModel):
-    created: int
+    transactions_considered: int
+    merchant_groups_scanned: int
+    active_patterns: int
+    candidate_patterns: int
+    created_suggestions: int
+    updated_patterns: int
+    retired_patterns: int
+    already_suggested: int
+    insufficient_evidence: int
+    irregular_interval: int
+    high_amount_variability: int
+    missing_merchant_identity: int
+    excluded_non_spend: int
+
+
+class RecurringCandidateResponse(BaseModel):
+    id: str
+    merchant: str
+    avg_amount: float
+    frequency: str
+    category: str | None
+    confidence: float
+    evidence_count: int
+    next_expected: str | None
+    amount_behavior: Literal["fixed", "variable"]
+    recurring_kind: Literal[
+        "subscription_candidate",
+        "emi",
+        "investment",
+        "insurance",
+    ]
+    payment_rail: str | None
 
 
 class SubscriptionSuggestionDecisionResponse(BaseModel):
@@ -224,6 +260,54 @@ def _suggestion_response(suggestion: SubscriptionSuggestion) -> dict:
             suggestion.snoozed_until.isoformat() if suggestion.snoozed_until else None
         ),
         "confirmed_subscription_id": suggestion.confirmed_subscription_id,
+    }
+
+
+def _recurring_kind(pattern: RecurringPattern) -> str:
+    evidence = f"{pattern.merchant_normalized} {pattern.category or ''}".upper()
+    if any(term in evidence for term in ("EMI", "LOAN")):
+        return "emi"
+    if any(term in evidence for term in ("SIP", "MUTUAL FUND", "INVEST")):
+        return "investment"
+    if any(term in evidence for term in ("INSURANCE", "PREMIUM")):
+        return "insurance"
+    return "subscription_candidate"
+
+
+def _candidate_response(db: Session, pattern: RecurringPattern) -> dict:
+    try:
+        transaction_ids = json.loads(pattern.evidence_transaction_ids_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        transaction_ids = []
+    rails = [
+        row[0]
+        for row in db.query(Transaction.instrument)
+        .filter(
+            Transaction.id.in_(transaction_ids[:100]),
+            Transaction.instrument.isnot(None),
+        )
+        .all()
+        if row[0]
+    ]
+    payment_rail = None
+    if rails:
+        payment_rail = max(sorted(set(rails)), key=rails.count)
+    return {
+        "id": pattern.id,
+        "merchant": pattern.merchant_normalized,
+        "avg_amount": float(pattern.avg_amount),
+        "frequency": pattern.frequency,
+        "category": pattern.category,
+        "confidence": pattern.confidence,
+        "evidence_count": pattern.evidence_count,
+        "next_expected": (
+            pattern.next_expected.isoformat() if pattern.next_expected else None
+        ),
+        "amount_behavior": (
+            "fixed" if (pattern.amount_variability or 0) <= 0.05 else "variable"
+        ),
+        "recurring_kind": _recurring_kind(pattern),
+        "payment_rail": payment_rail,
     }
 
 
@@ -380,19 +464,26 @@ async def get_subscription_stats(
 
 @router.get("/exchange-rates", response_model=ExchangeRatesResponse)
 async def get_exchange_rates(
+    db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Return verified current exchange rates and their provenance."""
-    snapshot, fx_metadata = await _resolve_exchange_rates(set(SUPPORTED_CURRENCIES))
-    return {
-        "rates": (
-            {
-                currency: round(rate, 6)
-                for currency, rate in snapshot.rates_to_inr.items()
+    """Return a complete, restart-persistent public reference-rate snapshot."""
+    currencies = set(SUPPORTED_CURRENCIES)
+    try:
+        snapshot = await _fetch_exchange_rates(currencies)
+    except FxRateUnavailable:
+        snapshot = load_reference_snapshot(db)
+        if snapshot is None:
+            return {
+                "rates": {},
+                "fx": unavailable_fx_metadata(_FX_UNAVAILABLE_MESSAGE, currencies),
             }
-            if snapshot is not None
-            else {}
-        ),
+    fx_metadata = snapshot.metadata(currencies)
+    return {
+        "rates": {
+            currency: round(rate, 6)
+            for currency, rate in snapshot.rates_to_inr.items()
+        },
         "fx": fx_metadata,
     }
 
@@ -414,17 +505,18 @@ async def refresh_exchange_rates(
         )
         .all()
     )
-    currencies = {(item.currency or "INR").upper() for item in subscriptions}
-    if not currencies:
-        snapshot = get_inr_rates({"INR"})
-        return {"updated": 0, "fx": snapshot.metadata({"INR"})}
+    currencies = set(SUPPORTED_CURRENCIES)
     try:
         snapshot = await _fetch_exchange_rates(currencies, force_refresh=True)
     except FxRateUnavailable:
+        stored = load_reference_snapshot(db)
+        if stored is not None:
+            return {"updated": 0, "fx": stored.metadata(currencies)}
         return {
             "updated": 0,
             "fx": unavailable_fx_metadata(_FX_UNAVAILABLE_MESSAGE, currencies),
         }
+    store_reference_snapshot(db, snapshot)
     for item in subscriptions:
         apply_snapshot_to_subscription(item, snapshot)
     db.commit()
@@ -439,9 +531,30 @@ def scan_subscription_suggestions(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    created = sync_subscription_suggestions(db)
+    summary = subscription_suggestion_scan_summary(db)
     db.commit()
-    return {"created": created}
+    return summary
+
+
+@router.get(
+    "/suggestions/candidates",
+    response_model=list[RecurringCandidateResponse],
+)
+def list_recurring_candidates(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    patterns = (
+        db.query(RecurringPattern)
+        .filter(RecurringPattern.detection_status == "candidate")
+        .order_by(
+            RecurringPattern.confidence.desc(),
+            RecurringPattern.evidence_count.desc(),
+        )
+        .limit(100)
+        .all()
+    )
+    return [_candidate_response(db, pattern) for pattern in patterns]
 
 
 @router.get("/suggestions", response_model=list[SubscriptionSuggestionResponse])
