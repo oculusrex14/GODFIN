@@ -313,12 +313,32 @@ def gmail_oauth_callback(
         )
     except GmailError as exc:
         logger.warning("Gmail OAuth callback rejected: %s", exc.code)
+        stale_attempt = exc.code in {
+            "expired_state",
+            "initiating_session_expired",
+            "invalid_state",
+            "missing_state",
+            "replayed_state",
+        }
+        heading = (
+            "This Gmail approval link cannot be used"
+            if stale_attempt
+            else "Gmail could not be connected"
+        )
+        explanation = (
+            "Approval links work once and expire after ten minutes. Close this "
+            "tab, unlock GODFIN, then open Settings, expand Gmail Integration, "
+            "and choose Connect Gmail to start a fresh approval."
+            if stale_attempt
+            else "Close this tab, return to GODFIN, and start a fresh Gmail "
+            "connection. No email was imported by this attempt."
+        )
         return HTMLResponse(
             content=(
                 "<!doctype html><title>GODFIN Gmail connection</title>"
                 "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
-                "<h1>Gmail could not be connected</h1>"
-                "<p>Return to GODFIN and try again. No email was imported.</p></main>"
+                f"<h1>{heading}</h1>"
+                f"<p>{explanation}</p></main>"
             ),
             status_code=400,
         )

@@ -867,16 +867,17 @@ function GmailSettings() {
                 </p>
                 <button
                   onClick={() => {
-                    if (oauthUrl) {
-                      openExternalUrl(oauthUrl);
-                      setAwaitingOAuth(true);
-                    }
+                    authUrlMutation.mutate();
                   }}
-                  disabled={!oauthUrl}
+                  disabled={authUrlMutation.isPending}
                   className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <ExternalLink className="h-4 w-4" />
-                  Open OAuth Page
+                  {authUrlMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Start a fresh approval
                 </button>
               </div>
             </div>

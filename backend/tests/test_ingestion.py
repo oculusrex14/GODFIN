@@ -4,7 +4,7 @@ from datetime import date
 
 from sqlalchemy.exc import IntegrityError
 
-from app.core.gmail_service import GmailFetchResult
+from app.core.gmail_service import GmailFetchResult, GmailOAuthStateError
 from app.core.ingestion import (
     IngestionResult,
     _process_message_with_savepoint,
@@ -572,6 +572,33 @@ def test_gmail_disconnect_reports_unconfirmed_remote_revocation(
         .value
         == "completed_remote_revocation_unconfirmed"
     )
+
+
+def test_gmail_callback_explains_single_use_state_recovery(
+    auth_client,
+    monkeypatch,
+):
+    def reject_replayed_attempt(*_args, **_kwargs):
+        raise GmailOAuthStateError(
+            "This Gmail approval was already used.",
+            code="replayed_state",
+        )
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.complete_auth",
+        reject_replayed_attempt,
+    )
+
+    response = auth_client.get(
+        "/api/v1/auth/gmail/callback"
+        "?code=provider-code&state=one-time-state-is-long-enough",
+    )
+
+    assert response.status_code == 400
+    assert "text/html" in response.headers["content-type"]
+    assert "approval link cannot be used" in response.text
+    assert "work once" in response.text
+    assert "Connect Gmail" in response.text
 
 
 def test_retired_manual_oauth_endpoint_is_absent(auth_client):

@@ -39,6 +39,7 @@ _DEVELOPMENT_ORIGINS = (
 )
 _PACKAGED_ORIGIN = "godfin://app"
 _ALLOWED_BROWSER_PORTS = {5173, 5200}
+_GMAIL_OAUTH_START_PATH = "/api/v1/auth/gmail/url"
 _GMAIL_OAUTH_CALLBACK_PATH = "/api/v1/auth/gmail/callback"
 
 
@@ -198,22 +199,39 @@ class LocalApiTrustMiddleware:
 
     async def _reject(self, scope, receive, send, *, code: str, message: str) -> None:
         request_id = new_request_id()
+        request_path = scope.get("path")
         if (
             code == "MISSING_LAUNCH_TRUST"
             and scope.get("method") == "GET"
-            and scope.get("path") == _GMAIL_OAUTH_CALLBACK_PATH
+            and request_path in {
+                _GMAIL_OAUTH_START_PATH,
+                _GMAIL_OAUTH_CALLBACK_PATH,
+            }
         ):
+            direct_start = request_path == _GMAIL_OAUTH_START_PATH
+            heading = (
+                "Start Gmail from the GODFIN app"
+                if direct_start
+                else "This Gmail approval link is no longer active"
+            )
+            explanation = (
+                "For your security, a web browser cannot start Gmail access "
+                "by itself. Close this tab, unlock GODFIN, open Settings, "
+                "expand Gmail Integration, and choose Connect Gmail."
+                if direct_start
+                else "Close this browser tab, return to GODFIN, then choose "
+                "Connect Gmail again. Approval links are single-use and expire "
+                "after ten minutes. Previously imported transactions stay in "
+                "GODFIN, and no email was imported by this expired attempt."
+            )
             response = HTMLResponse(
                 status_code=403,
                 headers={"X-GODFIN-Request-ID": request_id},
                 content=(
                     "<!doctype html><title>GODFIN Gmail connection</title>"
                     "<main style='font:16px system-ui;padding:48px;max-width:680px'>"
-                    "<h1>This Gmail approval link is no longer active</h1>"
-                    "<p>Close this browser tab, reopen GODFIN, then choose "
-                    "<strong>Connect Gmail</strong> again. Previously imported "
-                    "transactions stay in GODFIN, and no email was imported by "
-                    "this expired attempt.</p>"
+                    f"<h1>{heading}</h1>"
+                    f"<p>{explanation}</p>"
                     f"<p style='color:#667085'>Support code: {request_id}</p></main>"
                 ),
             )

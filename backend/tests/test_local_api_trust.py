@@ -93,6 +93,19 @@ def test_packaged_policy_without_launch_secret_fails_closed():
     assert "MISSING_LAUNCH_TRUST" not in callback.text
 
 
+def test_direct_browser_gmail_start_explains_trusted_app_handoff():
+    client = _client(LocalApiPolicy(RuntimeMode.PACKAGED, "launch-secret"))
+
+    response = client.get("/api/v1/auth/gmail/url")
+
+    assert response.status_code == 403
+    assert "text/html" in response.headers["content-type"]
+    assert "Start Gmail from the GODFIN app" in response.text
+    assert "Settings" in response.text
+    assert "Connect Gmail" in response.text
+    assert "MISSING_LAUNCH_TRUST" not in response.text
+
+
 def test_packaged_cors_is_exact_bounded_and_has_no_credentials_mode():
     client = _client(LocalApiPolicy(RuntimeMode.PACKAGED, "launch-secret"))
     response = client.options(

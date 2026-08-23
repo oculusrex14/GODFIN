@@ -459,7 +459,7 @@ test('locked report insights link to current lifetime pricing', async ({ page })
   await page.getByRole('button', { name: 'Unlock' }).click();
   await page.getByRole('link', { name: 'Reports', exact: true }).click();
   const pricing = page.getByRole('link', { name: 'View license options' });
-  await expect(pricing).toHaveAttribute('href', 'https://godfin.vercel.app/pricing');
+  await expect(pricing).toHaveAttribute('href', 'https://godfin.dev/pricing');
   await expect(pricing).toHaveAttribute('target', '_blank');
 });
 
