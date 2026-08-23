@@ -64,6 +64,7 @@ TOKEN_FILE = Path(
         Path(__file__).parent.parent.parent / "data" / "gmail_token.json",
     )
 ).expanduser()
+MAX_TOKEN_FILE_BYTES = 64 * 1024
 
 
 class GmailError(RuntimeError):
@@ -108,6 +109,12 @@ class GmailConnectionHealth:
     message: str
     retryable: bool = False
     action_required: str | None = None
+    credentials_present: bool = False
+    token_expiry: str | None = None
+    last_refresh_success_at: str | None = None
+    last_refresh_failure_at: str | None = None
+    client_config_match: bool | None = None
+    safe_reason_code: str = "not_connected"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -116,6 +123,12 @@ class GmailConnectionHealth:
             "message": self.message,
             "retryable": self.retryable,
             "action_required": self.action_required,
+            "credentials_present": self.credentials_present,
+            "token_expiry": self.token_expiry,
+            "last_refresh_success_at": self.last_refresh_success_at,
+            "last_refresh_failure_at": self.last_refresh_failure_at,
+            "client_config_match": self.client_config_match,
+            "safe_reason_code": self.safe_reason_code,
         }
 
 
@@ -142,6 +155,38 @@ def _credentials_expiry_for_storage(value: datetime | None) -> str | None:
     else:
         value = value.astimezone(timezone.utc)
     return value.isoformat().replace("+00:00", "Z")
+
+
+def _read_token_data() -> dict:
+    if TOKEN_FILE.stat().st_size > MAX_TOKEN_FILE_BYTES:
+        raise ValueError("Stored Gmail permission is unexpectedly large.")
+    with open(TOKEN_FILE, "r", encoding="utf-8") as handle:
+        token_data = json.load(handle)
+    if not isinstance(token_data, dict):
+        raise ValueError("Stored Gmail permission is not an object.")
+    return token_data
+
+
+def _write_token_data(token_data: dict) -> None:
+    payload = json.dumps(token_data, separators=(",", ":"))
+    if len(payload.encode("utf-8")) > MAX_TOKEN_FILE_BYTES:
+        raise ValueError("Stored Gmail permission is unexpectedly large.")
+    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".gmail-token-",
+        suffix=".json",
+        dir=TOKEN_FILE.parent,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_name, 0o600)
+        os.replace(temporary_name, TOKEN_FILE)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
 
 
 def _state_hash(state: str) -> str:
@@ -213,6 +258,74 @@ def _load_client_config() -> Optional[dict]:
     return None
 
 
+def _client_config_fingerprint(config: dict | None) -> str | None:
+    installed = config.get("installed") if isinstance(config, dict) else None
+    client_id = installed.get("client_id") if isinstance(installed, dict) else None
+    if not isinstance(client_id, str) or not client_id:
+        return None
+    return hashlib.sha256(client_id.encode("utf-8")).hexdigest()
+
+
+def _stored_client_fingerprint(token_data: dict) -> str | None:
+    fingerprint = token_data.get("client_config_fingerprint")
+    if isinstance(fingerprint, str) and len(fingerprint) == 64:
+        try:
+            bytes.fromhex(fingerprint)
+            return fingerprint
+        except ValueError:
+            return None
+    client_id = token_data.get("client_id")
+    if isinstance(client_id, str) and client_id:
+        return hashlib.sha256(client_id.encode("utf-8")).hexdigest()
+    return None
+
+
+def _safe_token_health_metadata() -> dict[str, object]:
+    if not TOKEN_FILE.exists():
+        return {
+            "credentials_present": False,
+            "token_expiry": None,
+            "last_refresh_success_at": None,
+            "last_refresh_failure_at": None,
+            "client_config_match": None,
+        }
+    try:
+        token_data = _read_token_data()
+        expiry = _credentials_expiry_for_storage(
+            _credentials_expiry_from_storage(token_data.get("expiry"))
+        )
+        current = _client_config_fingerprint(_load_client_config())
+        stored = _stored_client_fingerprint(token_data)
+        return {
+            "credentials_present": True,
+            "token_expiry": expiry,
+            "last_refresh_success_at": token_data.get("last_refresh_success_at"),
+            "last_refresh_failure_at": token_data.get("last_refresh_failure_at"),
+            "client_config_match": (
+                secrets.compare_digest(current, stored)
+                if current is not None and stored is not None
+                else None
+            ),
+        }
+    except (GmailConfigurationError, json.JSONDecodeError, OSError, TypeError, ValueError):
+        return {
+            "credentials_present": True,
+            "token_expiry": None,
+            "last_refresh_success_at": None,
+            "last_refresh_failure_at": None,
+            "client_config_match": None,
+        }
+
+
+def _record_token_diagnostic(**updates: str | None) -> None:
+    try:
+        token_data = _read_token_data()
+        token_data.update(updates)
+        _write_token_data(token_data)
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        logger.warning("Gmail diagnostic state could not be persisted")
+
+
 def client_config_available() -> bool:
     """Return whether this build has a desktop Gmail connection configured."""
     try:
@@ -242,20 +355,29 @@ class GmailService:
         message: str,
         retryable: bool = False,
         action_required: str | None = None,
+        safe_reason_code: str | None = None,
     ) -> None:
+        metadata = _safe_token_health_metadata()
         self._connection_health = GmailConnectionHealth(
             status=status,
             connected=connected,
             message=message,
             retryable=retryable,
             action_required=action_required,
+            credentials_present=bool(metadata["credentials_present"]),
+            token_expiry=metadata["token_expiry"],
+            last_refresh_success_at=metadata["last_refresh_success_at"],
+            last_refresh_failure_at=metadata["last_refresh_failure_at"],
+            client_config_match=metadata["client_config_match"],
+            safe_reason_code=safe_reason_code or status,
         )
 
     def connection_health(self) -> GmailConnectionHealth:
         """Return a safe, actionable state without exposing provider details."""
         if (
             self._connection_health.action_required == "reconnect"
-            and self._connection_health.status in {"reauthorize", "credential_error"}
+            and self._connection_health.status
+            in {"reauthorization_required", "client_config_changed", "credential_corrupt"}
         ):
             return self._connection_health
         if self._credentials is not None and self._credentials.valid:
@@ -263,6 +385,7 @@ class GmailService:
                 status="connected",
                 connected=True,
                 message="Gmail permission is active.",
+                safe_reason_code="connected",
             )
         elif TOKEN_FILE.exists():
             self.load_credentials()
@@ -274,6 +397,7 @@ class GmailService:
                     "Gmail connection is not configured for this GODFIN build yet."
                 ),
                 action_required="owner_configuration",
+                safe_reason_code="client_config_missing",
             )
         else:
             self._set_connection_health(
@@ -281,6 +405,7 @@ class GmailService:
                 connected=False,
                 message="Gmail is ready to connect.",
                 action_required="connect",
+                safe_reason_code="not_connected",
             )
         return self._connection_health
 
@@ -288,10 +413,11 @@ class GmailService:
         self._credentials = None
         self.service = None
         self._set_connection_health(
-            status="reauthorize",
+            status="reauthorization_required",
             connected=False,
             message="Google no longer accepts this Gmail permission. Connect Gmail again.",
             action_required="reconnect",
+            safe_reason_code="provider_permission_rejected",
         )
         return GmailSyncError(
             "Gmail permission expired. Connect Gmail again.",
@@ -474,12 +600,13 @@ class GmailService:
                 code_verifier=code_verifier,
             )
             self._credentials = flow.credentials
-            self._persist_credentials()
+            self._persist_credentials(refresh_succeeded=True)
             self._build_service()
             self._set_connection_health(
                 status="connected",
                 connected=True,
                 message="Gmail permission is active.",
+                safe_reason_code="connected",
             )
             logger.info("Gmail authentication completed successfully")
             return True
@@ -493,11 +620,32 @@ class GmailService:
                 retryable=False,
             ) from exc
 
-    def _persist_credentials(self) -> None:
+    def _persist_credentials(self, *, refresh_succeeded: bool = False) -> None:
         if self._credentials is None:
             raise GmailError(
                 "No Gmail credentials are available to save.",
                 code="credentials_missing",
+            )
+        previous: dict = {}
+        if TOKEN_FILE.exists():
+            try:
+                previous = _read_token_data()
+            except (json.JSONDecodeError, OSError, TypeError, ValueError):
+                previous = {}
+        now = _utcnow_naive().replace(tzinfo=timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
+        current_config = _load_client_config()
+        credential_client_id = self._credentials.client_id or ""
+        client_config_fingerprint = _client_config_fingerprint(current_config)
+        if client_config_fingerprint is None and credential_client_id:
+            client_config_fingerprint = hashlib.sha256(
+                credential_client_id.encode("utf-8")
+            ).hexdigest()
+        if client_config_fingerprint is None:
+            raise GmailError(
+                "Gmail credentials do not identify an OAuth client.",
+                code="client_identity_missing",
             )
         token_data = {
             'token': encrypt(self._credentials.token) if self._credentials.token else None,
@@ -509,29 +657,21 @@ class GmailService:
             'expiry': _credentials_expiry_for_storage(
                 self._credentials.expiry
             ),
+            'client_config_fingerprint': client_config_fingerprint,
+            'last_refresh_success_at': (
+                now if refresh_succeeded else previous.get('last_refresh_success_at')
+            ),
+            'last_refresh_failure_at': previous.get('last_refresh_failure_at'),
+            'safe_reason_code': 'connected',
         }
-        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=".gmail-token-",
-            suffix=".json",
-            dir=TOKEN_FILE.parent,
-        )
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(token_data, handle, separators=(",", ":"))
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temporary_name, 0o600)
-            os.replace(temporary_name, TOKEN_FILE)
-        finally:
-            if os.path.exists(temporary_name):
-                os.unlink(temporary_name)
+        _write_token_data(token_data)
 
     def load_credentials(self) -> bool:
         """Load saved credentials from disk."""
         if (
             self._connection_health.action_required == "reconnect"
-            and self._connection_health.status in {"reauthorize", "credential_error"}
+            and self._connection_health.status
+            in {"reauthorization_required", "client_config_changed", "credential_corrupt"}
         ):
             return False
         if not TOKEN_FILE.exists():
@@ -542,12 +682,44 @@ class GmailService:
                 connected=False,
                 message="Connect Gmail to import transaction alerts.",
                 action_required="connect",
+                safe_reason_code="not_connected",
             )
             return False
 
         try:
-            with open(TOKEN_FILE, "r", encoding="utf-8") as f:
-                token_data = json.load(f)
+            token_data = _read_token_data()
+
+            current_config = _load_client_config()
+            current_fingerprint = _client_config_fingerprint(current_config)
+            stored_fingerprint = _stored_client_fingerprint(token_data)
+            if current_fingerprint is None:
+                self._credentials = None
+                self.service = None
+                self._set_connection_health(
+                    status="not_configured",
+                    connected=False,
+                    message="Gmail connection is not configured for this GODFIN build yet.",
+                    action_required="owner_configuration",
+                    safe_reason_code="client_config_missing",
+                )
+                return False
+            if (
+                stored_fingerprint is None
+                or not secrets.compare_digest(current_fingerprint, stored_fingerprint)
+            ):
+                self._credentials = None
+                self.service = None
+                self._set_connection_health(
+                    status="client_config_changed",
+                    connected=False,
+                    message=(
+                        "GODFIN's Google connection changed after Gmail was approved. "
+                        "Connect Gmail again; previously imported transactions stay here."
+                    ),
+                    action_required="reconnect",
+                    safe_reason_code="oauth_client_changed",
+                )
+                return False
 
             parsed_expiry = _credentials_expiry_from_storage(
                 token_data.get('expiry')
@@ -566,31 +738,62 @@ class GmailService:
 
             if self._credentials.expired:
                 if not self._credentials.refresh_token:
+                    _record_token_diagnostic(
+                        last_refresh_failure_at=_utcnow_naive()
+                        .replace(tzinfo=timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                        safe_reason_code="refresh_token_missing",
+                    )
                     self._credentials = None
                     self.service = None
                     self._set_connection_health(
-                        status="reauthorize",
+                        status="reauthorization_required",
                         connected=False,
                         message="Gmail permission expired. Connect Gmail again.",
                         action_required="reconnect",
+                        safe_reason_code="refresh_token_missing",
                     )
                     return False
                 try:
+                    self._set_connection_health(
+                        status="refreshing",
+                        connected=False,
+                        message="GODFIN is checking the saved Gmail permission.",
+                        retryable=True,
+                        action_required="retry",
+                        safe_reason_code="refreshing",
+                    )
                     self._credentials.refresh(Request())
-                    self._persist_credentials()
+                    self._persist_credentials(refresh_succeeded=True)
                 except RefreshError:
                     logger.info("Gmail authorization is no longer valid")
+                    _record_token_diagnostic(
+                        last_refresh_failure_at=_utcnow_naive()
+                        .replace(tzinfo=timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                        safe_reason_code="refresh_token_rejected",
+                    )
                     self._credentials = None
                     self.service = None
                     self._set_connection_health(
-                        status="reauthorize",
+                        status="reauthorization_required",
                         connected=False,
                         message="Google no longer accepts this Gmail permission. Connect Gmail again.",
                         action_required="reconnect",
+                        safe_reason_code="refresh_token_rejected",
                     )
                     return False
                 except TransportError:
                     logger.info("Gmail credential refresh is temporarily unavailable")
+                    _record_token_diagnostic(
+                        last_refresh_failure_at=_utcnow_naive()
+                        .replace(tzinfo=timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                        safe_reason_code="google_temporarily_unreachable",
+                    )
                     self._credentials = None
                     self.service = None
                     self._set_connection_health(
@@ -599,17 +802,26 @@ class GmailService:
                         message="Google could not be reached. GODFIN will not sync until a retry succeeds.",
                         retryable=True,
                         action_required="retry",
+                        safe_reason_code="google_temporarily_unreachable",
                     )
                     return False
 
             if not self._credentials.valid:
+                _record_token_diagnostic(
+                    last_refresh_failure_at=_utcnow_naive()
+                    .replace(tzinfo=timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    safe_reason_code="credential_incomplete",
+                )
                 self._credentials = None
                 self.service = None
                 self._set_connection_health(
-                    status="reauthorize",
+                    status="reauthorization_required",
                     connected=False,
                     message="Gmail permission is incomplete. Connect Gmail again.",
                     action_required="reconnect",
+                    safe_reason_code="credential_incomplete",
                 )
                 return False
 
@@ -618,6 +830,7 @@ class GmailService:
                 status="connected",
                 connected=True,
                 message="Gmail permission is active.",
+                safe_reason_code="connected",
             )
             return True
         except (EncryptionError, json.JSONDecodeError, OSError, TypeError, ValueError):
@@ -625,10 +838,11 @@ class GmailService:
             self._credentials = None
             self.service = None
             self._set_connection_health(
-                status="reauthorize",
+                status="credential_corrupt",
                 connected=False,
                 message="Stored Gmail permission is unreadable. Connect Gmail again.",
                 action_required="reconnect",
+                safe_reason_code="credential_unreadable",
             )
             return False
         except Exception:
@@ -636,10 +850,11 @@ class GmailService:
             self._credentials = None
             self.service = None
             self._set_connection_health(
-                status="credential_error",
+                status="credential_corrupt",
                 connected=False,
                 message="Gmail permission could not be checked safely. Connect Gmail again.",
                 action_required="reconnect",
+                safe_reason_code="credential_load_failed",
             )
             return False
 
@@ -665,15 +880,17 @@ class GmailService:
                     status="connected",
                     connected=True,
                     message="Gmail permission is active.",
+                    safe_reason_code="connected",
                 )
             return connected
         except Exception:
             logger.warning("Gmail connection state could not be checked")
             self._set_connection_health(
-                status="credential_error",
+                status="credential_corrupt",
                 connected=False,
                 message="Gmail permission could not be checked safely. Connect Gmail again.",
                 action_required="reconnect",
+                safe_reason_code="credential_check_failed",
             )
             return False
 

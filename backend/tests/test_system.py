@@ -298,6 +298,14 @@ def test_support_diagnostics_include_backup_health_without_sensitive_state(
     assert diagnostics["application"]["api_status"] == "operational"
     assert diagnostics["application"]["build"]["schema_revision"] >= 19
     assert diagnostics["application"]["build"]["license_api_host"] == "godfin.dev"
+    assert diagnostics["gmail"]["status"] in {
+        "connected",
+        "not_connected",
+        "not_configured",
+    }
+    assert "access_token" not in str(diagnostics["gmail"]).lower()
+    assert "refresh_token" not in str(diagnostics["gmail"]).lower()
+    assert "client_id" not in str(diagnostics["gmail"]).lower()
     assert diagnostics["backup_protection"] == {
         "status": "degraded",
         "scheduler_status": "operational",

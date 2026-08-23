@@ -182,6 +182,77 @@ def test_oauth_callback_consumes_state_once_and_persists_credentials(
     assert replay.value.code == "replayed_state"
 
 
+def test_oauth_callback_persists_safe_restart_diagnostics(
+    db_session,
+    fake_oauth,
+    monkeypatch,
+):
+    state = "diagnostic-state"
+    _add_attempt(db_session, state)
+    service = GmailService()
+    monkeypatch.setattr(service, "_build_service", lambda: None)
+
+    assert service.complete_auth(
+        db_session,
+        authorization_code="provider-code",
+        state=state,
+    )
+
+    stored = json.loads(gmail_module.TOKEN_FILE.read_text(encoding="utf-8"))
+    assert stored["client_config_fingerprint"] == hashlib.sha256(
+        CLIENT_CONFIG["installed"]["client_id"].encode("utf-8")
+    ).hexdigest()
+    assert stored["last_refresh_success_at"].endswith("Z")
+    assert stored["safe_reason_code"] == "connected"
+    serialized = gmail_module.TOKEN_FILE.read_text(encoding="utf-8")
+    assert '"access-token"' not in serialized
+    assert '"refresh-token"' not in serialized
+    assert '"test-secret"' not in serialized
+    assert gmail_module.TOKEN_FILE.stat().st_mode & 0o077 == 0
+
+
+def test_changed_oauth_client_requires_reconnect_without_deleting_permission(
+    fake_oauth,
+):
+    gmail_module.TOKEN_FILE.write_text(
+        json.dumps(
+            {
+                "token": encrypt("access-token"),
+                "refresh_token": encrypt("refresh-token"),
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "client_id": "retired-client.apps.googleusercontent.com",
+                "client_secret": encrypt("retired-secret"),
+                "scopes": [GMAIL_READONLY_SCOPE],
+                "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = GmailService()
+
+    assert service.load_credentials() is False
+    health = service.connection_health()
+    assert health.status == "client_config_changed"
+    assert health.action_required == "reconnect"
+    assert health.credentials_present is True
+    assert health.client_config_match is False
+    assert health.safe_reason_code == "oauth_client_changed"
+    assert gmail_module.TOKEN_FILE.exists()
+
+
+def test_malformed_saved_permission_is_reported_without_raw_details(fake_oauth):
+    gmail_module.TOKEN_FILE.write_text("{not-json", encoding="utf-8")
+
+    health = GmailService().connection_health()
+
+    assert health.status == "credential_corrupt"
+    assert health.action_required == "reconnect"
+    assert health.credentials_present is True
+    assert health.safe_reason_code == "credential_unreadable"
+    assert "not-json" not in health.message
+
+
 @pytest.mark.parametrize(
     "stored_expiry",
     [
@@ -460,7 +531,12 @@ def test_expired_history_cursor_has_explicit_failure():
 @pytest.mark.parametrize(
     ("refresh_error", "expected_status", "retryable", "action"),
     [
-        (RefreshError("invalid_grant"), "reauthorize", False, "reconnect"),
+        (
+            RefreshError("invalid_grant"),
+            "reauthorization_required",
+            False,
+            "reconnect",
+        ),
         (TransportError("network unavailable"), "temporarily_unavailable", True, "retry"),
     ],
 )
@@ -509,6 +585,16 @@ def test_expired_credential_status_distinguishes_reauth_from_retry(
     assert health.connected is False
     assert health.retryable is retryable
     assert health.action_required == action
+    stored = json.loads(gmail_module.TOKEN_FILE.read_text(encoding="utf-8"))
+    assert stored["last_refresh_failure_at"].endswith("Z")
+    assert stored["safe_reason_code"] in {
+        "refresh_token_rejected",
+        "google_temporarily_unreachable",
+    }
+
+    restarted_health = GmailService().connection_health()
+    assert restarted_health.status == expected_status
+    assert restarted_health.retryable is retryable
 
 
 def test_message_limit_is_partial_and_never_advances_cursor():
@@ -593,5 +679,5 @@ def test_revoked_provider_permission_requires_reauthorization():
     assert error.value.code == "authorization_required"
     assert error.value.retryable is False
     health = service.connection_health()
-    assert health.status == "reauthorize"
+    assert health.status == "reauthorization_required"
     assert health.action_required == "reconnect"

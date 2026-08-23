@@ -54,7 +54,11 @@ function GmailSettings() {
   };
 
   // Fetch Gmail status
-  const { data: gmailStatus } = useQuery({
+  const {
+    data: gmailStatus,
+    refetch: refetchGmailStatus,
+    isFetching: gmailStatusRefreshing,
+  } = useQuery({
     queryKey: ['gmailStatus'],
     queryFn: fetchGmailStatus,
     staleTime: 30000,
@@ -308,6 +312,17 @@ function GmailSettings() {
   }, [queryClient]);
 
   const isConnected = gmailStatus?.connected;
+  const shouldRetry = gmailStatus?.action_required === 'retry';
+  const shouldReconnect = gmailStatus?.action_required === 'reconnect';
+  const gmailStatusTitle = (() => {
+    if (isConnected) return 'Gmail Connected';
+    if (gmailStatus?.status === 'temporarily_unavailable') return 'Gmail is temporarily unavailable';
+    if (gmailStatus?.status === 'client_config_changed') return 'Google connection changed';
+    if (gmailStatus?.status === 'reauthorization_required') return 'Gmail needs approval again';
+    if (gmailStatus?.status === 'credential_corrupt') return 'Saved Gmail permission needs repair';
+    if (gmailStatus?.status === 'not_configured') return 'Gmail setup is not ready';
+    return 'Gmail Not Connected';
+  })();
   const history = schedulerStatus?.history;
 
   // Format date for display
@@ -356,28 +371,43 @@ function GmailSettings() {
             </div>
             <div>
               <div className="text-white font-medium">
-                {isConnected ? 'Gmail Connected' : 'Gmail Not Connected'}
+                {gmailStatusTitle}
               </div>
               <div className="text-slate-500 text-xs">
                 {isConnected
                   ? `Connected as ${gmailStatus?.email || 'your approved Google account'}`
                   : gmailStatus?.message || 'Connect your Gmail to automatically import transactions'}
               </div>
+              {!isConnected && gmailStatus?.credentials_present && (
+                <div className="mt-1 space-y-0.5 text-[0.68rem] text-slate-500">
+                  {gmailStatus.token_expiry && (
+                    <div>Saved permission check due {formatDate(gmailStatus.token_expiry)}</div>
+                  )}
+                  {gmailStatus.last_refresh_success_at && (
+                    <div>Last successful permission check {formatDate(gmailStatus.last_refresh_success_at)}</div>
+                  )}
+                  {gmailStatus.last_refresh_failure_at && (
+                    <div>Last failed permission check {formatDate(gmailStatus.last_refresh_failure_at)}</div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
           {!isConnected ? (
             <button
-              onClick={handleConnect}
-              disabled={authUrlMutation.isPending}
+              onClick={shouldRetry ? () => refetchGmailStatus() : handleConnect}
+              disabled={authUrlMutation.isPending || gmailStatusRefreshing}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors disabled:opacity-50 text-sm"
             >
-              {authUrlMutation.isPending ? (
+              {authUrlMutation.isPending || gmailStatusRefreshing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
+              ) : shouldRetry ? (
+                <RefreshCw className="h-4 w-4" />
               ) : (
                 <ExternalLink className="h-4 w-4" />
               )}
-              Connect Gmail
+              {shouldRetry ? 'Retry Gmail' : shouldReconnect ? 'Reconnect Gmail' : 'Connect Gmail'}
             </button>
           ) : (
             <button

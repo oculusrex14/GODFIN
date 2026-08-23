@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import Enum
 from urllib.parse import urlsplit
 
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse
 
 from app.core.api_errors import error_payload
 from app.core.network_access import network_access_enabled
@@ -198,6 +198,27 @@ class LocalApiTrustMiddleware:
 
     async def _reject(self, scope, receive, send, *, code: str, message: str) -> None:
         request_id = new_request_id()
+        if (
+            code == "MISSING_LAUNCH_TRUST"
+            and scope.get("method") == "GET"
+            and scope.get("path") == _GMAIL_OAUTH_CALLBACK_PATH
+        ):
+            response = HTMLResponse(
+                status_code=403,
+                headers={"X-GODFIN-Request-ID": request_id},
+                content=(
+                    "<!doctype html><title>GODFIN Gmail connection</title>"
+                    "<main style='font:16px system-ui;padding:48px;max-width:680px'>"
+                    "<h1>This Gmail approval link is no longer active</h1>"
+                    "<p>Close this browser tab, reopen GODFIN, then choose "
+                    "<strong>Connect Gmail</strong> again. Previously imported "
+                    "transactions stay in GODFIN, and no email was imported by "
+                    "this expired attempt.</p>"
+                    f"<p style='color:#667085'>Support code: {request_id}</p></main>"
+                ),
+            )
+            await response(scope, receive, send)
+            return
         response = JSONResponse(
             status_code=403,
             headers={"X-GODFIN-Request-ID": request_id},

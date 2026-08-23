@@ -52,6 +52,7 @@ class SupportDiagnostics(BaseModel):
     schema_version: Literal[2]
     generated_at_utc: str
     application: DiagnosticApplicationStatus
+    gmail: dict
     backup_protection: DiagnosticBackupStatus
     readiness: dict
     background_jobs: dict
@@ -350,6 +351,7 @@ def download_support_diagnostics(
     from app.api.v1.endpoints.health import readiness_snapshot
     from app.core.background_jobs import job_queue_summary
     from app.core.build_identity import build_identity
+    from app.core.gmail_service import gmail_service
     from app.core.local_metrics import request_metrics_snapshot
 
     jobs = job_queue_summary(db)
@@ -362,6 +364,7 @@ def download_support_diagnostics(
             "api_status": "operational",
             "build": build_identity(),
         },
+        "gmail": gmail_service.connection_health().to_dict(),
         "backup_protection": {
             "status": protection_status,
             "scheduler_status": scheduler_status,

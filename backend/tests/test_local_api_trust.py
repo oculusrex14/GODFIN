@@ -87,7 +87,10 @@ def test_packaged_policy_without_launch_secret_fails_closed():
     assert ordinary.status_code == 403
     assert ordinary.json()["code"] == "MISSING_LAUNCH_TRUST"
     assert callback.status_code == 403
-    assert callback.json()["code"] == "MISSING_LAUNCH_TRUST"
+    assert "text/html" in callback.headers["content-type"]
+    assert "approval link is no longer active" in callback.text
+    assert "Connect Gmail" in callback.text
+    assert "MISSING_LAUNCH_TRUST" not in callback.text
 
 
 def test_packaged_cors_is_exact_bounded_and_has_no_credentials_mode():

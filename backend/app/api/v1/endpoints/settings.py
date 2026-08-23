@@ -102,6 +102,12 @@ class GmailHealthResponse(BaseModel):
     message: str
     retryable: bool
     action_required: str | None
+    credentials_present: bool
+    token_expiry: str | None
+    last_refresh_success_at: str | None
+    last_refresh_failure_at: str | None
+    client_config_match: bool | None
+    safe_reason_code: str
 
 
 class LLMHealthResponse(BaseModel):

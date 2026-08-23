@@ -19,6 +19,7 @@ import {
   fetchSpendingTrend,
   fetchReviewStats,
   fetchIngestionStatus,
+  fetchGmailStatus,
   fetchSchedulerStatus,
   fetchAuditSessions,
 } from '../api/client';
@@ -81,6 +82,20 @@ const tooltipStyle = {
   color: '#ffffff',
   backdropFilter: 'blur(12px)',
 };
+
+function gmailHealthLabel(status) {
+  if (status?.connected) return 'Connected';
+  if (status?.status === 'temporarily_unavailable') return 'Retry needed';
+  if (
+    ['reauthorization_required', 'client_config_changed', 'credential_corrupt'].includes(
+      status?.status,
+    )
+  ) {
+    return 'Reconnect';
+  }
+  if (status?.status === 'not_configured') return 'Setup needed';
+  return 'Not connected';
+}
 
 export default function Dashboard() {
   const currentYear = new Date().getFullYear();
@@ -150,10 +165,16 @@ export default function Dashboard() {
     queryFn: fetchIngestionStatus,
   });
 
+  const { data: gmailStatus } = useQuery({
+    queryKey: ['gmailStatus'],
+    queryFn: fetchGmailStatus,
+    staleTime: 30000,
+  });
+
   useQuery({
     queryKey: ['schedulerStatus'],
     queryFn: fetchSchedulerStatus,
-    enabled: ingestionStatus?.gmail_connected,
+    enabled: gmailStatus?.connected,
     staleTime: 60000,
   });
 
@@ -423,11 +444,13 @@ export default function Dashboard() {
               <Activity className="h-3.5 w-3.5 text-emerald-400/80" />
               <span className="text-white/50 text-[0.8rem]">Gmail</span>
               <span className={`text-[0.7rem] ml-auto px-2.5 py-0.5 rounded-full ${
-                ingestionStatus?.gmail_connected
+                gmailStatus?.connected
                   ? 'bg-emerald-500/[0.1] text-emerald-400/80 border border-emerald-500/[0.12]'
-                  : 'bg-white/[0.05] text-white/40 border border-white/[0.1]'
-              }`}>
-                {ingestionStatus?.gmail_connected ? 'Connected' : 'Not connected'}
+                  : gmailStatus?.retryable
+                    ? 'bg-amber-500/[0.1] text-amber-300/80 border border-amber-500/[0.12]'
+                    : 'bg-white/[0.05] text-white/40 border border-white/[0.1]'
+              }`} title={gmailStatus?.message}>
+                {gmailHealthLabel(gmailStatus)}
               </span>
             </div>
             <div className="flex items-center gap-2">
