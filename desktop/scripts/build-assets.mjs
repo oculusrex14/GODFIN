@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
@@ -13,6 +13,33 @@ const localPython = process.platform === "win32"
   : path.join(backendRoot, "venv", "bin", "python");
 const python = process.env.PYTHON_BIN || (existsSync(localPython) ? localPython : "python");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+
+function gitSha() {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: projectRoot,
+    encoding: "utf8",
+    shell: false,
+  });
+  const candidate = String(result.stdout || "").trim().toLowerCase();
+  return /^[0-9a-f]{40}$/.test(candidate) ? candidate : "unknown";
+}
+
+const packageJson = JSON.parse(
+  readFileSync(path.join(desktopRoot, "package.json"), "utf8"),
+);
+const identity = {
+  version: packageJson.version,
+  full_sha: process.env.GODFIN_BUILD_SHA || gitSha(),
+  channel: process.env.GODFIN_BUILD_CHANNEL || "private-local",
+  built_at_utc: process.env.GODFIN_BUILD_TIMESTAMP || new Date().toISOString(),
+};
+const identityDir = path.join(backendRoot, "build");
+mkdirSync(identityDir, { recursive: true });
+writeFileSync(
+  path.join(identityDir, "build-identity.json"),
+  `${JSON.stringify(identity, null, 2)}\n`,
+  { encoding: "utf8", mode: 0o600 },
+);
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, {

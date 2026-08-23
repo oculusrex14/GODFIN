@@ -12,6 +12,7 @@ from app.core.statement_parser import StatementParseResult
 
 
 MAX_PDF_PAGES = 250
+PARSER_REGISTRY_VERSION = "2026.08.v1"
 
 
 def registered_parsers() -> tuple[StatementParserPlugin, ...]:

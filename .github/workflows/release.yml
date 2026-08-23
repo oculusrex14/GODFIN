@@ -82,6 +82,15 @@ jobs:
         working-directory: frontend
       - run: npm ci
         working-directory: desktop
+      - name: Record immutable build identity
+        shell: bash
+        run: |
+          echo "GODFIN_BUILD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "GODFIN_BUILD_CHANNEL=private-release" >> "$GITHUB_ENV"
+          python - <<'PY' >> "$GITHUB_ENV"
+          from datetime import UTC, datetime
+          print(f"GODFIN_BUILD_TIMESTAMP={datetime.now(UTC).replace(microsecond=0).isoformat().replace('+00:00', 'Z')}")
+          PY
       - name: Build frontend and frozen backend
         run: npm run build:assets
         working-directory: desktop

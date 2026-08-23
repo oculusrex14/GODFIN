@@ -4,6 +4,36 @@ from app.models.app_setting import AppSetting
 from tests.license_helpers import install_test_license
 
 
+def test_system_status_exposes_support_safe_build_identity(
+    auth_client,
+    monkeypatch,
+):
+    monkeypatch.setenv("GODFIN_BUILD_SHA", "a" * 40)
+    monkeypatch.setenv("GODFIN_BUILD_CHANNEL", "private-rc")
+    monkeypatch.setenv("GODFIN_BUILD_TIMESTAMP", "2026-08-23T12:00:00Z")
+    from app.core.build_identity import build_identity
+
+    build_identity.cache_clear()
+    try:
+        response = auth_client.get("/api/v1/system/status")
+    finally:
+        build_identity.cache_clear()
+
+    assert response.status_code == 200
+    build = response.json()["build"]
+    assert build["version"] == "0.1.0"
+    assert build["full_sha"] == "a" * 40
+    assert build["short_sha"] == "a" * 12
+    assert build["channel"] == "private-rc"
+    assert build["built_at_utc"] == "2026-08-23T12:00:00Z"
+    assert build["schema_revision"] >= 19
+    assert build["entitlement_manifest_version"] >= 1
+    assert build["parser_registry_version"]
+    assert build["license_api_host"] == "godfin.dev"
+    assert "installation" not in str(build).lower()
+    assert "/Users/" not in str(build)
+
+
 def test_embeddings_disabled_by_default(auth_client):
     response = auth_client.get("/api/v1/system/embeddings/status")
     assert response.status_code == 200
@@ -266,6 +296,8 @@ def test_support_diagnostics_include_backup_health_without_sensitive_state(
     diagnostics = response.json()
     assert diagnostics["schema_version"] == 2
     assert diagnostics["application"]["api_status"] == "operational"
+    assert diagnostics["application"]["build"]["schema_revision"] >= 19
+    assert diagnostics["application"]["build"]["license_api_host"] == "godfin.dev"
     assert diagnostics["backup_protection"] == {
         "status": "degraded",
         "scheduler_status": "operational",

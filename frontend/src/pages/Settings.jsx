@@ -592,6 +592,24 @@ export default function Settings() {
                 <GlassButton icon={<Download size={14} />} variant="secondary" onClick={() => downloadCSV(csvMonth)}>Download</GlassButton>
               </div>
             </div>
+            <div className="pt-4 border-t border-white/[0.06] grid gap-2 sm:grid-cols-2 text-[0.72rem]">
+              <div>
+                <div className="text-white/25">App version</div>
+                <div className="text-white/55 tabular-nums">{systemStatus?.build?.version || systemStatus?.version || 'Unknown'}</div>
+              </div>
+              <div>
+                <div className="text-white/25">Build</div>
+                <div className="text-white/55 font-mono">{systemStatus?.build?.short_sha || 'Unknown'} · {systemStatus?.build?.channel || 'Unknown'}</div>
+              </div>
+              <div>
+                <div className="text-white/25">Local data format</div>
+                <div className="text-white/55 tabular-nums">Revision {systemStatus?.build?.schema_revision ?? 'Unknown'}</div>
+              </div>
+              <div>
+                <div className="text-white/25">System</div>
+                <div className="text-white/55">{systemStatus?.build?.os || 'Unknown'} · {systemStatus?.build?.architecture || 'Unknown'}</div>
+              </div>
+            </div>
             {backups?.length > 0 && (
               <div className="pt-4 border-t border-white/[0.06]">
                 <div className="text-white/30 text-[0.7rem] mb-2" style={{ fontWeight: 500 }}>Recent Backups</div>

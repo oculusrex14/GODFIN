@@ -38,6 +38,10 @@ datas = [
         str(Path(SPECPATH).resolve().parent / "shared" / "model-registry-public-key.txt"),
         "shared",
     ),
+    (
+        str(Path(SPECPATH).resolve().parent / "backend" / "build" / "build-identity.json"),
+        "shared",
+    ),
 ]
 for package in ("matplotlib", "fastembed"):
     try:

@@ -28,11 +28,13 @@ class SystemStatus(BaseModel):
     version: str
     backend_url: str
     frontend_url: str
+    build: dict
 
 
 class DiagnosticApplicationStatus(BaseModel):
     version: str
     api_status: Literal["operational"]
+    build: dict
 
 
 class DiagnosticBackupStatus(BaseModel):
@@ -288,11 +290,14 @@ def get_system_status(
     _user: bool = Depends(get_current_user),
 ):
     """Get system status."""
+    from app.core.build_identity import build_identity
+
     return SystemStatus(
         status="ok",
-        version="0.1.0",
+        version=app_settings.VERSION,
         backend_url="http://localhost:5100",
         frontend_url="http://localhost:5200",
+        build=build_identity(),
     )
 
 
@@ -344,6 +349,7 @@ def download_support_diagnostics(
 
     from app.api.v1.endpoints.health import readiness_snapshot
     from app.core.background_jobs import job_queue_summary
+    from app.core.build_identity import build_identity
     from app.core.local_metrics import request_metrics_snapshot
 
     jobs = job_queue_summary(db)
@@ -354,6 +360,7 @@ def download_support_diagnostics(
         "application": {
             "version": app_settings.VERSION,
             "api_status": "operational",
+            "build": build_identity(),
         },
         "backup_protection": {
             "status": protection_status,
