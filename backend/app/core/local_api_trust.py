@@ -165,7 +165,11 @@ class LocalApiPolicy:
         method: str,
         path: str,
     ) -> bool:
-        if method == "OPTIONS" or not self.launch_secret:
+        if method == "OPTIONS":
+            return True
+        if self.mode is RuntimeMode.PACKAGED and not self.launch_secret:
+            return False
+        if not self.launch_secret:
             return True
         # Google's installed-app flow returns through the user's default
         # browser, which cannot possess Electron's per-launch secret. This

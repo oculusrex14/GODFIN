@@ -7,7 +7,9 @@ import re
 import subprocess
 import sys
 import uuid
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +77,40 @@ _AUTHORITATIVE_LICENSE_ERRORS = {
         "Deactivate one in your account and try again."
     ),
     "INVALID_REQUEST": "The license request is invalid.",
+}
+
+
+class LicenseVerificationClass(str, Enum):
+    SUCCESS_SIGNED = "SUCCESS_SIGNED"
+    AUTHORITATIVE_REVOKED = "AUTHORITATIVE_REVOKED"
+    AUTHORITATIVE_SUSPENDED = "AUTHORITATIVE_SUSPENDED"
+    AUTHORITATIVE_NOT_FOUND = "AUTHORITATIVE_NOT_FOUND"
+    AUTHORITATIVE_DEVICE_LIMIT = "AUTHORITATIVE_DEVICE_LIMIT"
+    AUTHORITATIVE_INVALID_REQUEST = "AUTHORITATIVE_INVALID_REQUEST"
+    RETRIABLE_TRANSPORT = "RETRIABLE_TRANSPORT"
+    RETRIABLE_SERVER = "RETRIABLE_SERVER"
+    RETRIABLE_SCHEMA_MISMATCH = "RETRIABLE_SCHEMA_MISMATCH"
+    RETRIABLE_UNSIGNED_OR_INVALID_ENVELOPE = (
+        "RETRIABLE_UNSIGNED_OR_INVALID_ENVELOPE"
+    )
+
+
+@dataclass(frozen=True)
+class LicenseEndpointResult:
+    classification: LicenseVerificationClass
+    verified: dict[str, Any] | None = None
+    error: LicenseError | None = None
+
+
+_AUTHORITATIVE_CLASS_BY_CODE = {
+    "LICENSE_NOT_FOUND": LicenseVerificationClass.AUTHORITATIVE_NOT_FOUND,
+    "LICENSE_INVALID": LicenseVerificationClass.AUTHORITATIVE_NOT_FOUND,
+    "LICENSE_REVOKED": LicenseVerificationClass.AUTHORITATIVE_REVOKED,
+    "LICENSE_SUSPENDED": LicenseVerificationClass.AUTHORITATIVE_SUSPENDED,
+    "ACTIVATION_LIMIT": LicenseVerificationClass.AUTHORITATIVE_DEVICE_LIMIT,
+    "DEVICE_LIMIT_REACHED": LicenseVerificationClass.AUTHORITATIVE_DEVICE_LIMIT,
+    "DEVICE_LIMIT": LicenseVerificationClass.AUTHORITATIVE_DEVICE_LIMIT,
+    "INVALID_REQUEST": LicenseVerificationClass.AUTHORITATIVE_INVALID_REQUEST,
 }
 
 
@@ -266,13 +302,24 @@ def license_status(db: Session, *, now: datetime | None = None) -> dict[str, Any
 
     if claims is not None:
         effective_tier = str(claims["tier"])
-        status = "active"
         verified_at = _parse_datetime(str(claims["issued_at"]))
         grace_deadline = _parse_datetime(str(claims["expires_at"]))
-        message = (
-            f"GODFIN {effective_tier.title()} is active. Verification remains valid "
-            f"offline through {grace_deadline.date().isoformat()}."
+        refresh_due = bool(
+            grace_deadline
+            and timedelta(0) < grace_deadline - now <= timedelta(hours=48)
         )
+        status = "refresh_due" if refresh_due else "active"
+        if refresh_due:
+            message = (
+                f"GODFIN {effective_tier.title()} is active, but verification should "
+                f"refresh before {grace_deadline.date().isoformat()}. Paid features "
+                "remain available while this signed entitlement is valid."
+            )
+        else:
+            message = (
+                f"GODFIN {effective_tier.title()} is active. Verification remains valid "
+                f"offline through {grace_deadline.date().isoformat()}."
+            )
         features = list(claims["features"])
         licensed_tier: str | None = effective_tier
         active = True
@@ -365,7 +412,15 @@ def _validate_server_response(payload: Any, *, machine_id: str) -> dict[str, Any
             retriable=True,
         )
     if payload.get("valid") is not True:
-        raise _authoritative_license_error(payload)
+        supplied_code = payload.get("code")
+        if isinstance(supplied_code, str) and supplied_code in _AUTHORITATIVE_LICENSE_ERRORS:
+            raise _authoritative_license_error(payload)
+        raise LicenseError(
+            "The license server returned an incompatible response.",
+            code="VERIFY_SCHEMA_MISMATCH",
+            status_code=502,
+            retriable=True,
+        )
     try:
         claims = verify_entitlement_envelope(
             payload.get("entitlement"),
@@ -385,6 +440,64 @@ def _validate_server_response(payload: Any, *, machine_id: str) -> dict[str, Any
         "monthly_credits": included_hosted_ai_credits(),
         "topup_credits": 0,
     }
+
+
+def _classify_server_response(
+    response: Any,
+    *,
+    machine_id: str,
+) -> LicenseEndpointResult:
+    if response.status_code >= 500:
+        error = LicenseError(
+            "The license server is unavailable.",
+            code="VERIFY_UNAVAILABLE",
+            status_code=503,
+            retriable=True,
+        )
+        return LicenseEndpointResult(
+            LicenseVerificationClass.RETRIABLE_SERVER,
+            error=error,
+        )
+    try:
+        payload = response.json()
+    except (TypeError, ValueError) as exc:
+        error = LicenseError(
+            "The license server returned an unreadable response.",
+            code="VERIFY_SCHEMA_MISMATCH",
+            status_code=502,
+            retriable=True,
+        )
+        error.__cause__ = exc
+        return LicenseEndpointResult(
+            LicenseVerificationClass.RETRIABLE_SCHEMA_MISMATCH,
+            error=error,
+        )
+    if response.status_code >= 400 and isinstance(payload, dict) and payload.get("valid") is True:
+        return LicenseEndpointResult(
+            LicenseVerificationClass.RETRIABLE_SCHEMA_MISMATCH,
+            error=LicenseError(
+                "The license server returned an incompatible response.",
+                code="VERIFY_SCHEMA_MISMATCH",
+                status_code=502,
+                retriable=True,
+            ),
+        )
+    try:
+        verified = _validate_server_response(payload, machine_id=machine_id)
+    except LicenseError as exc:
+        authoritative_class = _AUTHORITATIVE_CLASS_BY_CODE.get(exc.code)
+        if authoritative_class is not None:
+            return LicenseEndpointResult(authoritative_class, error=exc)
+        classification = (
+            LicenseVerificationClass.RETRIABLE_UNSIGNED_OR_INVALID_ENVELOPE
+            if exc.code.startswith("LICENSE_")
+            else LicenseVerificationClass.RETRIABLE_SCHEMA_MISMATCH
+        )
+        return LicenseEndpointResult(classification, error=exc)
+    return LicenseEndpointResult(
+        LicenseVerificationClass.SUCCESS_SIGNED,
+        verified=verified,
+    )
 
 
 def _license_verification_endpoints() -> list[str]:
@@ -426,27 +539,29 @@ def verify_with_server(license_key: str) -> dict[str, Any]:
                 follow_redirects=False,
             )
         except httpx.HTTPError as exc:
-            last_error = exc
-            continue
-
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            last_error = exc
-            continue
-
-        if response.status_code >= 500:
             last_error = LicenseError(
-                "The license server is unavailable.",
-                code="VERIFY_UNAVAILABLE",
+                "The license server could not be reached.",
+                code=LicenseVerificationClass.RETRIABLE_TRANSPORT.value,
                 status_code=503,
                 retriable=True,
             )
+            last_error.__cause__ = exc
             continue
 
-        # Invalid, revoked, or over-limit licenses are authoritative responses.
-        # Never retry them against a second endpoint.
-        return _validate_server_response(payload, machine_id=machine_id)
+        result = _classify_server_response(response, machine_id=machine_id)
+        if result.classification is LicenseVerificationClass.SUCCESS_SIGNED:
+            assert result.verified is not None
+            return result.verified
+        if result.classification in {
+            LicenseVerificationClass.AUTHORITATIVE_REVOKED,
+            LicenseVerificationClass.AUTHORITATIVE_SUSPENDED,
+            LicenseVerificationClass.AUTHORITATIVE_NOT_FOUND,
+            LicenseVerificationClass.AUTHORITATIVE_DEVICE_LIMIT,
+            LicenseVerificationClass.AUTHORITATIVE_INVALID_REQUEST,
+        }:
+            assert result.error is not None
+            raise result.error
+        last_error = result.error
 
     raise LicenseError(
         "The license server is unavailable. Check your connection and try again.",
@@ -511,6 +626,26 @@ def reverify_license(db: Session) -> dict[str, Any]:
             _set(db, "license_verified_at", "")
             db.commit()
         raise
+
+
+def refresh_license_if_due(
+    db: Session,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Refresh a stored license only when its signed offline window is close."""
+    now = now or datetime.now(UTC)
+    current = license_status(db, now=now)
+    if not _get(db, "license_key"):
+        return current
+    deadline = _parse_datetime(str(current.get("offline_grace_until") or ""))
+    if (
+        current.get("valid") is True
+        and deadline is not None
+        and deadline - now > timedelta(hours=48)
+    ):
+        return current
+    return reverify_license(db)
 
 
 def deactivate_license(db: Session) -> dict[str, Any]:

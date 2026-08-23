@@ -16,6 +16,7 @@ from app.core.transaction_semantics import (
     verified_income_clause,
 )
 from app.models.transaction import Transaction
+from app.models.audit_session import AuditSession
 from app.schemas.dashboard import (
     CategoryBreakdownItem,
     DashboardMonthsResponse,
@@ -37,29 +38,48 @@ def dashboard_months(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Return up to 24 transaction-backed months, with a 24-month fallback."""
+    """Return recent calendar months plus every locally recorded older month."""
     rows = (
         db.query(func.strftime("%Y-%m", Transaction.date).label("month"))
         .filter(Transaction.status != "deleted")
         .group_by(func.strftime("%Y-%m", Transaction.date))
         .order_by(func.strftime("%Y-%m", Transaction.date).desc())
-        .limit(24)
         .all()
     )
-    months = [row.month for row in rows if row.month]
-    has_data = bool(months)
+    data_months = [row.month for row in rows if row.month]
+    audit_rows = (
+        db.query(AuditSession.period_year, AuditSession.period_month)
+        .distinct()
+        .all()
+    )
+    audit_months = sorted(
+        {
+            f"{int(row.period_year):04d}-{int(row.period_month):02d}"
+            for row in audit_rows
+            if row.period_year and row.period_month
+        },
+        reverse=True,
+    )
+    today = date.today()
+    calendar_months = [
+        f"{year:04d}-{month:02d}"
+        for year, month in (
+            _shift_month(today.year, today.month, -offset)
+            for offset in range(24)
+        )
+    ]
+    months = sorted(
+        set(calendar_months) | set(data_months) | set(audit_months),
+        reverse=True,
+    )
 
-    if not months:
-        today = date.today()
-        months = [
-            f"{year:04d}-{month:02d}"
-            for year, month in (
-                _shift_month(today.year, today.month, -offset)
-                for offset in range(24)
-            )
-        ]
-
-    return {"months": months, "has_data": has_data}
+    return {
+        "months": months,
+        "has_data": bool(data_months),
+        "data_months": data_months,
+        "audit_months": audit_months,
+        "calendar_months": calendar_months,
+    }
 
 
 @router.get("/stats", response_model=DashboardStats)

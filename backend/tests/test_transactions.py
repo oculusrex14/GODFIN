@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.models.audit_session import AuditSession
+from app.models.audit_log import AuditLog
 from app.models.transaction import Transaction
 from app.core.audit import reopen_audit
 from app.seed import SAVINGS_ACCOUNT_ID, CC_ACCOUNT_ID
@@ -226,6 +227,31 @@ def test_delete_transaction(auth_client):
 
     resp = auth_client.get(f"/api/v1/transactions/{txn_id}")
     assert resp.status_code == 404
+
+
+def test_delete_transaction_audit_preserves_pre_delete_status(
+    auth_client,
+    db_session,
+):
+    create_resp = auth_client.post("/api/v1/transactions", json=_make_txn())
+    txn_id = create_resp.json()["id"]
+    original_status = create_resp.json()["status"]
+
+    response = auth_client.delete(f"/api/v1/transactions/{txn_id}")
+
+    assert response.status_code == 204
+    db_session.expire_all()
+    audit = (
+        db_session.query(AuditLog)
+        .filter_by(
+            transaction_id=txn_id,
+            field_changed="status",
+            change_source="user_delete",
+        )
+        .one()
+    )
+    assert audit.old_value == original_status
+    assert audit.new_value == "deleted"
 
 
 def test_delete_locked_transaction(auth_client, db_session):

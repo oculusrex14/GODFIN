@@ -96,7 +96,7 @@ def readiness_snapshot(request: Request, db: Session) -> dict[str, Any]:
     ready = bool(
         database_status == "connected"
         and lifecycle in {"ready", "test"}
-        and schema_status != "mismatch"
+        and schema_status == "current"
     )
     optional_degraded = scheduler == "degraded" or job_worker == "degraded"
     return {

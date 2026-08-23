@@ -276,7 +276,8 @@ def test_support_diagnostics_include_backup_health_without_sensitive_state(
         "failure_code": "automatic_backup_failed",
         "failure_count": 2,
     }
-    assert diagnostics["readiness"]["ready"] is True
+    assert diagnostics["readiness"]["ready"] is False
+    assert diagnostics["readiness"]["dependencies"]["schema"] == "unknown"
     assert diagnostics["background_jobs"]["active"] == 0
     assert diagnostics["background_jobs"]["capacity"] > 0
     assert diagnostics["request_metrics"]["remote_telemetry"] is False

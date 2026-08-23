@@ -86,7 +86,7 @@ def test_logging_setup_is_idempotent_and_uses_private_file_permissions(tmp_path)
 def test_request_metrics_are_bounded_aggregates_without_raw_paths(client):
     reset_request_metrics_for_test()
     assert client.get("/api/v1/health?token=must-not-appear").status_code == 200
-    assert client.get("/api/v1/ready").status_code == 200
+    assert client.get("/api/v1/ready").status_code == 503
 
     snapshot = request_metrics_snapshot()
     assert snapshot["request_count"] == 2

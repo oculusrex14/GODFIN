@@ -5,8 +5,14 @@ import base64
 import json
 from datetime import UTC, datetime, timedelta
 
+import httpx
+
 from app.core.encryption import decrypt, encrypt
-from app.core.license import LICENSE_FEATURES, license_status
+from app.core.license import (
+    LICENSE_FEATURES,
+    license_status,
+    refresh_license_if_due,
+)
 from app.core.config import settings
 from app.core.license_entitlement import (
     EntitlementValidationError,
@@ -31,6 +37,8 @@ class FakeResponse:
         self.status_code = status_code
 
     def json(self):
+        if isinstance(self._payload, Exception):
+            raise self._payload
         return self._payload
 
 
@@ -174,6 +182,69 @@ def test_invalid_license_response_never_uses_fallback(auth_client, monkeypatch):
     assert calls == [primary]
 
 
+def test_unsigned_legacy_success_falls_back_to_signed_entitlement(
+    auth_client,
+    monkeypatch,
+):
+    primary = "https://godfin.dev/api/license/verify"
+    fallback = "https://godfin.vercel.app/api/license/verify"
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if url == primary:
+            return FakeResponse({"valid": True, "tier": "max"})
+        return FakeResponse(
+            signed_server_response(
+                "max",
+                machine_id=kwargs["json"]["machine_id"],
+            )
+        )
+
+    monkeypatch.setattr(settings, "LICENSE_API_URL", primary)
+    monkeypatch.setattr(settings, "LICENSE_API_FALLBACK_URL", fallback)
+    monkeypatch.setattr("app.core.license.httpx.post", fake_post)
+
+    response = auth_client.post(
+        "/api/v1/license/activate",
+        json={"license_key": TEST_KEY},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["tier"] == "max"
+    assert calls == [primary, fallback]
+
+
+def test_invalid_json_falls_back_to_signed_entitlement(auth_client, monkeypatch):
+    primary = "https://godfin.dev/api/license/verify"
+    fallback = "https://godfin.vercel.app/api/license/verify"
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if url == primary:
+            return FakeResponse(ValueError("invalid json"))
+        return FakeResponse(
+            signed_server_response(
+                "pro",
+                machine_id=kwargs["json"]["machine_id"],
+            )
+        )
+
+    monkeypatch.setattr(settings, "LICENSE_API_URL", primary)
+    monkeypatch.setattr(settings, "LICENSE_API_FALLBACK_URL", fallback)
+    monkeypatch.setattr("app.core.license.httpx.post", fake_post)
+
+    response = auth_client.post(
+        "/api/v1/license/activate",
+        json={"license_key": TEST_KEY},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["tier"] == "pro"
+    assert calls == [primary, fallback]
+
+
 def test_license_server_message_and_unknown_code_are_never_reflected(
     auth_client,
     monkeypatch,
@@ -196,9 +267,11 @@ def test_license_server_message_and_unknown_code_are_never_reflected(
         json={"license_key": TEST_KEY},
     )
 
-    assert response.status_code == 403
-    assert response.json()["code"] == "LICENSE_INVALID"
-    assert response.json()["message"] == "This license could not be verified."
+    assert response.status_code == 503
+    assert response.json()["code"] == "VERIFY_UNAVAILABLE"
+    assert response.json()["message"] == (
+        "The license server is unavailable. Check your connection and try again."
+    )
     assert leaked not in response.text
 
 
@@ -215,6 +288,20 @@ def test_license_server_unhashable_code_and_unsigned_success_fail_safely(
                     "message": "/private/license/path",
                 },
                 403,
+            ),
+            FakeResponse(
+                {
+                    "valid": False,
+                    "code": ["malformed"],
+                    "message": "/private/license/path",
+                },
+                403,
+            ),
+            FakeResponse(
+                {
+                    "valid": True,
+                    "tier": "max",
+                }
             ),
             FakeResponse(
                 {
@@ -238,11 +325,11 @@ def test_license_server_unhashable_code_and_unsigned_success_fail_safely(
         json={"license_key": TEST_KEY},
     )
 
-    assert invalid.status_code == 403
-    assert invalid.json()["code"] == "LICENSE_INVALID"
+    assert invalid.status_code == 503
+    assert invalid.json()["code"] == "VERIFY_UNAVAILABLE"
     assert "/private/license/path" not in invalid.text
-    assert malformed.status_code == 502
-    assert malformed.json()["code"] == "LICENSE_ENTITLEMENT_INVALID"
+    assert malformed.status_code == 503
+    assert malformed.json()["code"] == "VERIFY_UNAVAILABLE"
 
 
 def test_paid_features_expire_when_signed_entitlement_expires(db_session):
@@ -267,6 +354,103 @@ def test_paid_features_expire_when_signed_entitlement_expires(db_session):
     assert within_grace["valid"] is True
     assert expired["tier"] == "free"
     assert expired["status"] == "verification_required"
+
+
+def test_valid_entitlement_enters_refresh_due_window(db_session):
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    install_test_license(
+        db_session,
+        "max",
+        issued_at=now - timedelta(days=5),
+        expires_at=now + timedelta(hours=36),
+    )
+
+    status = license_status(db_session, now=now)
+
+    assert status["tier"] == "max"
+    assert status["valid"] is True
+    assert status["status"] == "refresh_due"
+    assert "refresh" in status["message"].lower()
+
+
+def test_transient_reverify_failure_preserves_valid_cached_entitlement(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    install_test_license(db_session, "max")
+    _set(db_session, "license_key", encrypt(TEST_KEY))
+    monkeypatch.setattr(
+        "app.core.license.httpx.post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            httpx.ConnectError("offline")
+        ),
+    )
+
+    response = auth_client.post("/api/v1/license/verify")
+
+    assert response.status_code == 503
+    db_session.expire_all()
+    status = license_status(db_session)
+    assert status["tier"] == "max"
+    assert status["valid"] is True
+
+
+def test_proactive_refresh_runs_inside_48_hour_window(
+    db_session,
+    monkeypatch,
+):
+    now = datetime.now(UTC)
+    install_test_license(
+        db_session,
+        "max",
+        issued_at=now - timedelta(days=5),
+        expires_at=now + timedelta(hours=36),
+    )
+    _set(db_session, "license_key", encrypt(TEST_KEY))
+    calls = []
+
+    def fake_post(_url, **kwargs):
+        calls.append(kwargs["json"]["machine_id"])
+        return FakeResponse(
+            signed_server_response(
+                "max",
+                machine_id=kwargs["json"]["machine_id"],
+            )
+        )
+
+    monkeypatch.setattr("app.core.license.httpx.post", fake_post)
+
+    refreshed = refresh_license_if_due(db_session, now=now)
+
+    assert refreshed["tier"] == "max"
+    assert refreshed["status"] == "active"
+    assert len(calls) == 1
+
+
+def test_proactive_refresh_skips_when_entitlement_is_not_near_expiry(
+    db_session,
+    monkeypatch,
+):
+    now = datetime.now(UTC)
+    install_test_license(
+        db_session,
+        "pro",
+        issued_at=now,
+        expires_at=now + timedelta(days=7),
+    )
+    _set(db_session, "license_key", encrypt(TEST_KEY))
+    monkeypatch.setattr(
+        "app.core.license.httpx.post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("refresh should not run")
+        ),
+    )
+
+    current = refresh_license_if_due(db_session, now=now)
+
+    assert current["tier"] == "pro"
+    assert current["status"] == "active"
 
 
 def test_editing_legacy_license_flags_cannot_unlock_paid_features(db_session):

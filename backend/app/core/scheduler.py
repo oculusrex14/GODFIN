@@ -354,6 +354,15 @@ def _enqueue_weekly_digest() -> bool:
     )
 
 
+def _enqueue_license_refresh() -> bool:
+    return _enqueue_scheduled_job(
+        "license_refresh",
+        "license-refresh",
+        "License verification refresh is waiting to start.",
+        max_attempts=5,
+    )
+
+
 def start_scheduler(db_path: str, backup_dir: str) -> bool:
     """Start background scheduler with polling and nightly batch jobs."""
     global _backup_retry_attempts, _scheduler_retry_attempts
@@ -385,6 +394,10 @@ def start_scheduler(db_path: str, backup_dir: str) -> bool:
         """Queue one cross-process single-flight weekly digest."""
         _enqueue_weekly_digest()
 
+    def license_refresh_job():
+        """Refresh expiring signed entitlements with bounded durable retries."""
+        _enqueue_license_refresh()
+
     # Nightly batch at 23:59
     scheduler.add_job(
         nightly_batch,
@@ -404,6 +417,17 @@ def start_scheduler(db_path: str, backup_dir: str) -> bool:
         minute=0,
         id="weekly_advisor_digest",
         replace_existing=True,
+    )
+
+    scheduler.add_job(
+        license_refresh_job,
+        "interval",
+        hours=12,
+        id="license_refresh",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60 * 60,
     )
 
     # Read frequency from database for initial scheduling

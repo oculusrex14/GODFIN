@@ -47,6 +47,8 @@ export default function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [addOpen, setAddOpen] = useState(false);
   const [editTxn, setEditTxn] = useState(null);
+  const search = searchParams.get('q') || '';
+  const [searchInput, setSearchInput] = useState(search);
   const searchTimerRef = useRef(null);
   const pageSize = 20;
   const queryClient = useQueryClient();
@@ -54,7 +56,6 @@ export default function Transactions() {
   const { confirm, ConfirmDialog: DeleteConfirmDialog } = useConfirm();
   const { categories, categoryNames } = useTaxonomy();
 
-  const search = searchParams.get('q') || '';
   const effectiveSearch = search.trim().length >= 2 ? search.trim() : '';
   const categoryFilter = searchParams.get('category') || '';
   const subcategoryFilter = searchParams.get('subcategory') || '';
@@ -69,6 +70,15 @@ export default function Transactions() {
     },
     [],
   );
+
+  useEffect(() => {
+    const syncSearchAfterHistoryNavigation = () => {
+      const restoredSearch = new URLSearchParams(window.location.search).get('q') || '';
+      setSearchInput(restoredSearch);
+    };
+    window.addEventListener('popstate', syncSearchAfterHistoryNavigation);
+    return () => window.removeEventListener('popstate', syncSearchAfterHistoryNavigation);
+  }, []);
 
   function updateUrl(updates, { resetPage = true } = {}) {
     setSearchParams((current) => {
@@ -86,6 +96,7 @@ export default function Transactions() {
   }
 
   function handleSearchChange(value) {
+    setSearchInput(value);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
       const trimmed = value.trim();
@@ -169,8 +180,7 @@ export default function Transactions() {
         <div className="relative flex-1 min-w-[200px] max-w-full">
           <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" aria-hidden="true" />
           <input
-            key={search}
-            defaultValue={search}
+            value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Search merchants..."
             aria-label="Search merchants"

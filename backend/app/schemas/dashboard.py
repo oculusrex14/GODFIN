@@ -16,6 +16,9 @@ class DashboardStats(BaseModel):
 class DashboardMonthsResponse(BaseModel):
     months: list[str]
     has_data: bool
+    data_months: list[str]
+    audit_months: list[str]
+    calendar_months: list[str]
 
 
 class CategoryBreakdownItem(BaseModel):

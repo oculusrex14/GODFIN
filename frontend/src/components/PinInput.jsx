@@ -16,7 +16,7 @@ export default function PinInput({
   const [selection, setSelection] = useState(0);
   const inputRef = useRef(null);
   const pin = value ?? internalValue;
-  const slotCount = displayLength || Math.max(minLength, Math.min(maxLength, pin.length));
+  const slotCount = displayLength ?? maxLength;
 
   useEffect(() => {
     inputRef.current?.focus();

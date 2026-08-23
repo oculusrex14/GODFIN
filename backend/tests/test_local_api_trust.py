@@ -76,6 +76,20 @@ def test_packaged_policy_requires_exact_host_origin_and_launch_secret():
     assert development_origin.json()["code"] == "UNTRUSTED_LOCAL_ORIGIN"
 
 
+def test_packaged_policy_without_launch_secret_fails_closed():
+    client = _client(LocalApiPolicy(RuntimeMode.PACKAGED, None))
+
+    ordinary = client.get("/health", headers={"Origin": "godfin://app"})
+    callback = client.get(
+        "/api/v1/auth/gmail/callback?code=provider-code&state=one-time-state"
+    )
+
+    assert ordinary.status_code == 403
+    assert ordinary.json()["code"] == "MISSING_LAUNCH_TRUST"
+    assert callback.status_code == 403
+    assert callback.json()["code"] == "MISSING_LAUNCH_TRUST"
+
+
 def test_packaged_cors_is_exact_bounded_and_has_no_credentials_mode():
     client = _client(LocalApiPolicy(RuntimeMode.PACKAGED, "launch-secret"))
     response = client.options(

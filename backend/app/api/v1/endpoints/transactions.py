@@ -261,6 +261,10 @@ def delete_transaction(
             detail="Transaction is locked (month finalized). Reopen audit to edit.",
         )
 
+    # Preserve the pre-delete value before mutating the row so the audit log
+    # remains an accurate account of the state transition.
+    old_status = txn.status
+
     # Soft delete the transaction
     txn.status = "deleted"
     txn.updated_at = datetime.now(timezone.utc)
@@ -281,7 +285,7 @@ def delete_transaction(
     db.add(AuditLog(
         transaction_id=txn.id,
         field_changed="status",
-        old_value=txn.status,
+        old_value=old_status,
         new_value="deleted",
         change_source="user_delete",
     ))

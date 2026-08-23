@@ -27,10 +27,29 @@ def test_dashboard_months_uses_actual_transaction_months(auth_client):
 
     resp = auth_client.get("/api/v1/dashboard/months")
     assert resp.status_code == 200
-    assert resp.json() == {
-        "months": ["2025-11", "2024-03"],
-        "has_data": True,
-    }
+    payload = resp.json()
+    assert payload["has_data"] is True
+    assert payload["data_months"] == ["2025-11", "2024-03"]
+    assert date.today().strftime("%Y-%m") in payload["months"]
+    assert "2025-11" in payload["months"]
+    assert "2024-03" in payload["months"]
+
+
+def test_dashboard_months_unions_recent_calendar_and_older_data(auth_client):
+    auth_client.post("/api/v1/transactions", json={
+        "date": "2020-01-10",
+        "merchant_raw": "Older Month Test",
+        "amount": 100,
+        "type": "debit",
+        "account_id": SAVINGS_ACCOUNT_ID,
+        "category": "SHOPPING",
+    })
+
+    payload = auth_client.get("/api/v1/dashboard/months").json()
+
+    assert payload["months"][0] == date.today().strftime("%Y-%m")
+    assert "2020-01" in payload["months"]
+    assert payload["data_months"] == ["2020-01"]
 
 
 def test_dashboard_stats_empty_month(auth_client):

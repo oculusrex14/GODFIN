@@ -146,7 +146,7 @@ export default function PinScreen() {
             <PinInput
               minLength={4}
               maxLength={isFirstRun ? 6 : (pinLength || 8)}
-              displayLength={isFirstRun ? null : pinLength}
+              displayLength={isFirstRun ? 6 : (pinLength || 8)}
               value={pin}
               onChange={setPinValue}
               autoSubmit={false}

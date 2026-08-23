@@ -97,6 +97,28 @@ def _automatic_backup(context: JobContext, _payload: dict) -> dict:
     return {"backup_created": True}
 
 
+def _license_refresh(context: JobContext, _payload: dict) -> dict:
+    from app.core import database as database_module
+    from app.core.license import LicenseError, refresh_license_if_due
+
+    db = database_module.SessionLocal()
+    try:
+        context.progress(20, message="Checking the signed license window…")
+        before = refresh_license_if_due(db)
+        context.progress(99, message="License check completed.")
+        return {
+            "license_status": str(before.get("status") or "unknown"),
+            "tier": str(before.get("tier") or "free"),
+        }
+    except LicenseError as exc:
+        db.rollback()
+        if exc.retriable:
+            raise JobExecutionError(exc.code, retryable=True) from exc
+        return {"license_status": exc.code, "tier": "free"}
+    finally:
+        db.close()
+
+
 def _weekly_digest(context: JobContext, _payload: dict) -> dict:
     from app.core import database as database_module
     from app.core.advisor_digest import build_weekly_digest, digest_to_html
@@ -152,5 +174,6 @@ def register_default_job_handlers() -> None:
     register_job_handler("gmail_date_range", _date_range_gmail_sync)
     register_job_handler("gmail_scheduled", _scheduled_gmail_sync)
     register_job_handler("automatic_backup", _automatic_backup)
+    register_job_handler("license_refresh", _license_refresh)
     register_job_handler("weekly_digest", _weekly_digest)
     register_job_handler("embedding_setup", run_embedding_setup_job)

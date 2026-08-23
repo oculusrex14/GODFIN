@@ -350,7 +350,7 @@ test('PIN boxes use the saved length and rate-limit countdown from the server', 
   await expect(page.getByText('Try again in 0:17')).toBeVisible();
 });
 
-test('unknown migrated PIN length expands on keyboard and paste input', async ({ page }) => {
+test('unknown migrated PIN length uses stable neutral geometry for keyboard and paste', async ({ page }) => {
   await mockPinApi(
     page,
     { is_first_run: false, pin_length: null },
@@ -361,15 +361,30 @@ test('unknown migrated PIN length expands on keyboard and paste input', async ({
 
   const pinInput = page.getByLabel('Enter your PIN');
   const slots = page.locator('[data-pin-slots]');
-  await expect(slots).toHaveAttribute('data-pin-slots', '4');
+  await expect(slots).toHaveAttribute('data-pin-slots', '8');
   await pinInput.pressSequentially('48265');
-  await expect(slots).toHaveAttribute('data-pin-slots', '5');
+  await expect(slots).toHaveAttribute('data-pin-slots', '8');
 
   await pinInput.fill('');
   await page.evaluate(() => navigator.clipboard.writeText('48265073'));
   await pinInput.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
   await expect(pinInput).toHaveValue('48265073');
   await expect(slots).toHaveAttribute('data-pin-slots', '8');
+});
+
+test('first-run PIN setup always shows six stable slots', async ({ page }) => {
+  await mockPinApi(
+    page,
+    { is_first_run: true, pin_length: null },
+    { json: { authenticated: true, token: 'test-token' } },
+  );
+  await page.goto('/pin');
+
+  const pinInput = page.getByLabel('Choose a 4 to 6 digit PIN');
+  const slots = page.locator('[data-pin-slots]');
+  await expect(slots).toHaveAttribute('data-pin-slots', '6');
+  await pinInput.fill('4826');
+  await expect(slots).toHaveAttribute('data-pin-slots', '6');
 });
 
 test('auth token stays out of renderer storage and reload locks the app', async ({ page }) => {
