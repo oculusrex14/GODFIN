@@ -764,7 +764,9 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
             ("valid-quote", 100, "USD", 80, 8000, "INR"),
         )
         connection.execute(
-            "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO transactions "
+            "(id, amount, type, confidence, status, semantic_type) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             ("valid-transaction", 100, "debit", 0.9, "settled", "expense"),
         )
 
@@ -816,7 +818,9 @@ def test_additive_migration_installs_restart_safe_financial_guards(tmp_path):
                 ("bad-quote", 100, "USD", 80, 8000, "INR", "partial"),
             ),
             (
-                "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO transactions "
+                "(id, amount, type, confidence, status, semantic_type) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 ("bad-transaction", 100, "sideways", 0.9, "settled", "expense"),
             ),
         ]

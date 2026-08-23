@@ -13,6 +13,13 @@ import pdfplumber
 import xlrd
 
 from app.core.transaction_semantics import contains_semantic_term
+from app.core.transaction_enrichment import (
+    detect_payment_rail,
+    extract_processor,
+    extract_reference,
+    extract_vpa,
+    infer_vpa_role,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +42,13 @@ class StatementTransaction:
     suggested_category: Optional[str] = None
     suggested_subcategory: Optional[str] = None
     merchant_name: Optional[str] = None
+    payment_rail: Optional[str] = None
+    processor_candidate: Optional[str] = None
+    counterparty_candidate: Optional[str] = None
+    vpa_role: Optional[str] = None
+    source_bank: Optional[str] = None
+    source_format_version: Optional[str] = None
+    parser_version: Optional[str] = None
 
 
 # Aliases for compatibility with GLM reconciliation service
@@ -56,6 +70,14 @@ class ParsedTransaction:
     vpa_handle: Optional[str] = None
     upi_ref_number: Optional[str] = None
     merchant_name: Optional[str] = None
+    value_date: Optional[date] = None
+    payment_rail: Optional[str] = None
+    processor_candidate: Optional[str] = None
+    counterparty_candidate: Optional[str] = None
+    vpa_role: Optional[str] = None
+    source_bank: Optional[str] = None
+    source_format_version: Optional[str] = None
+    parser_version: Optional[str] = None
 
     @classmethod
     def from_statement_transaction(cls, st: StatementTransaction) -> 'ParsedTransaction':
@@ -76,6 +98,14 @@ class ParsedTransaction:
             vpa_handle=st.vpa_handle,
             upi_ref_number=st.upi_ref_number,
             merchant_name=st.merchant_name,
+            value_date=st.value_date,
+            payment_rail=st.payment_rail,
+            processor_candidate=st.processor_candidate,
+            counterparty_candidate=st.counterparty_candidate,
+            vpa_role=st.vpa_role,
+            source_bank=st.source_bank,
+            source_format_version=st.source_format_version,
+            parser_version=st.parser_version,
         )
 
 
@@ -110,6 +140,14 @@ class ParsedStatement:
             total_credits=result.total_credits,
         )
         transactions = [ParsedTransaction.from_statement_transaction(t) for t in result.transactions]
+        if result.statement_type.startswith("hdfc_"):
+            parser_version = result.parser_profile or result.statement_type
+            for transaction in transactions:
+                transaction.source_bank = transaction.source_bank or "hdfc"
+                transaction.source_format_version = (
+                    transaction.source_format_version or parser_version
+                )
+                transaction.parser_version = transaction.parser_version or parser_version
         return cls(metadata=metadata, transactions=transactions)
 
 
@@ -518,29 +556,47 @@ def parse_upi_narration(narration: str) -> dict:
     """
     text = narration[4:]  # Strip 'UPI-' prefix
 
-    # Find the VPA (contains @ symbol) — this is the anchor
-    vpa_match = re.search(r'([A-Za-z0-9._]+@[A-Za-z0-9]+)', text)
-    if not vpa_match:
-        return {'merchant_name': text.split('-')[0].strip(), 'vpa': None, 'ref': None, 'instrument': 'upi'}
+    # A general VPA grammar is used only as evidence. The handle alone never
+    # decides which consumer app was used or whether the counterparty is a
+    # merchant.
+    vpa = extract_vpa(text)
+    if not vpa:
+        processor, merchant = extract_processor(text, text.split('-')[0].strip())
+        return {
+            'merchant_name': merchant,
+            'vpa': None,
+            'vpa_role': None,
+            'ref': extract_reference(text),
+            'instrument': 'upi',
+            'payment_rail': 'upi',
+            'processor_candidate': processor,
+        }
 
-    vpa = vpa_match.group(1)
-    vpa_start = vpa_match.start()
+    vpa_match = re.search(re.escape(vpa), text, re.IGNORECASE)
+    vpa_start = vpa_match.start() if vpa_match else 0
 
     # Everything before the VPA (minus trailing hyphen) is the name
     name_part = text[:vpa_start].rstrip('-').strip()
 
     # Everything after the VPA contains IFSC-REF-DESCRIPTION
-    after_vpa = text[vpa_match.end():]
+    after_vpa = text[vpa_match.end():] if vpa_match else text
 
     # Extract reference number (long digit sequence)
-    ref_match = re.search(r'(\d{10,})', after_vpa)
-    ref = ref_match.group(1) if ref_match else None
+    ref = extract_reference(after_vpa)
+    if not ref:
+        ref_match = re.search(r'(\d{10,})', after_vpa)
+        ref = ref_match.group(1) if ref_match else None
+    processor, merchant = extract_processor(text, name_part)
+    merchant = merchant or name_part
 
     return {
-        'merchant_name': name_part,
+        'merchant_name': merchant,
         'vpa': vpa,
+        'vpa_role': infer_vpa_role(vpa, merchant),
         'ref': ref,
         'instrument': 'upi',
+        'payment_rail': 'upi',
+        'processor_candidate': processor,
     }
 
 
@@ -560,7 +616,11 @@ def parse_statement_narration(narration: str) -> dict:
         'is_income': False,
         'semantic_type': 'unknown',
         'vpa': None,
+        'vpa_role': None,
         'ref': None,
+        'payment_rail': detect_payment_rail(narration),
+        'processor_candidate': None,
+        'counterparty_candidate': None,
         'suggested_category': None,
         'suggested_subcategory': None,
     }
@@ -907,6 +967,11 @@ def _finalize_savings_txn(raw: dict, txns_out: list) -> None:
         txn_type=txn_type,
         ref_number=raw.get('ref') or parsed.get('ref'),
         closing_balance=raw.get('balance'),
+        value_date=(
+            raw.get('value_date')
+            if isinstance(raw.get('value_date'), date)
+            else _parse_statement_date(str(raw.get('value_date') or ''))
+        ),
         instrument=parsed.get('instrument', 'savings_account'),
         is_transfer=parsed.get('is_transfer', False),
         is_income=is_income,
@@ -916,6 +981,13 @@ def _finalize_savings_txn(raw: dict, txns_out: list) -> None:
         suggested_category=parsed.get('suggested_category'),
         suggested_subcategory=parsed.get('suggested_subcategory'),
         merchant_name=parsed.get('merchant_name'),
+        payment_rail=parsed.get('payment_rail'),
+        processor_candidate=parsed.get('processor_candidate'),
+        counterparty_candidate=parsed.get('counterparty_candidate'),
+        vpa_role=parsed.get('vpa_role'),
+        source_bank="hdfc",
+        source_format_version="hdfc-savings-explicit-columns-v1",
+        parser_version="hdfc-savings-v1",
     )
     txns_out.append(txn)
 

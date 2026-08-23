@@ -31,6 +31,14 @@ from app.models.reward_pilot import RewardPilotSubmission
 from app.models.gmail_oauth_attempt import GmailOAuthAttempt
 from app.models.background_job import BackgroundJob
 from app.models.account_balance import AccountBalanceAnchor, AccountStatementCoverage
+from app.models.merchant_enrichment import (
+    MerchantAlias,
+    MerchantEntity,
+    MerchantIdentifier,
+    ProcessorPattern,
+    SourceProvenance,
+    TransactionRelationship,
+)
 
 __all__ = [
     "Account", "Transaction", "TransactionSplit", "MerchantMemory",
@@ -44,4 +52,6 @@ __all__ = [
     "GmailOAuthAttempt",
     "BackgroundJob",
     "AccountBalanceAnchor", "AccountStatementCoverage",
+    "MerchantAlias", "MerchantEntity", "MerchantIdentifier",
+    "ProcessorPattern", "SourceProvenance", "TransactionRelationship",
 ]

@@ -26,7 +26,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 21
+CURRENT_SCHEMA_REVISION = 22
 
 
 class SchemaMigrationError(RuntimeError):
@@ -2100,6 +2100,298 @@ def _validate_revision_21(connection: sqlite3.Connection) -> None:
         raise SchemaMigrationError("Historical income suggestions are invalid.")
 
 
+def _apply_revision_22(connection: sqlite3.Connection) -> None:
+    """Add source-preserving enrichment, merchant provenance and relationships."""
+    _add_missing_columns(
+        connection,
+        "transactions",
+        {
+            "semantic_detail": "VARCHAR(32) NOT NULL DEFAULT 'unknown'",
+            "source_bank": "VARCHAR(64)",
+            "source_format_version": "VARCHAR(64)",
+            "value_date": "DATE",
+            "currency": "VARCHAR(3) NOT NULL DEFAULT 'INR'",
+            "running_balance_minor": "BIGINT",
+            "payment_rail": "VARCHAR(32)",
+            "processor_candidate": "VARCHAR(100)",
+            "counterparty_candidate": "VARCHAR(255)",
+            "reference_number": "VARCHAR(64)",
+            "parser_version": "VARCHAR(64)",
+            "extraction_evidence": "TEXT",
+            "vpa_role": "VARCHAR(16)",
+            "review_required": "BOOLEAN NOT NULL DEFAULT 1",
+        },
+    )
+    transaction_columns = _table_columns(connection, "transactions")
+    if transaction_columns:
+        connection.execute(
+            "UPDATE transactions SET currency = 'INR' "
+            "WHERE currency IS NULL OR length(trim(currency)) <> 3"
+        )
+        connection.execute(
+            "UPDATE transactions SET semantic_detail = 'unknown' "
+            "WHERE semantic_detail IS NULL OR trim(semantic_detail) = ''"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_transactions_semantic_detail "
+            "ON transactions(semantic_detail)"
+        )
+        review_index_columns = (
+            "review_required, date" if "date" in transaction_columns else "review_required"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_transactions_review_required "
+            f"ON transactions({review_index_columns})"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_transactions_reference_number "
+            "ON transactions(reference_number)"
+        )
+
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS source_provenance (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            source_type VARCHAR(32) NOT NULL,
+            source_uri VARCHAR(500),
+            source_label VARCHAR(255) NOT NULL,
+            license_note VARCHAR(255),
+            reviewed_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS merchant_entities (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            canonical_name VARCHAR(255) NOT NULL UNIQUE,
+            entity_type VARCHAR(24) NOT NULL DEFAULT 'merchant',
+            category VARCHAR(50),
+            subcategory VARCHAR(50),
+            provenance_id VARCHAR(36),
+            is_verified BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            CONSTRAINT ck_merchant_entities_type CHECK (
+                entity_type IN ('merchant','processor','government','financial')
+            ),
+            FOREIGN KEY(provenance_id) REFERENCES source_provenance(id)
+                ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_merchant_entities_category
+            ON merchant_entities(category);
+
+        CREATE TABLE IF NOT EXISTS merchant_aliases (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            entity_id VARCHAR(36) NOT NULL,
+            normalized_alias VARCHAR(255) NOT NULL,
+            source_bank VARCHAR(64) NOT NULL DEFAULT '',
+            alias_kind VARCHAR(24) NOT NULL DEFAULT 'descriptor',
+            provenance_id VARCHAR(36),
+            is_verified BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_merchant_alias_bank UNIQUE (
+                normalized_alias, source_bank
+            ),
+            CONSTRAINT ck_merchant_aliases_kind CHECK (
+                alias_kind IN ('canonical','descriptor','vpa_name','domain')
+            ),
+            FOREIGN KEY(entity_id) REFERENCES merchant_entities(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(provenance_id) REFERENCES source_provenance(id)
+                ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_merchant_aliases_entity
+            ON merchant_aliases(entity_id);
+
+        CREATE TABLE IF NOT EXISTS merchant_identifiers (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            entity_id VARCHAR(36) NOT NULL,
+            identifier_type VARCHAR(32) NOT NULL,
+            normalized_value VARCHAR(255) NOT NULL,
+            source_bank VARCHAR(64) NOT NULL DEFAULT '',
+            provenance_id VARCHAR(36),
+            is_person BOOLEAN NOT NULL DEFAULT 0,
+            is_verified BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_merchant_identifier_bank UNIQUE (
+                identifier_type, normalized_value, source_bank
+            ),
+            CONSTRAINT ck_merchant_identifiers_type CHECK (
+                identifier_type IN ('vpa','domain','mcc','processor_account')
+            ),
+            FOREIGN KEY(entity_id) REFERENCES merchant_entities(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(provenance_id) REFERENCES source_provenance(id)
+                ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_merchant_identifiers_entity
+            ON merchant_identifiers(entity_id);
+
+        CREATE TABLE IF NOT EXISTS processor_patterns (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            processor_name VARCHAR(100) NOT NULL,
+            pattern_type VARCHAR(24) NOT NULL,
+            pattern VARCHAR(255) NOT NULL,
+            source_bank VARCHAR(64) NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 100,
+            provenance_id VARCHAR(36),
+            is_enabled BOOLEAN NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_processor_pattern_bank UNIQUE (
+                processor_name, pattern_type, pattern, source_bank
+            ),
+            CONSTRAINT ck_processor_patterns_type CHECK (
+                pattern_type IN ('exact_prefix','contains','regex')
+            ),
+            FOREIGN KEY(provenance_id) REFERENCES source_provenance(id)
+                ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_processor_patterns_enabled_priority
+            ON processor_patterns(is_enabled, priority);
+
+        CREATE TABLE IF NOT EXISTS transaction_relationships (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            from_transaction_id VARCHAR(36) NOT NULL,
+            to_transaction_id VARCHAR(36) NOT NULL,
+            relationship_type VARCHAR(40) NOT NULL,
+            confidence REAL NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            date_gap_days INTEGER NOT NULL,
+            reference_match BOOLEAN NOT NULL DEFAULT 0,
+            evidence_json TEXT NOT NULL DEFAULT '[]',
+            detector_version VARCHAR(32) NOT NULL DEFAULT '1.0',
+            decided_at DATETIME,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            CONSTRAINT uq_transaction_relationship_type UNIQUE (
+                from_transaction_id, to_transaction_id, relationship_type
+            ),
+            CONSTRAINT ck_transaction_relationship_not_self CHECK (
+                from_transaction_id <> to_transaction_id
+            ),
+            CONSTRAINT ck_transaction_relationship_type CHECK (
+                relationship_type IN (
+                    'refund_of','reversal_of','internal_transfer_pair',
+                    'credit_card_payment_pair','wallet_topup_pair','duplicate_of'
+                )
+            ),
+            CONSTRAINT ck_transaction_relationship_status CHECK (
+                status IN ('pending','confirmed','dismissed','voided')
+            ),
+            CONSTRAINT ck_transaction_relationship_confidence CHECK (
+                confidence >= 0 AND confidence <= 1
+            ),
+            FOREIGN KEY(from_transaction_id) REFERENCES transactions(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(to_transaction_id) REFERENCES transactions(id)
+                ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS ix_transaction_relationships_status
+            ON transaction_relationships(status);
+        CREATE INDEX IF NOT EXISTS ix_transaction_relationships_from
+            ON transaction_relationships(from_transaction_id);
+        CREATE INDEX IF NOT EXISTS ix_transaction_relationships_to
+            ON transaction_relationships(to_transaction_id);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS merchant_alias_fts USING fts5(
+            alias_id UNINDEXED,
+            normalized_alias,
+            tokenize='unicode61 remove_diacritics 2'
+        );
+        CREATE TRIGGER IF NOT EXISTS trg_merchant_alias_fts_insert
+        AFTER INSERT ON merchant_aliases BEGIN
+            INSERT INTO merchant_alias_fts(alias_id, normalized_alias)
+            VALUES (new.id, new.normalized_alias);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_merchant_alias_fts_update
+        AFTER UPDATE OF normalized_alias ON merchant_aliases BEGIN
+            DELETE FROM merchant_alias_fts WHERE alias_id = old.id;
+            INSERT INTO merchant_alias_fts(alias_id, normalized_alias)
+            VALUES (new.id, new.normalized_alias);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_merchant_alias_fts_delete
+        AFTER DELETE ON merchant_aliases BEGIN
+            DELETE FROM merchant_alias_fts WHERE alias_id = old.id;
+        END;
+        INSERT INTO merchant_alias_fts(alias_id, normalized_alias)
+        SELECT a.id, a.normalized_alias
+        FROM merchant_aliases a
+        WHERE NOT EXISTS (
+            SELECT 1 FROM merchant_alias_fts f WHERE f.alias_id = a.id
+        );
+        """
+    )
+
+
+def _validate_revision_22(connection: sqlite3.Connection) -> None:
+    transaction_columns = _table_columns(connection, "transactions")
+    required_transaction_columns = {
+        "semantic_detail",
+        "source_bank",
+        "source_format_version",
+        "value_date",
+        "currency",
+        "running_balance_minor",
+        "payment_rail",
+        "processor_candidate",
+        "counterparty_candidate",
+        "reference_number",
+        "parser_version",
+        "extraction_evidence",
+        "vpa_role",
+        "review_required",
+    }
+    if transaction_columns and required_transaction_columns.difference(
+        transaction_columns
+    ):
+        raise SchemaMigrationError("The transaction enrichment schema is incomplete.")
+
+    required_tables = {
+        "source_provenance",
+        "merchant_entities",
+        "merchant_aliases",
+        "merchant_identifiers",
+        "processor_patterns",
+        "transaction_relationships",
+        "merchant_alias_fts",
+    }
+    existing_tables = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+        ).fetchall()
+    }
+    if required_tables.difference(existing_tables):
+        raise SchemaMigrationError("The merchant enrichment tables are incomplete.")
+
+    if transaction_columns:
+        invalid = connection.execute(
+            "SELECT COUNT(*) FROM transactions WHERE "
+            "currency IS NULL OR length(currency) <> 3 OR currency <> UPPER(currency) "
+            "OR semantic_detail IS NULL "
+            "OR vpa_role NOT IN ('person','merchant','unknown') "
+            "OR running_balance_minor < ? OR running_balance_minor > ?",
+            (-_MAX_MONEY_MINOR, _MAX_MONEY_MINOR),
+        ).fetchone()[0]
+        if invalid:
+            raise SchemaMigrationError("Transaction enrichment values are invalid.")
+
+    invalid_relationships = connection.execute(
+        "SELECT COUNT(*) FROM transaction_relationships WHERE "
+        "from_transaction_id = to_transaction_id OR confidence < 0 OR confidence > 1 "
+        "OR status NOT IN ('pending','confirmed','dismissed','voided')"
+    ).fetchone()[0]
+    if invalid_relationships:
+        raise SchemaMigrationError("Transaction relationships are invalid.")
+
+    try:
+        connection.execute(
+            "SELECT alias_id FROM merchant_alias_fts WHERE merchant_alias_fts MATCH ? LIMIT 1",
+            ("godfin",),
+        ).fetchall()
+    except sqlite3.DatabaseError as exc:
+        raise SchemaMigrationError("SQLite merchant search is unavailable.") from exc
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -2166,6 +2458,12 @@ MIGRATION_REGISTRY = (
         name="add_time_aware_income_matching",
         apply=_apply_revision_21,
         validate=_validate_revision_21,
+    ),
+    SchemaMigration(
+        revision=22,
+        name="add_transaction_enrichment_and_merchant_entities",
+        apply=_apply_revision_22,
+        validate=_validate_revision_22,
     ),
 )
 

@@ -23,6 +23,10 @@ from app.core.transaction_semantics import (
 )
 from app.models.account import Account
 from app.core.statement_parser import ParsedTransaction, ParsedStatement, StatementTransaction, StatementMetadata
+from app.core.transaction_enrichment import (
+    apply_transaction_envelope,
+    build_transaction_envelope,
+)
 
 
 @dataclass
@@ -352,10 +356,10 @@ class ReconciliationService:
         vpa_handle = getattr(parsed_txn, 'vpa_handle', None)
         upi_ref = getattr(parsed_txn, 'upi_ref_number', None) or parsed_txn.reference
 
-        return Transaction(
+        transaction = Transaction(
             id=str(uuid.uuid4()),
             date=parsed_txn.date,
-            raw_text=f"Statement: {parsed_txn.description} {parsed_txn.amount}",
+            raw_text=parsed_txn.description,
             merchant_raw=merchant_raw,
             merchant_normalized=merchant_raw.upper().strip() if merchant_raw else parsed_txn.description.upper().strip(),
             amount=parsed_txn.amount,
@@ -368,11 +372,40 @@ class ReconciliationService:
             semantic_type=semantic_type,
             vpa_handle=vpa_handle,
             upi_ref_number=upi_ref,
-            confidence=0.8,
-            classification_source='statement',
+            confidence=0.0,
+            classification_source='unclassified',
             checksum_source=checksum,
             reconciled=True,
         )
+        envelope = build_transaction_envelope(
+            raw_text=parsed_txn.description,
+            source_type=source,
+            source_account_id=account_id,
+            source_bank=getattr(parsed_txn, "source_bank", None),
+            source_format_version=getattr(
+                parsed_txn, "source_format_version", None
+            ),
+            booking_date=parsed_txn.date,
+            value_date=getattr(parsed_txn, "value_date", None),
+            amount=parsed_txn.amount,
+            currency=getattr(parsed_txn, "currency", "INR") or "INR",
+            direction=parsed_txn.type,
+            running_balance=getattr(parsed_txn, "balance", None),
+            instrument=instrument,
+            merchant_raw=merchant_raw,
+            merchant_candidate=merchant_raw,
+            counterparty_candidate=getattr(
+                parsed_txn, "counterparty_candidate", None
+            ),
+            vpa=vpa_handle,
+            reference=upi_ref,
+            coarse_semantic=semantic_type,
+            category=getattr(parsed_txn, "category_hint", None),
+            subcategory=getattr(parsed_txn, "subcategory_hint", None),
+            parser_version=getattr(parsed_txn, "parser_version", None),
+        )
+        apply_transaction_envelope(transaction, envelope)
+        return transaction
 
     @staticmethod
     def detect_income_sources(

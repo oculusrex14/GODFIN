@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.classifier import classify_transaction
 from app.core.merchant_memory_service import upsert_merchant_memory
 from app.core.transaction_semantics import apply_category_semantic
+from app.core.transaction_enrichment import refresh_transaction_enrichment
 from app.models.transaction import Transaction
 
 
@@ -68,9 +69,11 @@ def postprocess_imported_transactions(
                     ),
                 )
                 classified += 1
-            else:
+            refresh_transaction_enrichment(transaction)
+            if transaction.review_required:
                 review_queue += 1
         except Exception:
+            transaction.review_required = True
             review_queue += 1
 
     merchant_keys = {

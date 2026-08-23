@@ -30,6 +30,10 @@ from app.core.transaction_semantics import (
     TransactionSemantic,
     infer_semantic_type,
 )
+from app.core.transaction_enrichment import (
+    apply_transaction_envelope,
+    build_transaction_envelope,
+)
 from app.models.app_setting import AppSetting
 from app.models.transaction import Transaction
 
@@ -474,6 +478,27 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
         semantic_type=semantic_type,
         reconciled=False,
     )
+    envelope = build_transaction_envelope(
+        raw_text=parsed.raw_text,
+        source_type="gmail",
+        source_account_id=account_id,
+        source_bank="hdfc",
+        source_format_version=f"gmail-{parsed.account_type}-v1",
+        booking_date=parsed.txn_date,
+        amount=parsed.amount,
+        currency="INR",
+        direction=parsed.txn_type,
+        instrument=parsed.instrument,
+        merchant_raw=parsed.merchant_raw,
+        merchant_candidate=parsed.merchant_normalized,
+        vpa=parsed.vpa_handle,
+        reference=parsed.upi_ref_number,
+        coarse_semantic=semantic_type,
+        category=classification.category,
+        subcategory=classification.subcategory,
+        parser_version="gmail-hdfc-v1",
+    )
+    apply_transaction_envelope(txn, envelope)
     db.add(txn)
     # Retry flush up to 3 times on database lock
     for attempt in range(3):

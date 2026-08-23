@@ -48,6 +48,7 @@ from app.core.transaction_semantics import (
     TransactionSemantic,
     apply_category_semantic,
 )
+from app.core.transaction_enrichment import refresh_transaction_enrichment
 from app.models.account import Account
 from app.models.income_source import IncomeSource
 from app.models.transaction import Transaction
@@ -909,10 +910,12 @@ async def import_statement(
                             ),
                         )
                         classified_count += 1
-                    else:
+                    refresh_transaction_enrichment(txn)
+                    if txn.review_required:
                         review_queue_count += 1
                 except Exception as e:
                     logger.warning(f"Classification failed for {txn.merchant_raw}: {e}")
+                    txn.review_required = True
                     review_queue_count += 1
 
             merchant_keys = {

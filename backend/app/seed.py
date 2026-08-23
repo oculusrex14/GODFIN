@@ -1,9 +1,15 @@
 import json
+import uuid
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 
+from app.core.merchant_entity_service import normalize_alias
+from app.core.merchant_seed_catalog import REVIEWED_MERCHANT_CATALOG_V1
 from app.models.account import Account
 from app.models.app_setting import AppSetting
 from app.models.classification_rule import ClassificationRule
+from app.models.merchant_enrichment import MerchantAlias, MerchantEntity, SourceProvenance
 
 # Stable IDs preserve upgrades while the fresh-install display data remains
 # synthetic and contains no developer account identifiers.
@@ -115,12 +121,6 @@ def seed_classification_rules(db: Session) -> None:
         ('contains', 'ZEPTO', 'FOOD & DINING', 'Groceries', 10),
         ('contains', 'INSTAMART', 'FOOD & DINING', 'Groceries', 10),
         ('contains', 'DMART', 'FOOD & DINING', 'Groceries', 10),
-        ('contains', 'SHOPPYMART', 'FOOD & DINING', 'Groceries', 10),
-        ('contains', 'SAARYODAY FOODS', 'FOOD & DINING', 'Canteen', 10),
-        ('contains', 'CUT COFFEE', 'FOOD & DINING', 'Coffee/Snacks', 10),
-        ('contains', 'ABCOFFEE', 'FOOD & DINING', 'Coffee/Snacks', 10),
-        ('contains', 'BRAHMINS KITCHEN', 'FOOD & DINING', 'Restaurants', 10),
-        ('contains', 'SOJITZ VENDING', 'FOOD & DINING', 'Coffee/Snacks', 10),
         # TRANSPORTATION
         ('contains', 'UBER', 'TRANSPORTATION', 'Ride Hailing', 10),
         ('contains', 'OLA', 'TRANSPORTATION', 'Ride Hailing', 10),
@@ -151,7 +151,6 @@ def seed_classification_rules(db: Session) -> None:
         ('contains', 'PVR INOX', 'ENTERTAINMENT', 'Movies/Events', 8),
         ('contains', 'INOX', 'ENTERTAINMENT', 'Movies/Events', 10),
         ('contains', 'SUPERCELL', 'ENTERTAINMENT', 'Gaming', 10),
-        ('contains', 'JP BADMINTON', 'ENTERTAINMENT', 'Sports', 10),
         ('contains', 'PLAYO', 'ENTERTAINMENT', 'Sports', 10),
         # UTILITIES & BILLS
         ('contains', 'AIRTEL', 'UTILITIES & BILLS', 'Internet/Phone', 10),
@@ -180,9 +179,6 @@ def seed_classification_rules(db: Session) -> None:
         ('contains', 'APOLLO', 'HEALTH & WELLNESS', 'Medical/Pharmacy', 10),
         ('contains', 'MEDPLUS', 'HEALTH & WELLNESS', 'Medical/Pharmacy', 10),
         ('contains', 'CULT.FIT', 'HEALTH & WELLNESS', 'Gym/Fitness', 10),
-        ('contains', 'SRI DURGA MEDICALS', 'HEALTH & WELLNESS', 'Medical/Pharmacy', 10),
-        ('contains', 'RADHA RAMAN HOSPITAL', 'HEALTH & WELLNESS', 'Hospital', 10),
-        ('contains', 'KRIPA SURGICALS', 'HEALTH & WELLNESS', 'Medical/Pharmacy', 10),
         # EDUCATION
         ('contains', 'UDEMY', 'EDUCATION', 'Courses/Books', 10),
         ('contains', 'COURSERA', 'EDUCATION', 'Courses/Books', 10),
@@ -190,8 +186,6 @@ def seed_classification_rules(db: Session) -> None:
         ('contains', 'CRED', 'TRANSFERS', 'Credit Card Payment', 10),
         ('contains', 'BILLDESK', 'TRANSFERS', 'Credit Card Payment', 10),
         ('contains', 'CREDIT CARD PAYMENT', 'TRANSFERS', 'Credit Card Payment', 10),
-        # INCOME (salary sources from user's statement)
-        ('contains', 'RSM US INTEGRATED', 'INCOME', 'Salary', 10),
     ]
 
     for rule_type, pattern, category, subcategory, priority in rules:
@@ -208,7 +202,86 @@ def seed_classification_rules(db: Session) -> None:
     db.commit()
 
 
+_MERCHANT_SEED_NAMESPACE = uuid.UUID("c3fa5cbf-72f7-4b93-ad91-0d6d49f5890d")
+_MERCHANT_PROVENANCE_ID = str(
+    uuid.uuid5(_MERCHANT_SEED_NAMESPACE, "godfin-reviewed-merchant-catalog-v1")
+)
+
+
+def seed_reviewed_merchants(db: Session) -> None:
+    """Install canonical public-brand candidates without guessed aliases."""
+
+    provenance = db.get(SourceProvenance, _MERCHANT_PROVENANCE_ID)
+    if provenance is None:
+        provenance = SourceProvenance(
+            id=_MERCHANT_PROVENANCE_ID,
+            source_type="bundled_reviewed_catalog",
+            source_uri=None,
+            source_label="GODFIN reviewed public-brand catalog v1",
+            license_note=(
+                "Canonical public brand names only; no affiliation or ownership "
+                "of arbitrary bank descriptors is implied."
+            ),
+            reviewed_at=datetime(2026, 8, 24),
+        )
+        db.add(provenance)
+        db.flush()
+
+    for canonical_name, entity_type, category, subcategory in (
+        REVIEWED_MERCHANT_CATALOG_V1
+    ):
+        entity = (
+            db.query(MerchantEntity)
+            .filter(MerchantEntity.canonical_name == canonical_name)
+            .first()
+        )
+        if entity is None:
+            entity = MerchantEntity(
+                id=str(
+                    uuid.uuid5(
+                        _MERCHANT_SEED_NAMESPACE,
+                        f"entity:{canonical_name}",
+                    )
+                ),
+                canonical_name=canonical_name,
+                entity_type=entity_type,
+                category=category,
+                subcategory=subcategory,
+                provenance_id=_MERCHANT_PROVENANCE_ID,
+                is_verified=True,
+            )
+            db.add(entity)
+            db.flush()
+
+        normalized_alias = normalize_alias(canonical_name)
+        existing_alias = (
+            db.query(MerchantAlias)
+            .filter_by(normalized_alias=normalized_alias, source_bank="")
+            .first()
+        )
+        if existing_alias is None:
+            db.add(
+                MerchantAlias(
+                    id=str(
+                        uuid.uuid5(
+                            _MERCHANT_SEED_NAMESPACE,
+                            f"alias:{normalized_alias}",
+                        )
+                    ),
+                    entity_id=entity.id,
+                    normalized_alias=normalized_alias,
+                    source_bank="",
+                    alias_kind="canonical",
+                    provenance_id=_MERCHANT_PROVENANCE_ID,
+                    is_verified=True,
+                )
+            )
+
+    db.commit()
+
+
 def run_seeds(db: Session) -> None:
     seed_accounts(db)
     seed_app_settings(db)
     seed_classification_rules(db)
+    seed_reviewed_merchants(db)

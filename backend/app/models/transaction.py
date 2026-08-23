@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -82,6 +83,31 @@ class Transaction(Base):
             "'cashback', 'adjustment', 'excluded')",
             name="ck_transactions_semantic_type",
         ),
+        CheckConstraint(
+            "semantic_detail IN ('purchase', 'transfer_in', 'transfer_out', "
+            "'internal_transfer', 'credit_card_payment', 'refund', 'reversal', "
+            "'chargeback', 'fee_charge', 'cash_withdrawal', 'cash_deposit', "
+            "'interest_credit', 'interest_debit', 'salary', 'other_income', "
+            "'cashback_reward', 'wallet_topup', 'wallet_withdrawal', "
+            "'investment_buy', 'investment_sell', 'investment_sip', 'dividend', "
+            "'loan_disbursement', 'loan_payment', 'emi', 'bill_payment', "
+            "'tax_payment', 'tax_refund', 'unknown')",
+            name="ck_transactions_semantic_detail",
+        ),
+        CheckConstraint(
+            "currency = UPPER(currency) AND length(currency) = 3",
+            name="ck_transactions_currency",
+        ),
+        CheckConstraint(
+            "vpa_role IS NULL OR vpa_role IN ('person', 'merchant', 'unknown')",
+            name="ck_transactions_vpa_role",
+        ),
+        CheckConstraint(
+            f"running_balance_minor IS NULL OR "
+            f"(running_balance_minor >= {-MAX_MONEY_MINOR} AND "
+            f"running_balance_minor <= {MAX_MONEY_MINOR})",
+            name="ck_transactions_running_balance_minor_range",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -112,7 +138,23 @@ class Transaction(Base):
     semantic_type: Mapped[str] = mapped_column(
         String(24), nullable=False, default="unknown"
     )
+    semantic_detail: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unknown"
+    )
     source: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_bank: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_format_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    value_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
+    running_balance_minor: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    payment_rail: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    processor_candidate: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    counterparty_candidate: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reference_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    parser_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    extraction_evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    vpa_role: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     vpa_handle: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     upi_ref_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     email_message_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
