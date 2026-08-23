@@ -3,7 +3,7 @@ from app.models.transaction import Transaction
 from app.models.transaction_split import TransactionSplit
 from app.models.merchant_memory import MerchantMemory
 from app.models.monthly_aggregate import MonthlyAggregate
-from app.models.income_source import IncomeSource
+from app.models.income_source import IncomeMatchSuggestion, IncomeSource
 from app.models.classification_rule import ClassificationRule
 from app.models.goal import Goal
 from app.models.goal_contribution import (
@@ -34,7 +34,7 @@ from app.models.account_balance import AccountBalanceAnchor, AccountStatementCov
 
 __all__ = [
     "Account", "Transaction", "TransactionSplit", "MerchantMemory",
-    "MonthlyAggregate", "IncomeSource", "ClassificationRule", "Goal",
+    "MonthlyAggregate", "IncomeSource", "IncomeMatchSuggestion", "ClassificationRule", "Goal",
     "GoalContribution", "GoalContributionSuggestion",
     "RecurringPattern", "AppSetting", "AuditSession", "AuditLog", "SystemLog",
     "LLMConfiguration", "Subscription", "AuthSession", "PinAttempt",

@@ -26,7 +26,7 @@ from app.models.goal import Goal
 from app.models.goal_contribution import GoalContribution
 
 SCHEMA_REVISION_KEY = "schema_revision"
-CURRENT_SCHEMA_REVISION = 20
+CURRENT_SCHEMA_REVISION = 21
 
 
 class SchemaMigrationError(RuntimeError):
@@ -1981,6 +1981,125 @@ def _validate_revision_20(connection: sqlite3.Connection) -> None:
         )
 
 
+def _apply_revision_21(connection: sqlite3.Connection) -> None:
+    """Add time-aware income sources and reviewable historical matches."""
+    _add_missing_columns(
+        connection,
+        "income_sources",
+        {
+            "effective_from": "DATE",
+            "effective_to": "DATE",
+            "amount_tolerance": "REAL NOT NULL DEFAULT 0.2",
+            "confirmed_merchant_alias": "VARCHAR(255)",
+            "account_id": "VARCHAR(36)",
+            "payment_rail": "VARCHAR(32)",
+        },
+    )
+    source_columns = _table_columns(connection, "income_sources")
+    if source_columns:
+        fallback = "DATE(created_at)" if "created_at" in source_columns else "DATE('now')"
+        connection.execute(
+            "UPDATE income_sources SET effective_from = "
+            f"COALESCE(effective_from, {fallback}, DATE('now'))"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_income_sources_effective_period "
+            "ON income_sources(effective_from, effective_to)"
+        )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS income_match_suggestions (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            income_source_id VARCHAR(36) NOT NULL,
+            transaction_id VARCHAR(36) NOT NULL,
+            confidence REAL NOT NULL,
+            strength VARCHAR(16) NOT NULL,
+            evidence_json TEXT NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'pending',
+            decided_at DATETIME,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            CONSTRAINT uq_income_match_source_transaction UNIQUE (
+                income_source_id, transaction_id
+            ),
+            CONSTRAINT ck_income_match_suggestions_confidence CHECK (
+                confidence >= 0 AND confidence <= 1
+            ),
+            CONSTRAINT ck_income_match_suggestions_strength CHECK (
+                strength IN ('strong', 'uncertain')
+            ),
+            CONSTRAINT ck_income_match_suggestions_status CHECK (
+                status IN ('pending', 'confirmed', 'dismissed', 'stale')
+            ),
+            FOREIGN KEY(income_source_id) REFERENCES income_sources(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(transaction_id) REFERENCES transactions(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_income_match_suggestions_source_status "
+        "ON income_match_suggestions(income_source_id, status)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_income_match_suggestions_source_id "
+        "ON income_match_suggestions(income_source_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_income_match_suggestions_transaction_id "
+        "ON income_match_suggestions(transaction_id)"
+    )
+
+
+def _validate_revision_21(connection: sqlite3.Connection) -> None:
+    source_columns = _table_columns(connection, "income_sources")
+    required_source_columns = {
+        "effective_from",
+        "effective_to",
+        "amount_tolerance",
+        "confirmed_merchant_alias",
+        "account_id",
+        "payment_rail",
+    }
+    if source_columns and required_source_columns.difference(source_columns):
+        raise SchemaMigrationError("The time-aware income source schema is incomplete.")
+
+    suggestion_columns = _table_columns(connection, "income_match_suggestions")
+    required_suggestion_columns = {
+        "id",
+        "income_source_id",
+        "transaction_id",
+        "confidence",
+        "strength",
+        "evidence_json",
+        "status",
+        "decided_at",
+        "created_at",
+        "updated_at",
+    }
+    if required_suggestion_columns.difference(suggestion_columns):
+        raise SchemaMigrationError("The historical income review schema is incomplete.")
+
+    if source_columns:
+        invalid_sources = connection.execute(
+            "SELECT COUNT(*) FROM income_sources WHERE effective_from IS NULL "
+            "OR (effective_to IS NOT NULL AND effective_to < effective_from) "
+            "OR amount_tolerance < 0 OR amount_tolerance > 1"
+        ).fetchone()[0]
+        if invalid_sources:
+            raise SchemaMigrationError("Income source dates or tolerances are invalid.")
+    invalid_suggestions = connection.execute(
+        "SELECT COUNT(*) FROM income_match_suggestions WHERE "
+        "confidence < 0 OR confidence > 1 "
+        "OR strength NOT IN ('strong','uncertain') "
+        "OR status NOT IN ('pending','confirmed','dismissed','stale')"
+    ).fetchone()[0]
+    if invalid_suggestions:
+        raise SchemaMigrationError("Historical income suggestions are invalid.")
+
+
 MIGRATION_REGISTRY = (
     SchemaMigration(
         revision=11,
@@ -2041,6 +2160,12 @@ MIGRATION_REGISTRY = (
         name="add_verified_balance_anchors_and_statement_coverage",
         apply=_apply_revision_20,
         validate=_validate_revision_20,
+    ),
+    SchemaMigration(
+        revision=21,
+        name="add_time_aware_income_matching",
+        apply=_apply_revision_21,
+        validate=_validate_revision_21,
     ),
 )
 

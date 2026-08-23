@@ -903,6 +903,60 @@ def test_revision_11_absorbs_former_seed_schema_changes(tmp_path):
     assert subscription_columns["currency"][4] == "'INR'"
 
 
+def test_time_aware_income_migration_backfills_and_is_restart_safe(tmp_path):
+    db_path = tmp_path / "godfin.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE income_sources (
+                id TEXT PRIMARY KEY,
+                source_name TEXT NOT NULL,
+                expected_amount REAL,
+                frequency TEXT NOT NULL,
+                created_at DATETIME
+            );
+            CREATE TABLE transactions (id TEXT PRIMARY KEY);
+            INSERT INTO income_sources (
+                id, source_name, expected_amount, frequency, created_at
+            ) VALUES (
+                'income-1', 'Synthetic salary', 1000, 'monthly',
+                '2025-11-18 09:30:00'
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    apply_additive_schema_updates(str(db_path))
+    apply_additive_schema_updates(str(db_path))
+
+    connection = sqlite3.connect(db_path)
+    try:
+        source_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(income_sources)")
+        }
+        assert {
+            "effective_from",
+            "effective_to",
+            "amount_tolerance",
+            "confirmed_merchant_alias",
+            "account_id",
+            "payment_rail",
+        }.issubset(source_columns)
+        assert connection.execute(
+            "SELECT effective_from, amount_tolerance FROM income_sources "
+            "WHERE id='income-1'"
+        ).fetchone() == ("2025-11-18", 0.2)
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='income_match_suggestions'"
+        ).fetchone() == (1,)
+    finally:
+        connection.close()
+
+
 def test_future_schema_revision_fails_closed_before_backup_or_migration(tmp_path):
     db_path = tmp_path / "godfin.db"
     backup_dir = tmp_path / "backups"

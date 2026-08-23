@@ -119,10 +119,16 @@
     "GET /api/v1/income-sources": {
       "access": "authenticated_free"
     },
+    "GET /api/v1/income/coverage": {
+      "access": "authenticated_free"
+    },
     "GET /api/v1/income/stats": {
       "access": "authenticated_free"
     },
     "GET /api/v1/income/{source_id}": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/income/{source_id}/matches": {
       "access": "authenticated_free"
     },
     "GET /api/v1/ingest/gmail/range/status": {
@@ -355,6 +361,15 @@
       "access": "authenticated_free"
     },
     "POST /api/v1/income-sources": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/income/{source_id}/matches/confirm": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/income/{source_id}/matches/dismiss": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/income/{source_id}/matches/scan": {
       "access": "authenticated_free"
     },
     "POST /api/v1/ingest/gmail": {

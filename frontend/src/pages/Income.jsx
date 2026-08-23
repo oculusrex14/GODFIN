@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, DollarSign, TrendingUp, Calendar, Trash2, X, Check, Edit2, AlertCircle,
+  Search, Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import {
   fetchIncomeSources, createIncomeSource, updateIncomeSource, deleteIncomeSource, fetchIncomeStats,
+  fetchIncomeCoverage, fetchAccounts, scanIncomeMatches, fetchIncomeMatches,
+  confirmIncomeMatches, dismissIncomeMatches,
 } from '../api/client';
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
@@ -31,22 +34,34 @@ const frequencyColors = {
   one_time: 'bg-white/[0.06] text-white/40 border border-white/[0.08]',
 };
 
-function AddIncomeModal({ open, onClose, editSource = null }) {
-  const [sourceName, setSourceName] = useState('');
-  const [expectedAmount, setExpectedAmount] = useState('');
-  const [frequency, setFrequency] = useState('monthly');
-  const [nextExpectedDate, setNextExpectedDate] = useState('');
-  const [enforceCurrentMonth, setEnforceCurrentMonth] = useState(false);
+function AddIncomeModal({ open, onClose, editSource = null, coverage, accounts, onFindPast }) {
+  const [sourceName, setSourceName] = useState(editSource?.source_name || '');
+  const [expectedAmount, setExpectedAmount] = useState(editSource?.expected_amount ?? '');
+  const [frequency, setFrequency] = useState(editSource?.frequency || 'monthly');
+  const [nextExpectedDate, setNextExpectedDate] = useState(editSource?.next_expected_date || '');
+  const [effectiveFrom, setEffectiveFrom] = useState(
+    editSource?.effective_from
+      || coverage?.earliest_transaction_date
+      || new Date().toISOString().split('T')[0],
+  );
+  const [effectiveTo, setEffectiveTo] = useState(editSource?.effective_to || '');
+  const [tolerancePercent, setTolerancePercent] = useState(
+    String(Math.round((editSource?.amount_tolerance ?? 0.2) * 100)),
+  );
+  const [payerAlias, setPayerAlias] = useState(editSource?.confirmed_merchant_alias || '');
+  const [accountId, setAccountId] = useState(editSource?.account_id || '');
+  const [paymentRail, setPaymentRail] = useState(editSource?.payment_rail || '');
+  const [findPast, setFindPast] = useState(!editSource);
   const [error, setError] = useState('');
   const queryClient = useQueryClient();
 
   const createMutation = useMutation({
     mutationFn: (data) => createIncomeSource(data),
-    onSuccess: () => {
+    onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ['incomeSources'] });
       queryClient.invalidateQueries({ queryKey: ['incomeStats'] });
       onClose();
-      resetForm();
+      if (findPast) onFindPast(created);
     },
     onError: (err) => setError(err.message || 'Failed to create income source'),
   });
@@ -57,19 +72,9 @@ function AddIncomeModal({ open, onClose, editSource = null }) {
       queryClient.invalidateQueries({ queryKey: ['incomeSources'] });
       queryClient.invalidateQueries({ queryKey: ['incomeStats'] });
       onClose();
-      resetForm();
     },
     onError: (err) => setError(err.message || 'Failed to update income source'),
   });
-
-  const resetForm = () => {
-    setSourceName('');
-    setExpectedAmount('');
-    setFrequency('monthly');
-    setNextExpectedDate('');
-    setEnforceCurrentMonth(false);
-    setError('');
-  };
 
   const handleFrequencyChange = (newFreq) => {
     setFrequency(newFreq);
@@ -98,12 +103,31 @@ function AddIncomeModal({ open, onClose, editSource = null }) {
       setError('Please enter a source name');
       return;
     }
+    if (!effectiveFrom) {
+      setError('Choose when this income source started');
+      return;
+    }
+    if (effectiveTo && effectiveTo < effectiveFrom) {
+      setError('The end date cannot be before the start date');
+      return;
+    }
+    const tolerance = Number(tolerancePercent);
+    if (!Number.isFinite(tolerance) || tolerance < 0 || tolerance > 100) {
+      setError('Amount variation must be between 0% and 100%');
+      return;
+    }
     const data = {
       source_name: sourceName.trim(),
       expected_amount: expectedAmount ? parseFloat(expectedAmount) : null,
       frequency,
       next_expected_date: nextExpectedDate || null,
-      enforce_current_month: enforceCurrentMonth,
+      enforce_current_month: false,
+      effective_from: effectiveFrom,
+      effective_to: effectiveTo || null,
+      amount_tolerance: tolerance / 100,
+      confirmed_merchant_alias: payerAlias.trim() || null,
+      account_id: accountId || null,
+      payment_rail: paymentRail || null,
     };
     if (editSource) {
       updateMutation.mutate({ id: editSource.id, data });
@@ -124,7 +148,7 @@ function AddIncomeModal({ open, onClose, editSource = null }) {
         exit={{ opacity: 0, scale: 0.95 }}
         labelledBy="income-modal-title"
         onClose={onClose}
-        className="relative overflow-hidden rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-md mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
+        className="relative overflow-y-auto max-h-[90vh] rounded-[24px] bg-[#0d2040]/95 backdrop-blur-[32px] border border-white/[0.15] p-6 w-full max-w-lg mx-4 shadow-[0_16px_64px_rgba(0,0,0,0.3)]"
       >
         <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
         <div className="flex items-center justify-between mb-5">
@@ -171,27 +195,96 @@ function AddIncomeModal({ open, onClose, editSource = null }) {
             </select>
           </div>
           {frequency !== 'one_time' && (
-            <>
-              <GlassInput
-                label="Next Expected Date (optional)"
-                type="date"
-                value={nextExpectedDate}
-                onChange={(e) => setNextExpectedDate(e.target.value)}
+            <GlassInput
+              label="Next Expected Date (optional)"
+              type="date"
+              value={nextExpectedDate}
+              onChange={(e) => setNextExpectedDate(e.target.value)}
+            />
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <GlassInput
+              label="Started on"
+              type="date"
+              value={effectiveFrom}
+              min={coverage?.earliest_transaction_date || undefined}
+              onChange={(e) => setEffectiveFrom(e.target.value)}
+              required
+            />
+            <GlassInput
+              label="Ended on (optional)"
+              type="date"
+              value={effectiveTo}
+              min={effectiveFrom || undefined}
+              onChange={(e) => setEffectiveTo(e.target.value)}
+            />
+          </div>
+          <p className="text-white/30 text-[0.7rem] -mt-2">
+            GODFIN only expects this income inside these dates. It never creates missing income automatically.
+          </p>
+          <GlassInput
+            label="Usual amount variation (%)"
+            type="number"
+            value={tolerancePercent}
+            onChange={(e) => setTolerancePercent(e.target.value)}
+            min="0"
+            max="100"
+            step="1"
+          />
+          <GlassInput
+            label="Payer name seen in your statement (optional)"
+            value={payerAlias}
+            onChange={(e) => setPayerAlias(e.target.value)}
+            placeholder="e.g., ACME PAYROLL"
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="income-account" className="block text-white/40 text-[0.75rem] mb-1.5">Account (optional)</label>
+              <select
+                id="income-account"
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[14px] text-white/80 text-[0.85rem]"
+              >
+                <option value="" className="bg-[#1a2a4a]">Any account</option>
+                {(accounts || []).map((account) => (
+                  <option key={account.id} value={account.id} className="bg-[#1a2a4a]">
+                    {account.nickname || account.bank} · {account.last_4_digits}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="income-payment-rail" className="block text-white/40 text-[0.75rem] mb-1.5">Paid through (optional)</label>
+              <select
+                id="income-payment-rail"
+                value={paymentRail}
+                onChange={(e) => setPaymentRail(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[14px] text-white/80 text-[0.85rem]"
+              >
+                <option value="" className="bg-[#1a2a4a]">Any method</option>
+                <option value="bank" className="bg-[#1a2a4a]">Bank transfer</option>
+                <option value="upi" className="bg-[#1a2a4a]">UPI</option>
+                <option value="cheque" className="bg-[#1a2a4a]">Cheque</option>
+                <option value="cash" className="bg-[#1a2a4a]">Cash</option>
+                <option value="other" className="bg-[#1a2a4a]">Other</option>
+              </select>
+            </div>
+          </div>
+          {!editSource && (
+            <div className="flex items-start gap-3 p-3 bg-cyan-400/[0.05] rounded-[12px] border border-cyan-400/[0.1]">
+              <input
+                type="checkbox"
+                id="findPastIncome"
+                checked={findPast}
+                onChange={(e) => setFindPast(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-white/[0.2] bg-white/[0.05] text-cyan-400"
               />
-              <div className="flex items-start gap-3 p-3 bg-white/[0.03] rounded-[12px] border border-white/[0.06]">
-                <input
-                  type="checkbox"
-                  id="enforceCurrentMonth"
-                  checked={enforceCurrentMonth}
-                  onChange={(e) => setEnforceCurrentMonth(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-white/[0.2] bg-white/[0.05] text-cyan-400"
-                />
-                <div>
-                  <label htmlFor="enforceCurrentMonth" className="text-white/70 text-[0.85rem] cursor-pointer">Apply to current month</label>
-                  <p className="text-white/25 text-[0.7rem] mt-0.5">Include in current month's expected income immediately</p>
-                </div>
+              <div>
+                <label htmlFor="findPastIncome" className="text-white/70 text-[0.85rem] cursor-pointer">Find past matching income after saving</label>
+                <p className="text-white/30 text-[0.7rem] mt-0.5">You review every suggested credit before GODFIN changes anything.</p>
               </div>
-            </>
+            </div>
           )}
           <div className="flex gap-3 pt-2">
             <GlassButton variant="secondary" onClick={onClose} className="flex-1 justify-center">Cancel</GlassButton>
@@ -205,9 +298,174 @@ function AddIncomeModal({ open, onClose, editSource = null }) {
   );
 }
 
+
+function IncomeMatchReview({ source, onClose }) {
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState(null);
+  const [subcategory, setSubcategory] = useState(
+    source?.source_name?.toLowerCase().includes('salary') ? 'Salary' : 'Other Income',
+  );
+
+  const { data: matches, isLoading: matchesLoading } = useQuery({
+    queryKey: ['incomeMatches', source?.id, 'pending'],
+    queryFn: () => fetchIncomeMatches(source.id),
+    enabled: Boolean(source?.id),
+  });
+  const scanMutation = useMutation({
+    mutationFn: () => scanIncomeMatches(source.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['incomeMatches', source.id] }),
+  });
+  const { mutate: runScan } = scanMutation;
+
+  useEffect(() => {
+    if (source?.id) runScan();
+  }, [source?.id, runScan]);
+
+  const refreshFinancialViews = () => {
+    queryClient.invalidateQueries({ queryKey: ['incomeMatches', source.id] });
+    queryClient.invalidateQueries({ queryKey: ['incomeSources'] });
+    queryClient.invalidateQueries({ queryKey: ['incomeStats'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+    queryClient.invalidateQueries({ queryKey: ['cashFlow'] });
+    queryClient.invalidateQueries({ queryKey: ['report'] });
+  };
+  const strongIds = (matches?.items || [])
+    .filter((item) => item.strength === 'strong')
+    .map((item) => item.id);
+  const selectedIds = selected ?? strongIds;
+  const confirmMutation = useMutation({
+    mutationFn: () => confirmIncomeMatches(source.id, selectedIds, subcategory),
+    onSuccess: () => {
+      setSelected([]);
+      refreshFinancialViews();
+    },
+  });
+  const dismissMutation = useMutation({
+    mutationFn: () => dismissIncomeMatches(source.id, selectedIds),
+    onSuccess: () => {
+      setSelected([]);
+      refreshFinancialViews();
+    },
+  });
+
+  const items = matches?.items || [];
+  const busy = scanMutation.isPending || confirmMutation.isPending || dismissMutation.isPending;
+  const error = scanMutation.error || confirmMutation.error || dismissMutation.error;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" role="presentation">
+      <DialogSurface
+        labelledBy="income-match-title"
+        onClose={onClose}
+        className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto mx-4 rounded-[24px] bg-[#0d2040]/95 border border-white/[0.15] p-6 shadow-[0_16px_64px_rgba(0,0,0,0.35)]"
+      >
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h3 id="income-match-title" className="text-white/90 text-lg">Review past income</h3>
+            <p className="text-white/35 text-xs mt-1">
+              {source.source_name} · {source.effective_from} onward. Nothing changes until you confirm it.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 text-white/40 hover:text-white/70" aria-label="Close past income review">
+            <X size={18} />
+          </button>
+        </div>
+
+        {scanMutation.data && (
+          <div className="mb-4 rounded-[14px] border border-cyan-400/[0.12] bg-cyan-400/[0.05] p-3 text-xs text-white/50">
+            Checked {scanMutation.data.scanned} credits from {scanMutation.data.coverage_start} to {scanMutation.data.coverage_end}. Found {scanMutation.data.strong} strong and {scanMutation.data.uncertain} uncertain match{scanMutation.data.uncertain === 1 ? '' : 'es'}. Safely excluded {scanMutation.data.excluded_unsafe} refund, transfer, reversal, or locked credit{scanMutation.data.excluded_unsafe === 1 ? '' : 's'}.
+          </div>
+        )}
+        {error && (
+          <div className="mb-4 rounded-[12px] border border-rose-400/20 bg-rose-400/[0.08] p-3 text-sm text-rose-300" role="alert">
+            {error.message || 'GODFIN could not finish the income review.'}
+          </div>
+        )}
+
+        {matchesLoading || scanMutation.isPending ? (
+          <div className="py-12 flex items-center justify-center gap-2 text-white/40 text-sm">
+            <Loader2 size={18} className="animate-spin" /> Checking your local transactions…
+          </div>
+        ) : items.length === 0 ? (
+          <div className="py-10 text-center">
+            <Check className="mx-auto text-emerald-400/60 mb-2" size={26} />
+            <p className="text-white/60">No unreviewed matches</p>
+            <p className="text-white/30 text-xs mt-1">GODFIN did not guess from amount alone.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((item) => (
+              <label key={item.id} className="flex gap-3 rounded-[14px] border border-white/[0.08] bg-white/[0.04] p-3 cursor-pointer hover:bg-white/[0.06]">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(item.id)}
+                  onChange={(event) => setSelected((current) => (
+                    event.target.checked
+                      ? [...(current ?? selectedIds), item.id]
+                      : (current ?? selectedIds).filter((id) => id !== item.id)
+                  ))}
+                  className="mt-1 h-4 w-4 rounded border-white/20 bg-white/5 text-cyan-400"
+                  aria-label={`Select ${item.merchant} credit from ${item.date}`}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-white/75 text-sm">{item.merchant}</span>
+                    <span className="text-white/80 tabular-nums text-sm">{formatINR(item.amount)}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[0.68rem] text-white/35">
+                    <span>{item.date}</span><span>·</span><span>{item.instrument}</span>
+                    <span className={item.strength === 'strong' ? 'text-emerald-300/70' : 'text-amber-300/70'}>
+                      {item.strength === 'strong' ? 'Strong match' : 'Needs a closer look'}
+                    </span>
+                  </div>
+                  <ul className="mt-1 text-[0.68rem] text-white/30 list-disc list-inside">
+                    {item.evidence.map((line) => <li key={line}>{line}</li>)}
+                  </ul>
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {items.length > 0 && (
+          <div className="mt-5 border-t border-white/[0.08] pt-4 flex flex-col sm:flex-row gap-3 sm:items-end">
+            <div className="flex-1">
+              <label htmlFor="income-match-kind" className="block text-white/40 text-xs mb-1.5">What kind of income is this?</label>
+              <select
+                id="income-match-kind"
+                value={subcategory}
+                onChange={(event) => setSubcategory(event.target.value)}
+                className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[12px] text-white/80 text-sm"
+              >
+                {['Salary', 'Freelance', 'Interest', 'Other Income'].map((value) => (
+                  <option key={value} value={value} className="bg-[#1a2a4a]">{value}</option>
+                ))}
+              </select>
+            </div>
+            <GlassButton
+              variant="secondary"
+              onClick={() => dismissMutation.mutate()}
+              disabled={!selectedIds.length || busy}
+            >
+              Not this income
+            </GlassButton>
+            <GlassButton
+              onClick={() => confirmMutation.mutate()}
+              disabled={!selectedIds.length || busy}
+            >
+              Confirm {selectedIds.length || ''}
+            </GlassButton>
+          </div>
+        )}
+      </DialogSurface>
+    </div>
+  );
+}
+
 export default function Income() {
   const [addOpen, setAddOpen] = useState(false);
   const [editSource, setEditSource] = useState(null);
+  const [reviewSource, setReviewSource] = useState(null);
   const queryClient = useQueryClient();
   const currentMonth = format(new Date(), 'yyyy-MM');
   const { confirm, ConfirmDialog: DeleteConfirmDialog } = useConfirm();
@@ -220,6 +478,16 @@ export default function Income() {
   const { data: stats } = useQuery({
     queryKey: ['incomeStats', currentMonth],
     queryFn: () => fetchIncomeStats(currentMonth),
+  });
+
+  const { data: coverage } = useQuery({
+    queryKey: ['incomeCoverage'],
+    queryFn: fetchIncomeCoverage,
+  });
+
+  const { data: accounts = [] } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: fetchAccounts,
   });
 
   const deleteMutation = useMutation({
@@ -352,6 +620,23 @@ export default function Income() {
                     </div>
                   </div>
                 )}
+                <div className="mt-3 pt-3 border-t border-white/[0.06] space-y-2">
+                  <div className="text-white/25 text-[0.68rem]">
+                    Applies from {format(new Date(`${source.effective_from}T00:00:00`), 'dd MMM yyyy')}
+                    {source.effective_to
+                      ? ` to ${format(new Date(`${source.effective_to}T00:00:00`), 'dd MMM yyyy')}`
+                      : ''}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReviewSource(source)}
+                    className="inline-flex items-center gap-1.5 text-cyan-300/65 hover:text-cyan-200 text-[0.72rem] transition-colors"
+                    aria-label={`Find past income for ${source.source_name}`}
+                  >
+                    <Search size={13} aria-hidden="true" />
+                    Find past income
+                  </button>
+                </div>
               </motion.div>
             ))}
           </AnimatePresence>
@@ -359,7 +644,22 @@ export default function Income() {
       )}
 
       <AnimatePresence>
-        {addOpen && <AddIncomeModal open={addOpen} onClose={handleCloseModal} editSource={editSource} />}
+        {addOpen && (
+          <AddIncomeModal
+            open={addOpen}
+            onClose={handleCloseModal}
+            editSource={editSource}
+            coverage={coverage}
+            accounts={accounts}
+            onFindPast={setReviewSource}
+          />
+        )}
+        {reviewSource && (
+          <IncomeMatchReview
+            source={reviewSource}
+            onClose={() => setReviewSource(null)}
+          />
+        )}
       </AnimatePresence>
     </div>
   );

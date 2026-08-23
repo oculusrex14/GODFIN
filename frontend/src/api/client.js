@@ -537,6 +537,32 @@ export function fetchIncomeStats(month) {
   return apiFetch(`/income/stats?month=${month}`);
 }
 
+export function fetchIncomeCoverage() {
+  return apiFetch('/income/coverage');
+}
+
+export function scanIncomeMatches(sourceId) {
+  return apiFetch(`/income/${sourceId}/matches/scan`, { method: 'POST' });
+}
+
+export function fetchIncomeMatches(sourceId, status = 'pending') {
+  return apiFetch(`/income/${sourceId}/matches?status=${encodeURIComponent(status)}`);
+}
+
+export function confirmIncomeMatches(sourceId, suggestionIds, subcategory) {
+  return apiFetch(`/income/${sourceId}/matches/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ suggestion_ids: suggestionIds, subcategory }),
+  });
+}
+
+export function dismissIncomeMatches(sourceId, suggestionIds) {
+  return apiFetch(`/income/${sourceId}/matches/dismiss`, {
+    method: 'POST',
+    body: JSON.stringify({ suggestion_ids: suggestionIds }),
+  });
+}
+
 // Goals
 export function fetchGoals() {
   return apiFetch('/goals');

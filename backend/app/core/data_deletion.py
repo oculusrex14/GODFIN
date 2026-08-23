@@ -17,7 +17,7 @@ from app.models.goal_contribution import (
     GoalContribution,
     GoalContributionSuggestion,
 )
-from app.models.income_source import IncomeSource
+from app.models.income_source import IncomeMatchSuggestion, IncomeSource
 from app.models.merchant_memory import MerchantMemory
 from app.models.monthly_aggregate import MonthlyAggregate
 from app.models.net_worth import NetWorthItem, NetWorthQuote
@@ -34,6 +34,7 @@ from app.models.transfer_match import TransferMatch
 RESET_DYNAMIC_MODELS = (
     TransactionSplit,
     AuditLog,
+    IncomeMatchSuggestion,
     GoalContributionSuggestion,
     TransferMatch,
     ClassificationCorrection,
@@ -95,6 +96,9 @@ def delete_transactions_with_dependents(
 
     db.query(GoalContributionSuggestion).filter(
         GoalContributionSuggestion.transaction_id.in_(unique_ids)
+    ).delete(synchronize_session=False)
+    db.query(IncomeMatchSuggestion).filter(
+        IncomeMatchSuggestion.transaction_id.in_(unique_ids)
     ).delete(synchronize_session=False)
     db.query(TransferMatch).filter(
         or_(
