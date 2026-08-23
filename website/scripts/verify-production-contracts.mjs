@@ -11,9 +11,25 @@ async function text(relativePath, from = websiteRoot) {
 }
 
 const generated = JSON.parse(await text("src/generated/entitlements.json"));
-const publicClaimsPolicy = JSON.parse(
-  await text("docs/production-remediation/PUBLIC_CLAIMS_POLICY.json", repoRoot),
+const generatedPublicClaimsPolicy = JSON.parse(
+  await text("src/generated/public-claims-policy.json"),
 );
+let publicClaimsPolicy = generatedPublicClaimsPolicy;
+try {
+  const sharedPublicClaimsPolicy = JSON.parse(
+    await text("docs/production-remediation/PUBLIC_CLAIMS_POLICY.json", repoRoot),
+  );
+  assert.deepEqual(
+    generatedPublicClaimsPolicy,
+    sharedPublicClaimsPolicy,
+    "Website public claims policy must match the repository policy.",
+  );
+  publicClaimsPolicy = sharedPublicClaimsPolicy;
+} catch (error) {
+  if (error?.code !== "ENOENT") {
+    throw error;
+  }
+}
 let manifest = generated;
 try {
   const shared = JSON.parse(await text("shared/entitlements.json", repoRoot));
@@ -345,9 +361,25 @@ assert.match(licenseVerify, /signEntitlement/);
 assert.match(licenseVerify, /rawResult\.license_id/);
 assert.match(licenseVerify, /rawResult\.license_state_version/);
 
-const publicKeyManifest = JSON.parse(
-  await text("shared/license-entitlement-public-keys.json", repoRoot),
+const generatedPublicKeyManifest = JSON.parse(
+  await text("src/generated/license-entitlement-public-keys.json"),
 );
+let publicKeyManifest = generatedPublicKeyManifest;
+try {
+  const sharedPublicKeyManifest = JSON.parse(
+    await text("shared/license-entitlement-public-keys.json", repoRoot),
+  );
+  assert.deepEqual(
+    generatedPublicKeyManifest,
+    sharedPublicKeyManifest,
+    "Website license public keys must match the shared manifest.",
+  );
+  publicKeyManifest = sharedPublicKeyManifest;
+} catch (error) {
+  if (error?.code !== "ENOENT") {
+    throw error;
+  }
+}
 assert.equal(publicKeyManifest.schema_version, 1);
 assert.ok(Object.keys(publicKeyManifest.keys).length >= 1);
 for (const key of Object.values(publicKeyManifest.keys)) {
