@@ -12,7 +12,12 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.errors import IntegrationUnavailableError, InvalidOperationError
 from app.core.encryption import encrypt, decrypt
-from app.core.llm_providers import create_provider, get_available_providers
+from app.core.llm_providers import (
+    LLMProviderProbeError,
+    create_provider,
+    get_available_providers,
+    probe_selected_model,
+)
 from app.core.llm_privacy import (
     HOSTED_DATA_CONSENT_VERSION,
     has_hosted_data_consent,
@@ -28,6 +33,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 AI_CLASSIFICATION_ENTITLEMENT = require_entitlement("ai_classification")
+
+
+def _model_probe_failure(exc: LLMProviderProbeError) -> IntegrationUnavailableError:
+    if exc.code in {"timeout", "provider_unreachable"}:
+        hint = "Check your internet connection or start the local AI service, then retry."
+    elif exc.code in {"empty_response", "no_response"}:
+        hint = "Check that the selected model is installed and available to this account."
+    else:
+        hint = "Check the model name or choose another supported model, then retry."
+    return IntegrationUnavailableError(
+        code="LLM_MODEL_PROBE_FAILED",
+        message="The selected AI model did not produce a usable test response.",
+        hint=hint,
+    )
 
 
 # ============================================================================
@@ -193,6 +212,9 @@ def create_llm_config(
     try:
         db.flush()
         activate_configuration(config)
+    except LLMProviderProbeError as exc:
+        db.rollback()
+        raise _model_probe_failure(exc) from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(
@@ -266,6 +288,9 @@ def update_llm_config(
         try:
             db.flush()
             activate_configuration(config)
+        except LLMProviderProbeError as exc:
+            db.rollback()
+            raise _model_probe_failure(exc) from exc
         except Exception as exc:
             db.rollback()
             raise HTTPException(
@@ -333,8 +358,8 @@ def test_llm_connection(
             api_key=request.api_key,
             base_url=request.base_url,
         )
-        success, _provider_message = provider.test_connection()
-        if not success:
+        probe = probe_selected_model(provider)
+        if not probe.success:
             raise IntegrationUnavailableError(
                 code="LLM_CONNECTION_FAILED",
                 message="GODFIN could not connect to that AI provider.",
@@ -387,6 +412,9 @@ def activate_llm_config(
     # Activate provider
     try:
         activate_configuration(config)
+    except LLMProviderProbeError as exc:
+        db.rollback()
+        raise _model_probe_failure(exc) from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(

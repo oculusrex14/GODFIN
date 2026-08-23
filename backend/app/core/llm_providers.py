@@ -7,7 +7,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 
 import requests
@@ -16,6 +18,66 @@ from app.core.llm_service import LLMClassificationResult
 from app.core.llm_privacy import validate_provider_base_url
 
 logger = logging.getLogger(__name__)
+
+PROVIDER_SMOKE_PROMPT = (
+    "This is a connection check using synthetic text only. "
+    "Reply with a short confirmation that the model can generate text."
+)
+MAX_PROVIDER_SMOKE_RESPONSE_CHARS = 8_192
+
+
+@dataclass(frozen=True)
+class ProviderProbeResult:
+    success: bool
+    error_code: str | None
+    latency_bucket: str
+
+
+class LLMProviderProbeError(RuntimeError):
+    """A selected model could not pass the privacy-safe generation probe."""
+
+    def __init__(self, code: str):
+        super().__init__("The selected AI model did not pass its connection check.")
+        self.code = code
+
+
+def _latency_bucket(elapsed_seconds: float) -> str:
+    if elapsed_seconds < 1:
+        return "under_1s"
+    if elapsed_seconds < 5:
+        return "1_to_5s"
+    if elapsed_seconds < 15:
+        return "5_to_15s"
+    return "15s_or_more"
+
+
+def probe_selected_model(provider: "LLMProvider") -> ProviderProbeResult:
+    """Prove the exact selected model can generate text without user data."""
+    started = time.monotonic()
+    error_code: str | None = None
+    try:
+        response = provider.call(PROVIDER_SMOKE_PROMPT, temperature=0.0)
+        if response is None:
+            error_code = "no_response"
+        elif not isinstance(response, str):
+            error_code = "malformed_response"
+        else:
+            normalized = response.strip()
+            if not normalized:
+                error_code = "empty_response"
+            elif len(normalized) > MAX_PROVIDER_SMOKE_RESPONSE_CHARS:
+                error_code = "response_too_large"
+    except requests.Timeout:
+        error_code = "timeout"
+    except requests.ConnectionError:
+        error_code = "provider_unreachable"
+    except Exception:
+        error_code = "provider_error"
+    return ProviderProbeResult(
+        success=error_code is None,
+        error_code=error_code,
+        latency_bucket=_latency_bucket(time.monotonic() - started),
+    )
 
 
 class LLMProvider(ABC):
