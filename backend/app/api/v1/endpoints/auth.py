@@ -14,7 +14,11 @@ from app.core.auth import (
     verify_pin_hash,
 )
 from app.core.database import get_db
-from app.core.local_api_trust import RuntimeMode, runtime_mode
+from app.core.local_api_trust import (
+    TRUSTED_DESKTOP_STATE_KEY,
+    RuntimeMode,
+    runtime_mode,
+)
 from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 from app.schemas.auth import (
@@ -88,14 +92,18 @@ def _stored_pin_length(db: Session) -> int | None:
 
 
 @router.get("/status", response_model=AuthStatusResponse)
-def auth_status(db: Session = Depends(get_db)):
+def auth_status(request: Request, db: Session = Depends(get_db)):
     setting = db.query(AppSetting).filter_by(key="is_first_run").first()
     is_first_run = setting.value == "true" if setting else True
+    trusted_desktop = bool(
+        request.scope.get("state", {}).get(TRUSTED_DESKTOP_STATE_KEY, False)
+    )
     return AuthStatusResponse(
         is_first_run=is_first_run,
         pin_length=(
             None
-            if is_first_run or runtime_mode() is RuntimeMode.LAN
+            if is_first_run
+            or (runtime_mode() is RuntimeMode.LAN and not trusted_desktop)
             else _stored_pin_length(db)
         ),
     )

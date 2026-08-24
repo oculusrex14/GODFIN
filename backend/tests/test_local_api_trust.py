@@ -3,12 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.testclient import TestClient
 
 from app.core.local_api_trust import (
     LAUNCH_SECRET_HEADER,
+    TRUSTED_DESKTOP_STATE_KEY,
     LocalApiPolicy,
     LocalApiTrustMiddleware,
     RuntimeMode,
@@ -33,6 +34,17 @@ def _client(policy: LocalApiPolicy) -> TestClient:
     @app.get("/health")
     def health():
         return {"status": "ok"}
+
+    @app.get("/trust-state")
+    def trust_state(request: Request):
+        return {
+            "trusted_desktop": bool(
+                request.scope.get("state", {}).get(
+                    TRUSTED_DESKTOP_STATE_KEY,
+                    False,
+                )
+            )
+        }
 
     @app.get("/api/v1/auth/gmail/callback")
     def gmail_callback():
@@ -205,6 +217,24 @@ def test_lan_mode_accepts_only_private_literal_addresses(
     client = _client(LocalApiPolicy(RuntimeMode.LAN, "desktop-secret"))
     response = client.get("/health", headers={"Host": host, "Origin": origin})
     assert (response.status_code == 200) is allowed
+
+
+def test_lan_mode_marks_only_the_exact_desktop_launch_secret_as_trusted():
+    client = _client(LocalApiPolicy(RuntimeMode.LAN, "desktop-secret"))
+
+    ordinary = client.get("/trust-state")
+    wrong = client.get(
+        "/trust-state",
+        headers={LAUNCH_SECRET_HEADER: "wrong"},
+    )
+    desktop = client.get(
+        "/trust-state",
+        headers={LAUNCH_SECRET_HEADER: "desktop-secret"},
+    )
+
+    assert ordinary.json() == {"trusted_desktop": False}
+    assert wrong.json() == {"trusted_desktop": False}
+    assert desktop.json() == {"trusted_desktop": True}
 
 
 def test_explicit_runtime_mode_is_typed_and_invalid_values_fail_closed(monkeypatch):

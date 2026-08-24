@@ -19,7 +19,7 @@ async function mockPinApi(page, authStatus, verifyResponse) {
   });
 }
 
-async function mockAuthenticatedApp(page, licenseOverride = null) {
+async function mockAuthenticatedApp(page, licenseOverride = null, authStatusOverride = null) {
   const profile = {
     savings_rate: 18.5,
     impulse_index: 22.1,
@@ -33,8 +33,9 @@ async function mockAuthenticatedApp(page, licenseOverride = null) {
     const path = url.pathname.slice(API_PREFIX.length);
     const responses = {
       '/health': { status: 'alive', liveness: true, database: 'not_checked', version: '0.1.0' },
-      '/auth/status': { is_first_run: false, pin_length: 4 },
+      '/auth/status': authStatusOverride || { is_first_run: false, pin_length: 4 },
       '/auth/verify-pin': { authenticated: true, token: 'test-token' },
+      '/auth/change-pin': { authenticated: true, token: 'changed-token' },
       '/onboarding': {
         completed: true,
         deferred: true,
@@ -385,6 +386,29 @@ test('first-run PIN setup always shows six stable slots', async ({ page }) => {
   await expect(slots).toHaveAttribute('data-pin-slots', '6');
   await pinInput.fill('4826');
   await expect(slots).toHaveAttribute('data-pin-slots', '6');
+});
+
+test('changing from a six-digit PIN to four digits immediately updates lock slots', async ({ page }) => {
+  await mockAuthenticatedApp(
+    page,
+    null,
+    { is_first_run: false, pin_length: 6 },
+  );
+  await page.goto('/pin');
+  await page.getByLabel('Enter your PIN').fill('482650');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Change PIN' }).click();
+  await page.getByLabel('Current PIN').fill('482650');
+  await page.getByLabel('New PIN', { exact: true }).fill('4826');
+  await page.getByLabel('Confirm New PIN').fill('4826');
+  await page.getByRole('button', { name: 'Change PIN', exact: true }).click();
+  await expect(page.getByText('PIN Changed')).toBeVisible();
+  await page.getByRole('button', { name: 'Lock' }).click();
+
+  const slots = page.locator('[data-pin-slots]');
+  await expect(slots).toHaveAttribute('data-pin-slots', '4');
 });
 
 test('auth token stays out of renderer storage and reload locks the app', async ({ page }) => {

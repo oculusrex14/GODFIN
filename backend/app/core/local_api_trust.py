@@ -41,6 +41,7 @@ _PACKAGED_ORIGIN = "godfin://app"
 _ALLOWED_BROWSER_PORTS = {5173, 5200}
 _GMAIL_OAUTH_START_PATH = "/api/v1/auth/gmail/url"
 _GMAIL_OAUTH_CALLBACK_PATH = "/api/v1/auth/gmail/callback"
+TRUSTED_DESKTOP_STATE_KEY = "godfin_trusted_desktop"
 
 
 def runtime_mode() -> RuntimeMode:
@@ -184,7 +185,12 @@ class LocalApiPolicy:
         # private-network clients are not expected to possess a process secret.
         if self.mode is RuntimeMode.LAN:
             return True
-        return bool(supplied) and secrets.compare_digest(
+        return self.matches_launch_secret(supplied)
+
+    def matches_launch_secret(self, supplied: str | None) -> bool:
+        """Return whether a request came through the active desktop process."""
+
+        return bool(supplied and self.launch_secret) and secrets.compare_digest(
             supplied,
             self.launch_secret,
         )
@@ -290,8 +296,9 @@ class LocalApiTrustMiddleware:
                 message="This page is not allowed to connect to GODFIN.",
             )
             return
+        supplied_launch_secret = launch_secrets[0] if launch_secrets else None
         if not self.policy.launch_secret_allowed(
-            launch_secrets[0] if launch_secrets else None,
+            supplied_launch_secret,
             scope.get("method", "GET"),
             scope.get("path", ""),
         ):
@@ -303,4 +310,7 @@ class LocalApiTrustMiddleware:
                 message="This request did not come through the active GODFIN app.",
             )
             return
+        scope.setdefault("state", {})[TRUSTED_DESKTOP_STATE_KEY] = (
+            self.policy.matches_launch_secret(supplied_launch_secret)
+        )
         await self.app(scope, receive, send)

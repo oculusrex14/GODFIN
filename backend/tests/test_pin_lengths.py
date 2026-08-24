@@ -1,6 +1,9 @@
 import pytest
+from starlette.requests import Request
 
+from app.api.v1.endpoints.auth import auth_status
 from app.core.auth import hash_pin
+from app.core.local_api_trust import TRUSTED_DESKTOP_STATE_KEY
 from app.models.app_setting import AppSetting
 
 
@@ -30,6 +33,27 @@ def test_lan_status_does_not_disclose_configured_pin_length(
     assert status.status_code == 200
     assert status.json()["is_first_run"] is False
     assert status.json()["pin_length"] is None
+
+
+def test_lan_status_returns_exact_pin_length_to_trusted_desktop(
+    client,
+    db_session,
+    monkeypatch,
+):
+    response = client.post("/api/v1/auth/set-pin", json={"pin": "4826"})
+    assert response.status_code == 200
+    monkeypatch.setenv("GODFIN_RUNTIME_MODE", "lan")
+    request = Request(
+        {
+            "type": "http",
+            "state": {TRUSTED_DESKTOP_STATE_KEY: True},
+        }
+    )
+
+    status = auth_status(request=request, db=db_session)
+
+    assert status.is_first_run is False
+    assert status.pin_length == 4
 
 
 def test_legacy_eight_digit_pin_can_unlock(client, db_session):

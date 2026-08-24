@@ -20,7 +20,7 @@ assert.ok(
 );
 
 const actualFiles = (await readdir(migrationRoot))
-  .filter((name) => /^\d{4}_[a-z0-9_]+\.sql$/.test(name))
+  .filter((name) => /^(?:\d{4}|\d{14})_[a-z0-9_]+\.sql$/.test(name))
   .sort();
 const expectedFiles = Object.keys(manifest.migrations).sort();
 assert.deepEqual(

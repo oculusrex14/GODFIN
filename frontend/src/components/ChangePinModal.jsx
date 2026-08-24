@@ -47,7 +47,7 @@ export default function ChangePinModal({ open, onClose }) {
     setLoading(true);
     try {
       const data = await changePin(currentPin, newPin);
-      handleAuth(data.token);
+      handleAuth(data.token, newPin.length);
       setSuccess(true);
       setTimeout(handleClose, 1500);
     } catch (err) {
