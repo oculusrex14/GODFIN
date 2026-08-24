@@ -5,7 +5,16 @@ test('homepage product chapters use real shipped feature demonstrations', async 
 }) => {
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
-  await page.goto('/');
+  page.on('console', (message) => {
+    if (message.type() === 'error') pageErrors.push(message.text());
+  });
+  const response = await page.goto('/');
+  const csp = response.headers()['content-security-policy'] || '';
+  expect(csp).not.toContain('upgrade-insecure-requests');
+  await expect(page.locator('body')).toHaveCSS(
+    'background-color',
+    'rgb(245, 247, 243)',
+  );
 
   await expect(
     page.getByRole('heading', {
@@ -23,7 +32,9 @@ test('homepage product chapters use real shipped feature demonstrations', async 
     await expect(page.getByRole('heading', { name: heading })).toBeVisible();
   }
 
-  const images = page.locator('#product-tour img');
+  const images = page.locator(
+    '#product-tour .product-chapter:not(:first-child) .product-demo img',
+  );
   await expect(images).toHaveCount(5);
   for (let index = 0; index < 5; index += 1) {
     await images.nth(index).scrollIntoViewIfNeeded();

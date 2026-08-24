@@ -3,9 +3,12 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { supabasePublicConfig } from "@/lib/env";
 
-function contentSecurityPolicy(nonce: string): string {
+function contentSecurityPolicy(
+  nonce: string,
+  upgradeInsecureRequests: boolean,
+): string {
   const development = process.env.NODE_ENV === "development";
-  return [
+  const directives = [
     "default-src 'self'",
     "base-uri 'none'",
     `connect-src 'self'${development ? " ws: wss:" : ""} https://*.supabase.co https://sdk.cashfree.com https://sandbox.cashfree.com https://api.cashfree.com https://payments.cashfree.com https://payments-test.cashfree.com https://www.google-analytics.com https://region1.google-analytics.com`,
@@ -19,14 +22,22 @@ function contentSecurityPolicy(nonce: string): string {
     "object-src 'none'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
     `style-src-elem 'self' 'nonce-${nonce}'`,
-    "style-src-attr 'none'",
-    "upgrade-insecure-requests",
-  ].join("; ");
+    "style-src-attr 'unsafe-hashes' 'sha256-zlqnbDt84zf1iSefLU/ImC54isoprH/MRiVZGskwexk='",
+  ];
+  if (upgradeInsecureRequests) directives.push("upgrade-insecure-requests");
+  return directives.join("; ");
 }
 
 export async function middleware(request: NextRequest) {
   const nonce = crypto.randomUUID().replaceAll("-", "");
-  const csp = contentSecurityPolicy(nonce);
+  const forwardedProtocol = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",", 1)[0]
+    ?.trim();
+  const secureTransport = forwardedProtocol
+    ? forwardedProtocol === "https"
+    : request.nextUrl.protocol === "https:";
+  const csp = contentSecurityPolicy(nonce, secureTransport);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);

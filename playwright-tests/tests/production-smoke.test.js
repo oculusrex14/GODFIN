@@ -75,7 +75,9 @@ test('login → upload → classify → generate report', async ({ page }) => {
 
   await page.getByRole('link', { name: 'Upload' }).click();
   await expect(page.getByRole('heading', { name: 'Upload Statement' })).toBeVisible();
-  await page.locator('input[type="file"]').setInputFiles(path.resolve(statementPath));
+  await page
+    .getByLabel(/Drop one or more PDF or Excel files here/i)
+    .setInputFiles(path.resolve(statementPath));
   await page.getByRole('button', { name: 'Upload & Reconcile' }).click();
   await expect(page.getByText('Reconciliation Review')).toBeVisible({ timeout: 15_000 });
 

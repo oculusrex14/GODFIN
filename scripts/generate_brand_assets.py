@@ -101,13 +101,42 @@ def expected_assets() -> dict[Path, bytes]:
 
 
 def verify(assets: dict[Path, bytes]) -> list[str]:
+    """Verify pixels and icon frames, independent of platform encoders.
+
+    Pillow delegates compression to platform libraries.  The same RGBA pixels
+    can therefore have different PNG/ICO/ICNS bytes on macOS and Linux.  The
+    owner-approved source remains byte-pinned above; generated derivatives are
+    compared as decoded pixels so CI still catches any visible or structural
+    change without treating encoder metadata as artwork.
+    """
+
+    def image_fingerprint(data: bytes) -> tuple[object, ...]:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format == "ICO":
+                sizes = tuple(sorted(image.ico.sizes()))
+                frames = tuple(
+                    (size, sha256(image.ico.getimage(size).convert("RGBA").tobytes()))
+                    for size in sizes
+                )
+                return (image.format, sizes, frames)
+            if image.format == "ICNS":
+                sizes = tuple(sorted(image.icns.itersizes()))
+                frames = tuple(
+                    (size, sha256(image.icns.getimage(size).convert("RGBA").tobytes()))
+                    for size in sizes
+                )
+                return (image.format, sizes, frames)
+
+            rgba = image.convert("RGBA")
+            return (image.format, rgba.size, sha256(rgba.tobytes()))
+
     errors = []
     for path, expected in assets.items():
         if not path.is_file():
             errors.append(f"missing: {path.relative_to(PROJECT_ROOT)}")
             continue
         actual = path.read_bytes()
-        if actual != expected:
+        if image_fingerprint(actual) != image_fingerprint(expected):
             errors.append(
                 f"mismatch: {path.relative_to(PROJECT_ROOT)} "
                 f"(expected {sha256(expected)}, got {sha256(actual)})"

@@ -20,7 +20,14 @@ def main() -> None:
     pdf.add_page()
     pdf.set_font("Helvetica", size=12)
     pdf.cell(0, 10, "HDFC Bank Statement of Account - Synthetic Test Data", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 8, "Savings Account XXXX0000", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, "Account No : XXXX0000", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        8,
+        "From : 01/07/2026 To : 31/07/2026",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(5)
     widths = [22, 55, 24, 24, 22, 20, 27]
     headers = [
@@ -28,8 +35,8 @@ def main() -> None:
         "Narration",
         "Chq/Ref",
         "Value Date",
-        "Withdrawal",
-        "Deposit",
+        "Withdrawal Amt.",
+        "Deposit Amt.",
         "Closing Balance",
     ]
     rows = [

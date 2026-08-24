@@ -323,7 +323,16 @@ const rootLayout = await text("src/app/layout.tsx");
 assert.match(middleware, /crypto\.randomUUID\(\)/);
 assert.match(middleware, /'nonce-\$\{nonce\}' 'strict-dynamic'/);
 assert.match(middleware, /style-src-elem 'self' 'nonce-\$\{nonce\}'/);
-assert.match(middleware, /style-src-attr 'none'/);
+assert.match(
+  middleware,
+  /style-src-attr 'unsafe-hashes' 'sha256-zlqnbDt84zf1iSefLU\/ImC54isoprH\/MRiVZGskwexk='/,
+);
+assert.match(
+  middleware,
+  /if \(upgradeInsecureRequests\) directives\.push\("upgrade-insecure-requests"\)/,
+);
+assert.match(middleware, /forwardedProtocol === "https"/);
+assert.match(middleware, /request\.nextUrl\.protocol === "https:"/);
 assert.match(
   middleware,
   /connect-src 'self'\$\{development \? " ws: wss:" : ""\}/,
