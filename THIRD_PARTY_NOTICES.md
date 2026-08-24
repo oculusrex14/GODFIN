@@ -961,75 +961,75 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | apscheduler | 3.11.3 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | beautifulsoup4 | 4.15.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | certifi | 2026.7.22 | PyPI | MPL-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| cffi | 2.1.0 | PyPI | MIT-0 | build, runtime, test | python-build, python-runtime, python-test |
-| charset-normalizer | 3.4.9 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
+| cffi | 2.1.1 | PyPI | MIT-0 | build, runtime, test | python-build, python-runtime, python-test |
+| charset-normalizer | 3.5.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | click | 8.4.2 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | colorama | 0.4.6 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | contourpy | 1.3.3 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
-| cryptography | 49.0.0 | PyPI | Apache-2.0 OR BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| cryptography | 50.0.0 | PyPI | Apache-2.0 OR BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | cycler | 0.12.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | defusedxml | 0.7.1 | PyPI | PSF-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | et-xmlfile | 2.0.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| fastapi | 0.140.13 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
+| fastapi | 0.141.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | fastembed | 0.8.0 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| filelock | 3.32.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
+| filelock | 3.32.4 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | flatbuffers | 25.12.19 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | fonttools | 4.63.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| fpdf2 | 2.8.7 | PyPI | LGPL-3.0-only | build, runtime, test | python-build, python-runtime, python-test |
+| fpdf2 | 2.8.8 | PyPI | LGPL-3.0-only | build, runtime, test | python-build, python-runtime, python-test |
 | fsspec | 2026.7.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | google-api-core | 2.34.0 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| google-api-python-client | 2.198.0 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
+| google-api-python-client | 2.199.0 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | google-auth-httplib2 | 0.4.1 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | google-auth-oauthlib | 1.4.0 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| google-auth | 2.56.2 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
+| google-auth | 2.56.3 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | googleapis-common-protos | 1.75.1 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| greenlet | 3.5.4 | PyPI | MIT AND PSF-2.0 | build, runtime, test | python-build, python-runtime, python-test |
+| greenlet | 3.5.5 | PyPI | MIT AND PSF-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | h11 | 0.16.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| hf-xet | 1.5.2 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| httpcore2 | 2.10.0 | PyPI | BSD-3-Clause | test | python-test |
+| hf-xet | 1.6.0 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
+| httpcore2 | 2.12.0 | PyPI | BSD-3-Clause | test | python-test |
 | httpcore | 1.0.9 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | httplib2 | 0.32.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | httptools | 0.8.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | httpx2-jsfetch | 1.0 | PyPI | BSD-3-Clause | test | python-test |
-| httpx2 | 2.10.0 | PyPI | BSD-3-Clause | test | python-test |
+| httpx2 | 2.12.0 | PyPI | BSD-3-Clause | test | python-test |
 | httpx | 0.28.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
-| huggingface-hub | 1.25.1 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| idna | 3.18 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| huggingface-hub | 1.28.0 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
+| idna | 3.19 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | iniconfig | 2.3.0 | PyPI | MIT | test | python-test |
 | kiwisolver | 1.5.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | loguru | 0.7.3 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| lxml | 6.1.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| lxml | 6.1.2 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | macholib | 1.16.4 | PyPI | MIT | build | python-build |
 | matplotlib | 3.11.1 | PyPI | PSF-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | mmh3 | 5.2.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| numpy | 2.5.1 | PyPI | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | build, runtime, test | python-build, python-runtime, python-test |
+| numpy | 2.5.2 | PyPI | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | build, runtime, test | python-build, python-runtime, python-test |
 | oauthlib | 3.3.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
-| onnxruntime | 1.28.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
+| onnxruntime | 1.29.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | openpyxl | 3.1.5 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| packaging | 26.2 | PyPI | Apache-2.0 OR BSD-2-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| packaging | 26.3 | PyPI | Apache-2.0 OR BSD-2-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | pdfminer-six | 20260107 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | pdfplumber | 0.11.10 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | pefile | 2024.8.26 | PyPI | MIT | build | python-build |
 | pillow | 12.3.0 | PyPI | MIT-CMU | build, runtime, test | python-build, python-runtime, python-test |
 | pluggy | 1.6.0 | PyPI | MIT | test | python-test |
 | proto-plus | 1.28.3 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| protobuf | 7.35.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| protobuf | 7.36.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | py-rust-stemmers | 0.1.8 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | pyasn1-modules | 0.4.2 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | pyasn1 | 0.6.4 | PyPI | BSD-2-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | pycparser | 3.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | pycryptodomex | 3.23.0 | PyPI | BSD-2-Clause AND Unlicense | build, runtime, test | python-build, python-runtime, python-test |
 | pydantic-core | 2.46.4 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| pydantic-settings | 2.14.2 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
+| pydantic-settings | 2.15.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | pydantic | 2.13.4 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| pygments | 2.20.0 | PyPI | BSD-2-Clause | test | python-test |
+| pygments | 2.21.0 | PyPI | BSD-2-Clause | test | python-test |
 | pyinstaller-hooks-contrib | 2026.6 | PyPI | GPL-2.0-or-later AND Apache-2.0 | build | python-build |
 | pyinstaller | 6.21.0 | PyPI | GPL-2.0-or-later WITH Bootloader-exception | build | python-build |
 | pyparsing | 3.3.2 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| pypdfium2 | 5.12.1 | PyPI | Apache-2.0 AND BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| pypdfium2 | 5.13.0 | PyPI | Apache-2.0 AND BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | pytest | 9.1.1 | PyPI | MIT | test | python-test |
 | python-dateutil | 2.9.0.post0 | PyPI | Apache-2.0 OR BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
-| python-dotenv | 1.2.2 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| python-dotenv | 1.2.3 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | python-multipart | 0.0.32 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | pywin32-ctypes | 0.2.3 | PyPI | BSD-3-Clause | build | python-build |
 | pyyaml | 6.0.3 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
@@ -1037,25 +1037,25 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | rapidfuzz | 3.14.5 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | requests-oauthlib | 2.0.0 | PyPI | ISC | build, runtime, test | python-build, python-runtime, python-test |
 | requests | 2.34.2 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| setuptools | 83.0.0 | PyPI | MIT | build | python-build |
+| setuptools | 84.0.0 | PyPI | MIT | build | python-build |
 | six | 1.17.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| soupsieve | 2.9.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| sqlalchemy | 2.0.51 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| starlette | 1.3.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| soupsieve | 2.9.2 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
+| sqlalchemy | 2.0.52 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
+| starlette | 1.6.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | thefuzz | 0.22.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | tokenizers | 0.23.1 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | tqdm | 4.70.0 | PyPI | MPL-2.0 AND MIT | build, runtime, test | python-build, python-runtime, python-test |
 | truststore | 0.10.4 | PyPI | MIT | test | python-test |
 | typing-extensions | 4.16.0 | PyPI | PSF-2.0 | build, runtime, test | python-build, python-runtime, python-test |
-| typing-inspection | 0.4.2 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
+| typing-inspection | 0.4.4 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | tzdata | 2026.3 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | tzlocal | 5.4.4 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | uritemplate | 4.2.0 | PyPI | Apache-2.0 OR BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | urllib3 | 2.7.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| uvicorn | 0.51.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| uvicorn | 0.52.4 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | uvloop | 0.22.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | watchfiles | 1.2.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
-| websockets | 16.1.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| websockets | 17.0.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | win32-setctime | 1.2.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | xlrd | 2.0.2 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 
@@ -1063,14 +1063,14 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 
 | Input | SHA-256 |
 |---|---|
-| `backend/requirements-build-lock.txt` | `ae117fdb738a5d5062bb46bb417be7048c0d8a30ca667a2cd3f51be8e6e392d4` |
-| `backend/requirements-lock.txt` | `83c9572bd1692838fdf6033f1533642cd71d49a77af33b17b861be47d2568b6a` |
-| `backend/requirements-test-lock.txt` | `df8f46046031bc806bca57beb8dfe0a9d886104567fdab484b4fa5475ac651be` |
+| `backend/requirements-build-lock.txt` | `9f230b923154eecb1db58c0658b619dddd30870d2185b7e88534d39ab20e7f31` |
+| `backend/requirements-lock.txt` | `67418e529d4b089a8ceaf2dd4ab933e7ca80f61294c4d98516fa874a5807d512` |
+| `backend/requirements-test-lock.txt` | `546c8be397cbadb38a81e3e0e1c54c7a9dfa6b56e8f53d5d87e82364957a60a3` |
 | `desktop/package-lock.json` | `6cd31437a7a8279d2e7fac6ab3afb1fa2933863834f215330207d191f6386cc6` |
 | `frontend/package-lock.json` | `ee10cbf9af687f03ba291edad9f46f250ea1cc3f76e423ab81a479c81c8c9829` |
 | `playwright-tests/package-lock.json` | `de7d47eede06c4e557e72816924d371c0993405a30fb79a12618f5136a66d43b` |
 | `supply-chain/license-policy.json` | `695825706d9c47fb6645a503a03b10433695dcd8c027d77f5445a608e3fc72eb` |
-| `supply-chain/python-license-review.json` | `88b7f56709365645eb2d81c6eb6e654f302e7c9942b9858fedd0ba496e1b1da6` |
+| `supply-chain/python-license-review.json` | `5bd358251ff195fd899d7a3ecc04ad702ec6f4f81624e30a7c8494422cb6c7cd` |
 | `website/package-lock.json` | `710415f21da2f095b1761617bc714f3634002d65423c4cd7d10ec512794eaff9` |
 
 ## Release rule

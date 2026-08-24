@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import io
 from typing import Optional
-
-import pdfplumber
 
 from app.core.parsers.base import StatementParserPlugin
 from app.core.parsers.hdfc_cc import PARSER as hdfc_cc
 from app.core.parsers.hdfc_savings import PARSER as hdfc_savings
+from app.core.parsers.kotak_savings import PARSER as kotak_savings
+from app.core.parsers.sbi_savings import PARSER as sbi_savings
+from app.core.pdf_extraction import PDFPLUMBER_ENGINE, PdfExtractionError
 from app.core.statement_parser import StatementParseResult
 
 
@@ -17,7 +17,7 @@ PARSER_REGISTRY_VERSION = "2026.08.v1"
 
 def registered_parsers() -> tuple[StatementParserPlugin, ...]:
     # Explicit imports keep parser plugins discoverable in frozen builds.
-    return (hdfc_savings, hdfc_cc)
+    return (hdfc_savings, hdfc_cc, kotak_savings, sbi_savings)
 
 
 def supported_parser_profiles() -> list[dict[str, object]]:
@@ -42,25 +42,23 @@ def account_requirements(statement_type: str) -> tuple[Optional[str], Optional[s
 
 def _pdf_text(contents: bytes, password: Optional[str]) -> tuple[str, Optional[str]]:
     try:
-        pdf = pdfplumber.open(io.BytesIO(contents), password=password)
-    except Exception:
+        with PDFPLUMBER_ENGINE.open_document(contents, password) as pdf:
+            if len(pdf.pages) > MAX_PDF_PAGES:
+                return "", f"PDF exceeds the {MAX_PDF_PAGES}-page review limit"
+            return "\n".join(page.extract_text() or "" for page in pdf.pages), None
+    except PdfExtractionError:
         return "", (
             "The PDF could not be opened. Check the file and its password, then try again."
         )
-    try:
-        if len(pdf.pages) > MAX_PDF_PAGES:
-            return "", f"PDF exceeds the {MAX_PDF_PAGES}-page review limit"
-        return "\n".join(page.extract_text() or "" for page in pdf.pages), None
     except Exception:
         return "", "The PDF layout could not be inspected safely."
-    finally:
-        pdf.close()
 
 
 def parse_registered_statement(
     contents: bytes,
     file_format: str,
     password: Optional[str] = None,
+    account_last4: Optional[str] = None,
 ) -> StatementParseResult:
     parsers = [
         parser for parser in registered_parsers()
@@ -79,7 +77,7 @@ def parse_registered_statement(
         if not detected:
             return StatementParseResult(
                 errors=[
-                    "Unsupported or unrecognized PDF statement; select a supported HDFC profile",
+                    "Unsupported or unrecognized PDF statement; choose a supported bank export",
                 ],
             )
         if len(detected) != 1:
@@ -97,7 +95,7 @@ def parse_registered_statement(
             )
         parser = spreadsheet_parsers[0]
 
-    result = parser.parse(contents, file_format, password)
+    result = parser.parse(contents, file_format, password, account_last4)
     result.parser_profile = result.parser_profile or parser.profile
     if result.errors or not result.transactions:
         result.transactions.clear()

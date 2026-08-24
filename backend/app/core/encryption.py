@@ -119,9 +119,11 @@ def _save_to_keychain(key: bytes) -> bool:
             getpass.getuser(),
             "-s",
             KEYCHAIN_SERVICE,
+            "-T",
+            "",
             "-w",
-            key.decode("ascii"),
         ],
+        input=f"{key.decode('ascii')}\n",
         capture_output=True,
         text=True,
         timeout=5,
@@ -144,8 +146,20 @@ def _load_from_file() -> Optional[bytes]:
 
 def _save_to_file(key: bytes) -> None:
     path = _key_file_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    if path.is_symlink() or path.parent.is_symlink():
+        raise EncryptionError("Encryption key path must not be a symbolic link")
+    parent_existed = path.parent.exists()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not parent_existed:
+        os.chmod(path.parent, 0o700)
+    descriptor = os.open(
+        path,
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_TRUNC
+        | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
     try:
         os.write(descriptor, key + b"\n")
         os.fsync(descriptor)

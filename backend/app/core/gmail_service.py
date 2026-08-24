@@ -14,6 +14,7 @@ import logging
 import os
 from pathlib import Path
 import secrets
+import stat
 import tempfile
 from typing import Iterator, Optional
 from urllib.parse import urlparse
@@ -27,6 +28,7 @@ from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session
 
 from app.core.encryption import EncryptionError, decrypt, encrypt
+from app.core.local_api_trust import mint_oauth_callback_state
 from app.models.gmail_oauth_attempt import GmailOAuthAttempt
 from app.models.session import AuthSession
 
@@ -174,8 +176,12 @@ def _credentials_expiry_for_storage(value: datetime | None) -> str | None:
 
 
 def _read_token_data() -> dict:
-    if TOKEN_FILE.stat().st_size > MAX_TOKEN_FILE_BYTES:
+    metadata = TOKEN_FILE.lstat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ValueError("Stored Gmail permission is not a regular file.")
+    if metadata.st_size > MAX_TOKEN_FILE_BYTES:
         raise ValueError("Stored Gmail permission is unexpectedly large.")
+    os.chmod(TOKEN_FILE, 0o600)
     with open(TOKEN_FILE, "r", encoding="utf-8") as handle:
         token_data = json.load(handle)
     if not isinstance(token_data, dict):
@@ -187,7 +193,12 @@ def _write_token_data(token_data: dict) -> None:
     payload = json.dumps(token_data, separators=(",", ":"))
     if len(payload.encode("utf-8")) > MAX_TOKEN_FILE_BYTES:
         raise ValueError("Stored Gmail permission is unexpectedly large.")
-    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if TOKEN_FILE.is_symlink() or TOKEN_FILE.parent.is_symlink():
+        raise OSError("Gmail permission path cannot be a symbolic link.")
+    parent_existed = TOKEN_FILE.parent.exists()
+    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not parent_existed:
+        os.chmod(TOKEN_FILE.parent, 0o700)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=".gmail-token-",
         suffix=".json",
@@ -200,9 +211,22 @@ def _write_token_data(token_data: dict) -> None:
             os.fsync(handle.fileno())
         os.chmod(temporary_name, 0o600)
         os.replace(temporary_name, TOKEN_FILE)
+        os.chmod(TOKEN_FILE, 0o600)
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
+
+
+def _remove_local_token_file() -> None:
+    """Remove only the configured token directory entry, never a symlink target."""
+
+    try:
+        metadata = TOKEN_FILE.lstat()
+    except FileNotFoundError:
+        return
+    if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode)):
+        raise OSError("Gmail permission path is not a removable credential file.")
+    TOKEN_FILE.unlink()
 
 
 def _state_hash(state: str) -> str:
@@ -460,7 +484,12 @@ class GmailService:
                 code="client_config_missing",
             )
 
-        state = secrets.token_urlsafe(32)
+        launch_secret = os.environ.get("GODFIN_LAUNCH_SECRET")
+        state = (
+            mint_oauth_callback_state(launch_secret)
+            if launch_secret
+            else secrets.token_urlsafe(32)
+        )
         code_verifier = secrets.token_urlsafe(64)
         code_challenge = base64.urlsafe_b64encode(
             hashlib.sha256(code_verifier.encode("ascii")).digest()
@@ -784,13 +813,7 @@ class GmailService:
                     self._persist_credentials(refresh_succeeded=True)
                 except RefreshError:
                     logger.info("Gmail authorization is no longer valid")
-                    _record_token_diagnostic(
-                        last_refresh_failure_at=_utcnow_naive()
-                        .replace(tzinfo=timezone.utc)
-                        .isoformat()
-                        .replace("+00:00", "Z"),
-                        safe_reason_code="refresh_token_rejected",
-                    )
+                    _remove_local_token_file()
                     self._credentials = None
                     self.service = None
                     self._set_connection_health(

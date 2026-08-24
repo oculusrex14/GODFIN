@@ -3,6 +3,32 @@
   "updated_at": "2026-08-24",
   "license_model": "lifetime",
   "included_hosted_ai_credits": 0,
+  "navigation": {
+    "/transfers": {
+      "feature": "multiple_accounts",
+      "required_tier": "pro",
+      "label": "Transfers",
+      "explanation": "Match transfers across more than one account with GODFIN Pro."
+    },
+    "/net-worth": {
+      "feature": "net_worth",
+      "required_tier": "max",
+      "label": "Net Worth",
+      "explanation": "Track assets, liabilities, and valuation freshness with GODFIN Max."
+    },
+    "/behavior-insights": {
+      "feature": "behavior_insights",
+      "required_tier": "max",
+      "label": "Behavior Insights",
+      "explanation": "Explore explainable money-behavior patterns with GODFIN Max."
+    },
+    "/advisor": {
+      "feature": "ai_advisor",
+      "required_tier": "max",
+      "label": "Advisor",
+      "explanation": "Ask an optional verified AI to explain local calculations with GODFIN Max."
+    }
+  },
   "tiers": {
     "free": {
       "name": "GODFIN Core",

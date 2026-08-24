@@ -59,6 +59,58 @@ def test_license_defaults_to_core_and_never_exposes_key(auth_client):
     assert "license_key" not in settings_response.json()
 
 
+def test_core_navigation_metadata_marks_paid_routes_without_granting_them(
+    auth_client,
+):
+    response = auth_client.get("/api/v1/license/navigation")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tier"] == "free"
+    assert payload["features"] == features_for_tier("free")
+    assert payload["routes"]["/transfers"]["required_tier"] == "pro"
+    assert payload["routes"]["/net-worth"]["required_tier"] == "max"
+
+
+def test_pro_navigation_unlocks_pro_but_not_max_routes(
+    auth_client,
+    db_session,
+):
+    install_test_license(db_session, "pro")
+
+    payload = auth_client.get("/api/v1/license/navigation").json()
+
+    assert payload["tier"] == "pro"
+    assert "multiple_accounts" in payload["features"]
+    assert "net_worth" not in payload["features"]
+
+
+def test_max_navigation_unlocks_every_declared_route(
+    auth_client,
+    db_session,
+):
+    install_test_license(db_session, "max")
+
+    payload = auth_client.get("/api/v1/license/navigation").json()
+
+    assert payload["tier"] == "max"
+    assert all(
+        route["feature"] in payload["features"]
+        for route in payload["routes"].values()
+    )
+
+
+def test_navigation_metadata_never_changes_tier_grants():
+    manifest = entitlement_manifest()
+    tier_order = ("free", "pro", "max")
+
+    for route in manifest["navigation"].values():
+        required_index = tier_order.index(route["required_tier"])
+        for index, tier in enumerate(tier_order):
+            has_feature = route["feature"] in features_for_tier(tier)
+            assert has_feature is (index >= required_index)
+
+
 def test_activate_encrypts_key_and_unlocks_server_features(
     auth_client, db_session, monkeypatch, tmp_path
 ):

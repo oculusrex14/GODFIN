@@ -149,7 +149,7 @@ def test_llm_connection_fault_is_not_returned_as_http_success(
     monkeypatch.setattr("app.api.v1.endpoints.llm.create_provider", fail_provider)
     response = auth_client.post(
         "/api/v1/llm/config/test",
-        json={"provider": "ollama", "model": "qwen"},
+        json={"provider": "ollama_local", "model": "qwen"},
     )
 
     payload = _assert_correlated_error(response, code="LLM_CONNECTION_FAILED")
@@ -178,7 +178,7 @@ def test_llm_provider_failure_message_is_never_reflected(
     )
     response = auth_client.post(
         "/api/v1/llm/config/test",
-        json={"provider": "ollama", "model": "qwen"},
+        json={"provider": "ollama_local", "model": "qwen"},
     )
 
     payload = _assert_correlated_error(response, code="LLM_CONNECTION_FAILED")

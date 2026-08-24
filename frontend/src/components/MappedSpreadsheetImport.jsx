@@ -96,14 +96,14 @@ function savedMapping(headerSignature) {
 function ColumnSelect({ field, label, value, columns, optional, onChange }) {
   return (
     <label className="grid gap-1.5">
-      <span className="text-[0.68rem] text-white/35">{label}{optional ? ' (optional)' : ''}</span>
+      <span className="text-[0.68rem] text-ink-muted">{label}{optional ? ' (optional)' : ''}</span>
       <select
         aria-label={label}
         value={value ?? ''}
         onChange={(event) => onChange(
           event.target.value === '' ? null : Number(event.target.value),
         )}
-        className="rounded-[10px] border border-white/[0.12] bg-[#15294a] px-3 py-2 text-[0.75rem] text-white/75 focus:border-cyan-400/40 focus:outline-none"
+        className="rounded-[10px] border border-white/[0.12] bg-[#15294a] px-3 py-2 text-[0.75rem] text-ink-secondary focus:border-cyan-400/40 focus:outline-none"
       >
         <option value="">{optional ? 'Not included' : 'Select a column'}</option>
         {columns.map(column => (
@@ -265,8 +265,8 @@ export default function MappedSpreadsheetImport() {
     <div className="grid gap-5 lg:grid-cols-[minmax(220px,0.38fr)_minmax(0,1fr)]">
       <section className="relative overflow-hidden rounded-[20px] border border-white/[0.18] bg-white/[0.08] p-5 backdrop-blur-[24px]">
         <div className="mb-4">
-          <h2 className="text-[0.75rem] font-medium uppercase tracking-wider text-white/45">Import queue</h2>
-          <p className="mt-1 text-[0.7rem] leading-relaxed text-white/25">
+          <h2 className="text-[0.75rem] font-medium uppercase tracking-wider text-ink-muted">Import queue</h2>
+          <p className="mt-1 text-[0.7rem] leading-relaxed text-ink-muted">
             Add several files, then inspect and confirm them one at a time. Nothing is imported during preview.
           </p>
         </div>
@@ -278,9 +278,9 @@ export default function MappedSpreadsheetImport() {
             addFiles(event.dataTransfer.files || []);
           }}
         >
-          <Upload className="mx-auto mb-2 h-6 w-6 text-cyan-300/60" />
-          <span className="text-[0.78rem] text-white/60">Choose CSV or XLSX files</span>
-          <span className="mt-1 block text-[0.65rem] text-white/25">Up to 10 MB each · one transaction sheet per XLSX</span>
+          <Upload className="mx-auto mb-2 h-6 w-6 text-cyan-200" />
+          <span className="text-[0.78rem] text-ink-secondary">Choose CSV or XLSX files</span>
+          <span className="mt-1 block text-[0.65rem] text-ink-muted">Up to 10 MB each · one transaction sheet per XLSX</span>
           <input
             className="hidden"
             type="file"
@@ -292,11 +292,11 @@ export default function MappedSpreadsheetImport() {
             }}
           />
         </label>
-        {fileError && <p className="mt-2 text-[0.7rem] text-rose-300/80">{fileError}</p>}
+        {fileError && <p className="mt-2 text-[0.7rem] text-rose-200">{fileError}</p>}
 
         {queue.length > 0 && (
           <div className="mt-4 space-y-2">
-            <div className="flex justify-between text-[0.65rem] text-white/30">
+            <div className="flex justify-between text-[0.65rem] text-ink-muted">
               <span>{queue.length} file(s)</span>
               <span>{reviewedCount} reviewed · {completeCount} complete · {failedCount} failed</span>
             </div>
@@ -316,17 +316,17 @@ export default function MappedSpreadsheetImport() {
                   className="flex min-w-0 flex-1 items-center gap-2 p-2.5 text-left disabled:cursor-not-allowed"
                 >
                   {item.stage === 'complete' ? (
-                    <CheckCircle className="h-4 w-4 shrink-0 text-emerald-300/80" />
+                    <CheckCircle className="h-4 w-4 shrink-0 text-emerald-200" />
                   ) : item.stage.endsWith('ing') ? (
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cyan-300/70" />
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-cyan-200" />
                   ) : item.stage === 'failed' ? (
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-rose-300/80" />
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-rose-200" />
                   ) : (
-                    <FileSpreadsheet className="h-4 w-4 shrink-0 text-white/35" />
+                    <FileSpreadsheet className="h-4 w-4 shrink-0 text-ink-muted" />
                   )}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[0.72rem] text-white/65">{item.file.name}</span>
-                    <span className="block text-[0.6rem] capitalize text-white/25">{item.stage}</span>
+                    <span className="block truncate text-[0.72rem] text-ink-secondary">{item.file.name}</span>
+                    <span className="block text-[0.6rem] capitalize text-ink-muted">{item.stage}</span>
                   </span>
                 </button>
                 <button
@@ -334,13 +334,13 @@ export default function MappedSpreadsheetImport() {
                   aria-label={`Remove ${item.file.name}`}
                   disabled={busy}
                   onClick={() => removeEntry(item.id)}
-                  className="mr-2 rounded p-1 text-white/20 hover:text-rose-300/70 disabled:cursor-not-allowed"
+                  className="mr-2 rounded p-1 text-ink-muted hover:text-rose-200 disabled:cursor-not-allowed"
                 >
                   <Trash2 size={13} />
                 </button>
               </div>
             ))}
-            <label className="flex items-center gap-2 pt-1 text-[0.64rem] leading-relaxed text-white/35">
+            <label className="flex items-center gap-2 pt-1 text-[0.64rem] leading-relaxed text-ink-muted">
               <input
                 type="checkbox"
                 checked={reviewAllFirst}
@@ -350,7 +350,7 @@ export default function MappedSpreadsheetImport() {
               Review every queued file before importing any of them
             </label>
             {(completeCount > 0 || failedCount > 0) && (
-              <p className="pt-1 text-[0.62rem] leading-relaxed text-white/27">
+              <p className="pt-1 text-[0.62rem] leading-relaxed text-ink-muted">
                 Batch summary: {totals.imported} imported · {totals.duplicates} duplicates skipped · {totals.review} need category review · {failedCount} failed
               </p>
             )}
@@ -361,20 +361,20 @@ export default function MappedSpreadsheetImport() {
       <section className="relative min-h-[320px] overflow-hidden rounded-[20px] border border-white/[0.18] bg-white/[0.08] p-6 backdrop-blur-[24px]">
         {!active ? (
           <div className="flex min-h-[270px] flex-col items-center justify-center text-center">
-            <FileSpreadsheet className="mb-3 h-10 w-10 text-white/15" />
-            <p className="text-[0.85rem] text-white/45">Add a spreadsheet to begin</p>
-            <p className="mt-1 max-w-md text-[0.7rem] leading-relaxed text-white/25">
+            <FileSpreadsheet className="mb-3 h-10 w-10 text-ink-muted" />
+            <p className="text-[0.85rem] text-ink-muted">Add a spreadsheet to begin</p>
+            <p className="mt-1 max-w-md text-[0.7rem] leading-relaxed text-ink-muted">
               GODFIN will show the columns and sample rows before asking what each column means.
             </p>
           </div>
         ) : active.stage === 'waiting' || active.stage === 'failed' || active.stage === 'inspecting' ? (
           <div className="flex min-h-[270px] flex-col items-center justify-center text-center">
-            <FileCheck className="mb-3 h-9 w-9 text-cyan-300/50" />
-            <h3 className="max-w-md truncate text-[0.9rem] text-white/70">{active.file.name}</h3>
-            <p className="mt-2 max-w-md text-[0.72rem] leading-relaxed text-white/30">
+            <FileCheck className="mb-3 h-9 w-9 text-cyan-200" />
+            <h3 className="max-w-md truncate text-[0.9rem] text-ink-secondary">{active.file.name}</h3>
+            <p className="mt-2 max-w-md text-[0.72rem] leading-relaxed text-ink-muted">
               Inspecting reads the headings and a few sample rows locally. It does not save any transactions.
             </p>
-            {active.error && <p className="mt-3 max-w-md text-[0.72rem] text-rose-300/80">{active.error}</p>}
+            {active.error && <p className="mt-3 max-w-md text-[0.72rem] text-rose-200">{active.error}</p>}
             <GlassButton
               className="mt-5 justify-center"
               disabled={busy}
@@ -387,13 +387,13 @@ export default function MappedSpreadsheetImport() {
           <div>
             <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-[0.95rem] text-white/75">Tell GODFIN what each column means</h3>
-                <p className="mt-1 text-[0.68rem] text-white/28">
+                <h3 className="text-[0.95rem] text-ink-secondary">Tell GODFIN what each column means</h3>
+                <p className="mt-1 text-[0.68rem] text-ink-muted">
                   Header row {active.inspect.header_row} · {active.inspect.row_count.toLocaleString('en-IN')} transaction row(s)
                 </p>
               </div>
               {active.stage === 'complete' && (
-                <span className="flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-1 text-[0.68rem] text-emerald-300/80">
+                <span className="flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-1 text-[0.68rem] text-emerald-200">
                   <CheckCircle size={12} /> Imported
                 </span>
               )}
@@ -401,7 +401,7 @@ export default function MappedSpreadsheetImport() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="grid gap-1.5">
-                <span className="text-[0.68rem] text-white/35">Import into account</span>
+                <span className="text-[0.68rem] text-ink-muted">Import into account</span>
                 <select
                   value={active.accountId}
                   onChange={event => updateEntry(active.id, {
@@ -410,7 +410,7 @@ export default function MappedSpreadsheetImport() {
                     result: null,
                     stage: 'mapping',
                   })}
-                  className="rounded-[10px] border border-white/[0.12] bg-[#15294a] px-3 py-2 text-[0.75rem] text-white/75 focus:border-cyan-400/40 focus:outline-none"
+                  className="rounded-[10px] border border-white/[0.12] bg-[#15294a] px-3 py-2 text-[0.75rem] text-ink-secondary focus:border-cyan-400/40 focus:outline-none"
                 >
                   <option value="">Select an account</option>
                   {activeAccounts.map(account => (
@@ -419,7 +419,7 @@ export default function MappedSpreadsheetImport() {
                 </select>
               </label>
               <label className="grid gap-1.5">
-                <span className="text-[0.68rem] text-white/35">Date style used in this file</span>
+                <span className="text-[0.68rem] text-ink-muted">Date style used in this file</span>
                 <select
                   value={active.dateFormat}
                   onChange={event => updateEntry(active.id, {
@@ -428,7 +428,7 @@ export default function MappedSpreadsheetImport() {
                     result: null,
                     stage: 'mapping',
                   })}
-                  className="rounded-[10px] border border-white/[0.12] bg-[#15294a] px-3 py-2 text-[0.75rem] text-white/75 focus:border-cyan-400/40 focus:outline-none"
+                  className="rounded-[10px] border border-white/[0.12] bg-[#15294a] px-3 py-2 text-[0.75rem] text-ink-secondary focus:border-cyan-400/40 focus:outline-none"
                 >
                   {DATE_FORMATS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
@@ -458,10 +458,10 @@ export default function MappedSpreadsheetImport() {
 
             <div className="mt-5 overflow-x-auto rounded-[12px] border border-white/[0.08]">
               <table className="min-w-full text-left text-[0.67rem]">
-                <thead className="bg-white/[0.05] text-white/40">
+                <thead className="bg-white/[0.05] text-ink-muted">
                   <tr>{active.inspect.columns.map(column => <th key={column.index} className="whitespace-nowrap px-3 py-2 font-medium">{column.label}</th>)}</tr>
                 </thead>
-                <tbody className="text-white/35">
+                <tbody className="text-ink-muted">
                   {active.inspect.sample_rows.map((row, rowIndex) => (
                     <tr key={rowIndex} className="border-t border-white/[0.05]">
                       {active.inspect.columns.map(column => <td key={column.index} className="max-w-[220px] truncate whitespace-nowrap px-3 py-2">{row[column.index] || '—'}</td>)}
@@ -479,10 +479,10 @@ export default function MappedSpreadsheetImport() {
               }`}>
                 {active.preview.status === 'ready' ? (
                   <>
-                    <p className="flex items-center gap-2 text-[0.75rem] text-emerald-300/80">
+                    <p className="flex items-center gap-2 text-[0.75rem] text-emerald-200">
                       <CheckCircle size={14} /> Ready: {active.preview.new_count} new transaction(s), {active.preview.matched_count} exact duplicate(s)
                     </p>
-                    <p className="mt-1 text-[0.68rem] leading-relaxed text-white/35">
+                    <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-muted">
                       {active.preview.balance_controls_verified
                         ? 'The debit, credit, and running-balance arithmetic agree. A verified account balance can be shown after import.'
                         : 'Transactions can be imported, but no verified account balance will be claimed because a running-balance column was not mapped.'}
@@ -490,8 +490,8 @@ export default function MappedSpreadsheetImport() {
                   </>
                 ) : (
                   <>
-                    <p className="flex items-center gap-2 text-[0.75rem] text-amber-300/80"><AlertTriangle size={14} /> Fix the rows below, then preview again</p>
-                    <ul className="mt-2 space-y-1 text-[0.68rem] text-white/40">
+                    <p className="flex items-center gap-2 text-[0.75rem] text-amber-200"><AlertTriangle size={14} /> Fix the rows below, then preview again</p>
+                    <ul className="mt-2 space-y-1 text-[0.68rem] text-ink-muted">
                       {active.preview.errors.map(error => <li key={`${error.row}-${error.code}`}>Row {error.row}: {error.message}</li>)}
                     </ul>
                   </>
@@ -499,11 +499,11 @@ export default function MappedSpreadsheetImport() {
               </div>
             )}
             {active.result && (
-              <div className="mt-4 rounded-[12px] border border-emerald-400/15 bg-emerald-400/[0.05] p-3 text-[0.72rem] text-emerald-300/80">
+              <div className="mt-4 rounded-[12px] border border-emerald-400/15 bg-emerald-400/[0.05] p-3 text-[0.72rem] text-emerald-200">
                 Imported {active.result.imported} transaction(s); skipped {active.result.skipped_duplicate} exact duplicate(s). {active.result.review_queue} item(s) need your category review.
               </div>
             )}
-            {active.error && <p className="mt-3 text-[0.72rem] text-rose-300/80">{active.error}</p>}
+            {active.error && <p className="mt-3 text-[0.72rem] text-rose-200">{active.error}</p>}
 
             {active.stage !== 'complete' && (
               <div className="mt-5 flex flex-wrap justify-end gap-2">

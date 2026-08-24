@@ -10,7 +10,9 @@
     "start": "next start -p 5300",
     "lint": "next lint",
     "test:cashfree": "node --import tsx --test src/lib/cashfree.test.ts",
+    "test:webhook": "node --import tsx --test src/lib/webhook-security.test.ts",
     "test:upgrades": "node --import tsx --test src/lib/license-upgrades.test.ts",
+    "test:unit": "npm run test:cashfree && npm run test:webhook && npm run test:upgrades",
     "verify:contracts": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs && node scripts/verify-supabase-migrations.mjs",
     "verify:migrations": "node scripts/verify-supabase-migrations.mjs"
   },
@@ -33,7 +35,7 @@
     "typescript": "5.7.2"
   },
   "engines": {
-    "node": ">=20.11.0"
+    "node": ">=22.0.0"
   },
   "overrides": {
     "brace-expansion": "5.0.9",

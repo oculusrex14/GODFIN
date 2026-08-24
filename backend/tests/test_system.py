@@ -16,10 +16,12 @@ def test_system_status_exposes_support_safe_build_identity(
     build_identity.cache_clear()
     try:
         response = auth_client.get("/api/v1/system/status")
+        diagnostics_response = auth_client.get("/api/v1/system/diagnostics")
     finally:
         build_identity.cache_clear()
 
     assert response.status_code == 200
+    assert diagnostics_response.status_code == 200
     build = response.json()["build"]
     assert build["version"] == "0.1.0"
     assert build["full_sha"] == "a" * 40
@@ -32,6 +34,7 @@ def test_system_status_exposes_support_safe_build_identity(
     assert build["license_api_host"] == "godfin.dev"
     assert "installation" not in str(build).lower()
     assert "/Users/" not in str(build)
+    assert diagnostics_response.json()["application"]["build"] == build
 
 
 def test_embeddings_disabled_by_default(auth_client):

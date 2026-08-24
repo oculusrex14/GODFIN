@@ -7,8 +7,11 @@ from sqlalchemy.exc import IntegrityError
 from app.core.gmail_service import GmailFetchResult, GmailOAuthStateError
 from app.core.ingestion import (
     IngestionResult,
+    _record_successful_coverage,
+    gmail_coverage_summary,
     _process_message_with_savepoint,
     run_ingestion,
+    run_ingestion_with_dates,
     run_initial_sync,
 )
 from app.models.app_setting import AppSetting
@@ -259,9 +262,8 @@ def test_unrelated_gmail_integrity_error_remains_an_error(
     assert result.processed == 1
     assert result.skipped_duplicate == 0
     assert result.errors == 1
-    assert result.error_details == [
-        "Message invalid-message: database validation failed"
-    ]
+    assert result.error_details == ["A transaction failed local validation."]
+    assert result.skip_reasons == {"database_validation": 1}
 
 
 def test_ingestion_all_mock_emails(db_session):
@@ -626,3 +628,94 @@ def test_ingestion_status_rejects_legacy_python_repr(auth_client, db_session):
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
     assert response.json()["result"] is None
+
+
+def test_gmail_coverage_exposes_a_missing_month(db_session):
+    _record_successful_coverage(
+        db_session,
+        date(2026, 1, 1),
+        date(2026, 6, 30),
+    )
+    _record_successful_coverage(
+        db_session,
+        date(2026, 8, 1),
+        date(2026, 8, 31),
+    )
+    db_session.commit()
+
+    coverage = gmail_coverage_summary(db_session, through=date(2026, 8, 31))
+
+    assert coverage["missing_ranges"] == [
+        {"start": "2026-07-01", "end": "2026-07-31"}
+    ]
+    assert coverage["last_successful_coverage_end"] == "2026-08-31"
+    assert coverage["next_sync_start"] == "2026-08-31"
+
+
+def test_exact_july_august_backfill_is_queried_and_idempotent(
+    db_session,
+    monkeypatch,
+):
+    calls = []
+
+    def fetched(**options):
+        calls.append(options)
+        return GmailFetchResult(
+            messages=[MOCK_UPI_DEBIT_EMAIL],
+            history_id=None,
+            status="complete",
+        )
+
+    monkeypatch.setattr("app.core.ingestion.fetch_messages", fetched)
+
+    first = run_ingestion_with_dates(
+        db_session,
+        after_date="2026-07-01",
+        before_date="2026-09-01",
+    )
+    second = run_ingestion_with_dates(
+        db_session,
+        after_date="2026-07-01",
+        before_date="2026-09-01",
+    )
+
+    assert [
+        (call["after_date"], call["before_date"])
+        for call in calls
+    ] == [
+        ("2026-07-01", "2026-09-01"),
+        ("2026-07-01", "2026-09-01"),
+    ]
+    assert first.created == 1
+    assert second.created == 0
+    assert second.skipped_duplicate == 1
+    assert first.requested_start == "2026-07-01"
+    assert first.requested_end == "2026-08-31"
+    assert first.coverage_advanced is True
+
+
+def test_partial_date_range_does_not_claim_coverage(db_session, monkeypatch):
+    monkeypatch.setattr(
+        "app.core.ingestion.fetch_messages",
+        lambda **_options: GmailFetchResult(
+            messages=[],
+            history_id=None,
+            status="partial",
+            errors=("Gmail stopped before every page was read.",),
+            retryable=True,
+        ),
+    )
+
+    result = run_ingestion_with_dates(
+        db_session,
+        after_date="2026-07-01",
+        before_date="2026-09-01",
+    )
+
+    assert result.source_status == "partial"
+    assert result.coverage_advanced is False
+    coverage = gmail_coverage_summary(db_session, through=date(2026, 8, 31))
+    assert coverage["coverage_ranges"] == []
+    assert coverage["missing_ranges"] == [
+        {"start": "2026-01-01", "end": "2026-08-31"}
+    ]

@@ -132,7 +132,13 @@
     "GET /api/v1/income/{source_id}/matches": {
       "access": "authenticated_free"
     },
+    "GET /api/v1/ingest/gmail/coverage": {
+      "access": "authenticated_free"
+    },
     "GET /api/v1/ingest/gmail/range/status": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/ingest/gmail/sync-now/status": {
       "access": "authenticated_free"
     },
     "GET /api/v1/ingest/gmail/sync-status": {
@@ -148,6 +154,9 @@
       "access": "authenticated_free"
     },
     "GET /api/v1/license": {
+      "access": "authenticated_free"
+    },
+    "GET /api/v1/license/navigation": {
       "access": "authenticated_free"
     },
     "GET /api/v1/llm/config": {
@@ -364,6 +373,15 @@
     "POST /api/v1/income-sources": {
       "access": "authenticated_free"
     },
+    "POST /api/v1/income/actual": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/income/actual/period/confirm": {
+      "access": "authenticated_free"
+    },
+    "POST /api/v1/income/actual/period/preview": {
+      "access": "authenticated_free"
+    },
     "POST /api/v1/income/{source_id}/matches/confirm": {
       "access": "authenticated_free"
     },
@@ -393,6 +411,10 @@
       "access": "authenticated_free"
     },
     "POST /api/v1/ingest/gmail/range/start": {
+      "access": "paid",
+      "feature": "gmail_sync"
+    },
+    "POST /api/v1/ingest/gmail/sync-now/start": {
       "access": "paid",
       "feature": "gmail_sync"
     },

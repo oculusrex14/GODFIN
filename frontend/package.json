@@ -7,8 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "verify:a11y": "node scripts/verify-accessibility-contracts.mjs",
+    "verify:a11y": "node scripts/verify-accessibility-contracts.mjs && node scripts/verify-contrast-tokens.mjs",
+    "verify:controls": "node scripts/generate-interactive-action-manifest.mjs",
     "test:auth": "node --test tests/auth-token-memory.test.mjs",
+    "test:content": "node --test tests/build-identity.test.mjs tests/secure-password.test.mjs tests/tier-navigation.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

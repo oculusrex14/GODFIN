@@ -13,7 +13,9 @@ from app.core.local_api_trust import (
     LocalApiPolicy,
     LocalApiTrustMiddleware,
     RuntimeMode,
+    mint_oauth_callback_state,
     runtime_mode,
+    verify_oauth_callback_state,
 )
 from app.core.network_access import NetworkAccessMode, network_access_mode
 
@@ -33,6 +35,10 @@ def _client(policy: LocalApiPolicy) -> TestClient:
 
     @app.get("/health")
     def health():
+        return {"status": "ok"}
+
+    @app.get("/api/v1/health")
+    def api_health():
         return {"status": "ok"}
 
     @app.get("/trust-state")
@@ -138,11 +144,12 @@ def test_packaged_cors_is_exact_bounded_and_has_no_credentials_mode():
     assert "POST" in allowed_methods
 
 
-def test_packaged_policy_allows_only_exact_browser_oauth_callback_without_secret():
+def test_packaged_policy_allows_only_signed_browser_oauth_callback_without_secret():
     client = _client(LocalApiPolicy(RuntimeMode.PACKAGED, "launch-secret"))
+    state = mint_oauth_callback_state("launch-secret")
 
     callback = client.get(
-        "/api/v1/auth/gmail/callback?code=provider-code&state=one-time-state",
+        f"/api/v1/auth/gmail/callback?code=provider-code&state={state}",
     )
     callback_post = client.post("/api/v1/auth/gmail/callback")
     callback_suffix = client.get("/api/v1/auth/gmail/callback/extra")
@@ -165,6 +172,32 @@ def test_packaged_policy_allows_only_exact_browser_oauth_callback_without_secret
     assert untrusted_host.json()["code"] == "UNTRUSTED_LOCAL_HOST"
     assert untrusted_origin.status_code == 403
     assert untrusted_origin.json()["code"] == "UNTRUSTED_LOCAL_ORIGIN"
+
+
+def test_packaged_policy_rejects_unsigned_tampered_expired_or_ambiguous_oauth_state():
+    client = _client(LocalApiPolicy(RuntimeMode.PACKAGED, "launch-secret"))
+    valid = mint_oauth_callback_state(
+        "launch-secret",
+        now=1_000,
+        nonce="fixed-callback-nonce",
+    )
+    assert verify_oauth_callback_state(valid, "launch-secret", now=1_599)
+    assert not verify_oauth_callback_state(valid, "wrong-secret", now=1_599)
+    assert not verify_oauth_callback_state(valid, "launch-secret", now=1_601)
+    assert not verify_oauth_callback_state(f"{valid}x", "launch-secret", now=1_599)
+
+    unsigned = client.get(
+        "/api/v1/auth/gmail/callback?code=provider-code&state=unsigned"
+    )
+    tampered = client.get(
+        f"/api/v1/auth/gmail/callback?code=provider-code&state={valid}x"
+    )
+    duplicate = client.get(
+        f"/api/v1/auth/gmail/callback?state={valid}&state={valid}"
+    )
+    assert unsigned.status_code == 403
+    assert tampered.status_code == 403
+    assert duplicate.status_code == 403
 
 
 def test_local_mode_rejects_dns_rebinding_and_unlisted_origins():
@@ -215,7 +248,10 @@ def test_lan_mode_accepts_only_private_literal_addresses(
     allowed: bool,
 ):
     client = _client(LocalApiPolicy(RuntimeMode.LAN, "desktop-secret"))
-    response = client.get("/health", headers={"Host": host, "Origin": origin})
+    response = client.get(
+        "/api/v1/health",
+        headers={"Host": host, "Origin": origin},
+    )
     assert (response.status_code == 200) is allowed
 
 
@@ -232,9 +268,25 @@ def test_lan_mode_marks_only_the_exact_desktop_launch_secret_as_trusted():
         headers={LAUNCH_SECRET_HEADER: "desktop-secret"},
     )
 
-    assert ordinary.json() == {"trusted_desktop": False}
-    assert wrong.json() == {"trusted_desktop": False}
+    assert ordinary.status_code == 403
+    assert wrong.status_code == 403
     assert desktop.json() == {"trusted_desktop": True}
+
+
+def test_lan_mode_requires_bearer_for_non_public_routes():
+    client = _client(LocalApiPolicy(RuntimeMode.LAN, "desktop-secret"))
+
+    public_health = client.get("/api/v1/health")
+    protected_without_token = client.get("/trust-state")
+    protected_with_token = client.get(
+        "/trust-state",
+        headers={"Authorization": "Bearer candidate-session"},
+    )
+
+    assert public_health.status_code == 200
+    assert protected_without_token.status_code == 403
+    assert protected_with_token.status_code == 200
+    assert protected_with_token.json() == {"trusted_desktop": False}
 
 
 def test_explicit_runtime_mode_is_typed_and_invalid_values_fail_closed(monkeypatch):

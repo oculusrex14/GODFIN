@@ -11,15 +11,15 @@ export default function HealthCheck() {
 
   return (
     <div className="flex items-center gap-3 rounded-xl bg-slate-800/50 border border-slate-700 px-5 py-4 backdrop-blur-md">
-      <Activity className="h-5 w-5 text-slate-400" />
+      <Activity className="h-5 w-5 text-ink-muted" />
       <div>
-        <p className="text-sm text-slate-400">System Status</p>
+        <p className="text-sm text-ink-muted">System Status</p>
         {isLoading ? (
-          <p className="text-sm text-slate-500">Checking...</p>
+          <p className="text-sm text-ink-muted">Checking...</p>
         ) : isError ? (
-          <p className="text-sm font-medium text-rose-400">Backend Offline</p>
+          <p className="text-sm font-medium text-rose-200">Backend Offline</p>
         ) : (
-          <p className="text-sm font-medium text-emerald-400">
+          <p className="text-sm font-medium text-emerald-200">
             {isBackendAlive(data) ? 'Connected' : 'Error'} &middot; v{data.version}
           </p>
         )}

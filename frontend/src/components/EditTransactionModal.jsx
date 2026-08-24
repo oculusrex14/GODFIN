@@ -72,7 +72,7 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
               <h2 id="edit-transaction-title" className="text-base font-semibold text-white">Edit Transaction</h2>
-              <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close edit transaction dialog">
+              <button onClick={onClose} className="text-ink-muted hover:text-white" aria-label="Close edit transaction dialog">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -83,19 +83,19 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
                   {transaction.merchant_normalized || transaction.merchant_raw}
                 </span>
                 <span className={`text-sm font-medium tabular-nums ${
-                  transaction.type === 'credit' ? 'text-emerald-400' : 'text-white'
+                  transaction.type === 'credit' ? 'text-emerald-200' : 'text-white'
                 }`}>
                   {transaction.type === 'credit' ? '+' : '-'}
                   {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0 }).format(transaction.amount)}
                 </span>
               </div>
-              <p className="text-xs text-slate-500">{transaction.date}</p>
+              <p className="text-xs text-ink-muted">{transaction.date}</p>
             </div>
 
             <form onSubmit={handleSubmit} className="p-5 pt-2 space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="edit-transaction-category" className="block text-xs text-slate-400 mb-1">Category</label>
+                  <label htmlFor="edit-transaction-category" className="block text-xs text-ink-muted mb-1">Category</label>
                   <select
                     id="edit-transaction-category"
                     value={form.category}
@@ -109,7 +109,7 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="edit-transaction-subcategory" className="block text-xs text-slate-400 mb-1">Subcategory</label>
+                  <label htmlFor="edit-transaction-subcategory" className="block text-xs text-ink-muted mb-1">Subcategory</label>
                   <select
                     id="edit-transaction-subcategory"
                     value={form.subcategory}
@@ -126,7 +126,7 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
               </div>
 
               <div>
-                <label htmlFor="edit-transaction-notes" className="block text-xs text-slate-400 mb-1">Notes</label>
+                <label htmlFor="edit-transaction-notes" className="block text-xs text-ink-muted mb-1">Notes</label>
                 <input
                   id="edit-transaction-notes"
                   type="text"
@@ -137,7 +137,7 @@ export default function EditTransactionModal({ open, onClose, transaction }) {
                 />
               </div>
 
-              {error && <p className="text-rose-400 text-sm" role="alert">{error}</p>}
+              {error && <p className="text-rose-200 text-sm" role="alert">{error}</p>}
 
               <button
                 type="submit"

@@ -84,7 +84,7 @@ export default function FilterBar({ filters, onChange }) {
   return (
     <div className="flex flex-wrap items-center gap-3 mb-4">
       <div className="relative flex-1 min-w-[200px]">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" aria-hidden="true" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-muted" aria-hidden="true" />
         <input
           type="text"
           placeholder="Search merchants..."
@@ -146,8 +146,8 @@ export default function FilterBar({ filters, onChange }) {
           aria-label="Sort options"
           className={`flex items-center gap-1.5 px-3 py-2 border rounded-lg text-sm transition-colors ${
             isCustomSort
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-              : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:text-white'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+              : 'bg-slate-800/50 border-slate-700 text-ink-muted hover:text-white'
           }`}
           title={currentSort?.label || 'Sort'}
         >
@@ -163,8 +163,8 @@ export default function FilterBar({ filters, onChange }) {
                 onClick={() => setSort(opt.sort_by, opt.sort_order)}
                 className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
                   filters.sort_by === opt.sort_by && filters.sort_order === opt.sort_order
-                    ? 'text-emerald-400 bg-emerald-500/10'
-                    : 'text-slate-300 hover:bg-slate-700/50'
+                    ? 'text-emerald-200 bg-emerald-500/10'
+                    : 'text-ink-secondary hover:bg-slate-700/50'
                 }`}
               >
                 {opt.label}
@@ -177,7 +177,7 @@ export default function FilterBar({ filters, onChange }) {
       {hasFilters && (
         <button
           onClick={clear}
-          className="text-slate-400 hover:text-white transition-colors p-2"
+          className="text-ink-muted hover:text-white transition-colors p-2"
           title="Clear filters"
           aria-label="Clear transaction filters"
         >

@@ -71,7 +71,7 @@ export default function PinInput({
           <span
             key={index}
             aria-hidden="true"
-            className={`grid h-14 w-12 sm:w-14 place-items-center rounded-[16px] border bg-white/[0.08] text-xl text-white/90 shadow-[inset_0_2px_4px_rgba(0,0,0,0.1)] transition-all ${
+            className={`grid h-14 w-12 sm:w-14 place-items-center rounded-[16px] border bg-white/[0.08] text-xl text-ink-primary shadow-[inset_0_2px_4px_rgba(0,0,0,0.1)] transition-all ${
               active
                 ? 'border-cyan-300/45 ring-2 ring-cyan-300/15'
                 : 'border-white/[0.18]'

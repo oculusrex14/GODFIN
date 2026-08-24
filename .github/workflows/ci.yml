@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
@@ -31,6 +33,19 @@ jobs:
       - run: python scripts/verify_api_access_policy.py
       - run: python scripts/verify_test_governance.py
       - run: python scripts/verify_performance_contract.py
+      - name: Install checksum-pinned Gitleaks
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/gitleaks_8.30.1_linux_x64.tar.gz"
+          curl --fail --location --silent --show-error \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            --output "$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $archive" \
+            | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          sudo install -m 0755 "$RUNNER_TEMP/gitleaks" /usr/local/bin/gitleaks
+      - name: Scan the complete repository history for secrets
+        run: gitleaks git --redact --no-banner --exit-code 1
       - name: Reject executable pickle deserialization in production code
         shell: bash
         run: |
@@ -62,7 +77,11 @@ jobs:
         working-directory: frontend
       - run: npm run test:auth
         working-directory: frontend
+      - run: npm run test:content
+        working-directory: frontend
       - run: npm run build
+        working-directory: frontend
+      - run: npm run verify:controls
         working-directory: frontend
       - run: npm audit --omit=dev
         working-directory: frontend
@@ -80,6 +99,8 @@ jobs:
       - run: npm ci
         working-directory: website
       - run: npm run verify:contracts
+        working-directory: website
+      - run: npm run test:unit
         working-directory: website
       - run: npm run build
         working-directory: website
@@ -157,7 +178,7 @@ jobs:
         working-directory: playwright-tests
       - run: npm audit
         working-directory: playwright-tests
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
         working-directory: playwright-tests
       - name: Generate redacted statement fixture
         run: python playwright-tests/fixtures/generate_redacted_statement.py "$RUNNER_TEMP/redacted-statement.pdf"
@@ -185,20 +206,21 @@ jobs:
         env:
           CI: "true"
           GODFIN_E2E_STATEMENT: ${{ runner.temp }}/redacted-statement.pdf
-      - name: Run mobile accessibility smoke
-        run: npx playwright test --config=playwright.legacy.config.js tests/accessibility-smoke.test.js
+      - name: Run Chromium, Firefox, and WebKit accessibility matrix
+        run: npm run test:app-matrix
         working-directory: playwright-tests
         env:
           CI: "true"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: failure()
+        if: always()
         with:
-          name: e2e-diagnostics
+          name: e2e-and-accessibility-evidence
           path: |
             playwright-tests/reports
+            frontend/build/interactive-action-manifest.json
             ${{ runner.temp }}/godfin-backend.log
             ${{ runner.temp }}/godfin-frontend.log
-          retention-days: 7
+          retention-days: 30
 
   desktop-audit:
     runs-on: ubuntu-latest

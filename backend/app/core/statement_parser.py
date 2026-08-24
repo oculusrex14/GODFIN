@@ -166,6 +166,13 @@ class StatementParseResult:
     closing_balance: Optional[float] = None
     total_debits: Optional[float] = None
     total_credits: Optional[float] = None
+    account_last4: Optional[str] = None
+    available_account_last4s: list[str] = field(default_factory=list)
+    declared_opening_balance: Optional[float] = None
+    declared_closing_balance: Optional[float] = None
+    declared_total_debits: Optional[float] = None
+    declared_total_credits: Optional[float] = None
+    declared_transaction_count: Optional[int] = None
     errors: list[str] = field(default_factory=list)
 
 
@@ -210,8 +217,8 @@ def _append_strict_savings_txn(
         errors.append(f"{row_label}: missing transaction narration")
         return
 
-    has_withdrawal = withdrawal is not None and withdrawal > 0
-    has_deposit = deposit is not None and deposit > 0
+    has_withdrawal = withdrawal is not None and withdrawal != 0
+    has_deposit = deposit is not None and deposit != 0
     if has_withdrawal and has_deposit:
         errors.append(f"{row_label}: both withdrawal and deposit are populated")
         return
@@ -224,8 +231,18 @@ def _append_strict_savings_txn(
 
     normalized = dict(raw)
     normalized["narration"] = narration
-    normalized["withdrawal"] = float(withdrawal) if has_withdrawal else None
-    normalized["deposit"] = float(deposit) if has_deposit else None
+    # A few certified bank layouts use a negative value in an explicit debit
+    # or credit column for reversals. The sign and named column are both bank
+    # evidence, so normalize that explicit representation without consulting
+    # running-balance deltas to guess direction.
+    if has_withdrawal:
+        assert withdrawal is not None
+        normalized["withdrawal"] = float(withdrawal) if withdrawal > 0 else None
+        normalized["deposit"] = float(abs(withdrawal)) if withdrawal < 0 else None
+    else:
+        assert deposit is not None
+        normalized["withdrawal"] = float(abs(deposit)) if deposit < 0 else None
+        normalized["deposit"] = float(deposit) if deposit > 0 else None
     normalized["balance"] = float(balance)
     _finalize_savings_txn(normalized, txns_out)
 
@@ -340,6 +357,32 @@ def _validate_savings_controls(result: StatementParseResult) -> None:
     result.period_end = result.period_end or max(txn.date for txn in result.transactions)
     result.reconciliation_status = "passed"
     result.reconciliation_method = "explicit_columns_and_running_balance"
+
+    declared_controls = (
+        ("opening balance", result.declared_opening_balance, result.opening_balance),
+        ("closing balance", result.declared_closing_balance, result.closing_balance),
+        ("total debits", result.declared_total_debits, result.total_debits),
+        ("total credits", result.declared_total_credits, result.total_credits),
+    )
+    for label, declared, calculated in declared_controls:
+        if declared is None:
+            continue
+        if _money_decimal(declared) != _money_decimal(calculated):
+            result.errors.append(
+                f"Statement {label} does not match the extracted transaction controls"
+            )
+            result.transactions.clear()
+            result.reconciliation_status = "failed"
+            return
+    if (
+        result.declared_transaction_count is not None
+        and result.declared_transaction_count != len(result.transactions)
+    ):
+        result.errors.append(
+            "Statement transaction count does not match the extracted rows"
+        )
+        result.transactions.clear()
+        result.reconciliation_status = "failed"
 
 
 def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
@@ -985,9 +1028,12 @@ def _finalize_savings_txn(raw: dict, txns_out: list) -> None:
         processor_candidate=parsed.get('processor_candidate'),
         counterparty_candidate=parsed.get('counterparty_candidate'),
         vpa_role=parsed.get('vpa_role'),
-        source_bank="hdfc",
-        source_format_version="hdfc-savings-explicit-columns-v1",
-        parser_version="hdfc-savings-v1",
+        source_bank=raw.get("source_bank", "hdfc"),
+        source_format_version=raw.get(
+            "source_format_version",
+            "hdfc-savings-explicit-columns-v1",
+        ),
+        parser_version=raw.get("parser_version", "hdfc-savings-v1"),
     )
     txns_out.append(txn)
 

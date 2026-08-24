@@ -351,6 +351,12 @@ def test_llm_connection(
     _user: bool = Depends(get_current_user),
 ):
     """Test connection to an LLM provider without saving."""
+    if request.provider not in get_available_providers():
+        raise InvalidOperationError(
+            code="LLM_PROVIDER_NOT_RELEASE_ACCEPTED",
+            message="That AI provider is not available in this GODFIN build.",
+            hint="Choose a provider shown in the app.",
+        )
     try:
         provider = create_provider(
             provider=request.provider,

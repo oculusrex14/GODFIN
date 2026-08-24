@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import io
 from typing import Optional
-
-import pdfplumber
+import re
 
 from app.core.parsers.base import StatementParserPlugin
+from app.core.pdf_extraction import PDFPLUMBER_ENGINE, PdfExtractionError
 from app.core.statement_parser import (
     StatementParseResult,
     _parse_hdfc_cc_statement,
@@ -13,9 +12,13 @@ from app.core.statement_parser import (
 
 
 def _detect(text: str) -> bool:
-    normalized = text.lower()
-    return "hdfc" in normalized and (
-        "credit card" in normalized or "card number" in normalized
+    normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
+    return "hdfcbank" in normalized and (
+        "creditcardstatement" in normalized
+        or "statementofcreditcard" in normalized
+    ) and (
+        "transactionamount" in normalized
+        or ("transactiondescription" in normalized and "amount" in normalized)
     )
 
 
@@ -23,6 +26,7 @@ def _parse(
     contents: bytes,
     file_format: str,
     password: Optional[str],
+    _account_last4: Optional[str] = None,
 ) -> StatementParseResult:
     result = StatementParseResult(
         statement_type="hdfc_credit_card",
@@ -34,21 +38,16 @@ def _parse(
         return result
 
     try:
-        pdf = pdfplumber.open(io.BytesIO(contents), password=password)
-    except Exception:
+        with PDFPLUMBER_ENGINE.open_document(contents, password) as document:
+            _parse_hdfc_cc_statement(document, result)
+    except PdfExtractionError:
         result.errors.append(
             "The PDF could not be opened. Check the file and its password, then try again."
         )
-        return result
-
-    try:
-        _parse_hdfc_cc_statement(pdf, result)
     except Exception:
         result.errors.append(
             "The PDF layout could not be read as an HDFC credit-card statement."
         )
-    finally:
-        pdf.close()
     if result.errors:
         result.transactions.clear()
         result.reconciliation_status = "failed"

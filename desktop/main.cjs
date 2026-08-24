@@ -56,6 +56,7 @@ protocol.registerSchemesAsPrivileged([
 let backendProcess = null;
 let mainWindow = null;
 let backendMaintenanceInProgress = false;
+let updateDownloadPromptOpen = false;
 
 function frontendRoot() {
   return app.isPackaged
@@ -250,6 +251,27 @@ function isTrustedExternal(rawUrl) {
   }
 }
 
+function isTrustedRendererUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (app.isPackaged) {
+      return parsed.protocol === "godfin:" && parsed.hostname === "app";
+    }
+    return parsed.origin === "http://127.0.0.1:5200";
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedRendererEvent(event) {
+  return Boolean(
+    mainWindow
+    && event.sender === mainWindow.webContents
+    && event.senderFrame === mainWindow.webContents.mainFrame
+    && isTrustedRendererUrl(event.senderFrame?.url || ""),
+  );
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -275,7 +297,7 @@ function createWindow() {
     return { action: "deny" };
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (url.startsWith(APP_ORIGIN) || url.startsWith(BACKEND_ORIGIN)) return;
+    if (isTrustedRendererUrl(url)) return;
     event.preventDefault();
     if (isTrustedExternal(url)) void shell.openExternal(url);
   });
@@ -296,7 +318,7 @@ function configureUpdater() {
     provider: "generic",
     url: `${updateOrigin.replace(/\/+$/, "")}/${updateChannel}`,
   });
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = false;
   // A downloaded binary is never installed merely because the app quits. The
   // explicit install path below first creates the verified database recovery
   // state required for both upgrade failure and signed rollback.
@@ -304,9 +326,32 @@ function configureUpdater() {
   // Release metadata can point to a previously signed immutable version only
   // through the owner-confirmed rollback workflow. Code signing remains the
   // authenticity boundary for every downloaded application.
-  autoUpdater.allowDowngrade = true;
+  autoUpdater.allowDowngrade = process.env.GODFIN_ALLOW_SIGNED_ROLLBACK === "1";
   autoUpdater.on("error", (error) => {
     console.error("Auto-update failed", error);
+  });
+  autoUpdater.on("update-available", (event) => {
+    if (updateDownloadPromptOpen) return;
+    updateDownloadPromptOpen = true;
+    dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "GODFIN update available",
+      message: `GODFIN ${event.version} is available.`,
+      detail: "Download the signed update now? GODFIN will keep working while it downloads, and will ask again before installing.",
+      buttons: ["Download update", "Not now"],
+      defaultId: 0,
+      cancelId: 1,
+    })
+      .then(({ response }) => {
+        if (response === 0) return autoUpdater.downloadUpdate();
+        return undefined;
+      })
+      .catch((error) => {
+        console.error("Could not start the update download", error);
+      })
+      .finally(() => {
+        updateDownloadPromptOpen = false;
+      });
   });
   autoUpdater.on("update-downloaded", (event) => {
     const currentVersion = autoUpdater.currentVersion.version;
@@ -335,7 +380,7 @@ function configureUpdater() {
       });
   });
   setTimeout(() => {
-    autoUpdater.checkForUpdatesAndNotify().catch(() => {
+    autoUpdater.checkForUpdates().catch(() => {
       // The updater emits a detailed "error" event above. Offline startup is
       // expected and must never surface as an unhandled promise rejection.
     });
@@ -493,12 +538,9 @@ function runRestoreMaintenance(restoreToken, timeoutMs = 120_000) {
 
 function configureDesktopBridge() {
   ipcMain.handle("godfin:restore-backup", async (event, restoreToken) => {
-    const senderUrl = event.senderFrame?.url || "";
-    const trustedDevelopmentRenderer = !app.isPackaged
-      && senderUrl.startsWith("http://127.0.0.1:5200");
     if (
-      event.sender !== mainWindow?.webContents
-      || (!senderUrl.startsWith(APP_ORIGIN) && !trustedDevelopmentRenderer)
+      !isTrustedRendererEvent(event)
+      || backendMaintenanceInProgress
       || typeof restoreToken !== "string"
       || !/^[A-Za-z0-9_-]{40,128}$/.test(restoreToken)
     ) {

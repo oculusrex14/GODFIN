@@ -215,6 +215,14 @@ class RecurringDetectionResponse(BaseModel):
     subscription_suggestions_created: int
 
 
+class FinancialMetricStatusResponse(BaseModel):
+    available: bool
+    unavailable_reason: str | None
+    period_start: str | None
+    period_end: str | None
+    sample_count: int
+
+
 class FinancialProfileResponse(BaseModel):
     impulse_index: float | None
     lifestyle_inflation: float | None
@@ -229,6 +237,13 @@ class FinancialProfileResponse(BaseModel):
     comparison_end: str | None
     transaction_count: int
     comparison_transaction_count: int
+    verified_income_count: int
+    verified_income_total: float
+    spending_transaction_count: int
+    spending_total: float
+    complete_month_count: int
+    recurring_sample_count: int
+    metrics: dict[str, FinancialMetricStatusResponse]
     calculation_version: str
     caveat: str
 
@@ -670,6 +685,13 @@ def financial_profile(
         "comparison_end": profile.comparison_end,
         "transaction_count": profile.transaction_count,
         "comparison_transaction_count": profile.comparison_transaction_count,
+        "verified_income_count": profile.verified_income_count,
+        "verified_income_total": profile.verified_income_total,
+        "spending_transaction_count": profile.spending_transaction_count,
+        "spending_total": profile.spending_total,
+        "complete_month_count": profile.complete_month_count,
+        "recurring_sample_count": profile.recurring_sample_count,
+        "metrics": profile.metrics,
         "calculation_version": profile.calculation_version,
         "caveat": profile.caveat,
     }

@@ -10,6 +10,7 @@ from app.core.llm_privacy import record_hosted_data_consent
 from app.core.llm_providers import (
     LLMProviderProbeError,
     PROVIDER_SMOKE_PROMPT,
+    get_available_providers,
     probe_selected_model,
 )
 from app.models.llm_config import LLMConfiguration
@@ -47,6 +48,32 @@ def test_provider_probe_uses_only_fixed_synthetic_text():
         "5_to_15s",
         "15s_or_more",
     }
+
+
+def test_unaccepted_hosted_providers_are_not_visible_in_production_catalog():
+    providers = get_available_providers()
+
+    assert set(providers) == {"ollama_local"}
+    assert providers["ollama_local"]["is_local"] is True
+
+
+def test_unaccepted_hosted_provider_cannot_be_probed_through_api(
+    auth_client,
+    db_session,
+):
+    install_test_license(db_session, "max")
+
+    response = auth_client.post(
+        "/api/v1/llm/config/test",
+        json={
+            "provider": "openai",
+            "model": "synthetic-model",
+            "api_key": "synthetic-test-key",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "LLM_PROVIDER_NOT_RELEASE_ACCEPTED"
 
 
 @pytest.mark.parametrize(
@@ -140,6 +167,10 @@ def test_failed_candidate_keeps_previous_database_configuration_active(
     monkeypatch,
 ):
     install_test_license(db_session, "max")
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.llm.get_available_providers",
+        lambda: {"openai": {"models": ["candidate-model"]}},
+    )
     previous = _hosted_config()
     previous.model = "previous-working-model"
     db_session.add(previous)

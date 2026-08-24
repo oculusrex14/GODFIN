@@ -5,7 +5,8 @@ import { format, subMonths } from 'date-fns';
 import {
   FileText, Download, ChevronLeft, ChevronRight, TrendingDown, TrendingUp,
   PiggyBank, Sparkles, FileSpreadsheet, AlertTriangle, CheckCircle2,
-  Info, Lightbulb, CalendarRange, ShieldCheck, Repeat2, KeyRound, X
+  Info, Lightbulb, CalendarRange, ShieldCheck, Repeat2, KeyRound, X,
+  Eye, EyeOff, Copy
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar,
@@ -23,6 +24,10 @@ import { websiteUrl } from '../config/website';
 import { StatCard } from '../components/StatCard';
 import { GlassButton } from '../components/GlassButton';
 import DialogSurface from '../components/DialogSurface';
+import {
+  copySecretToClipboard,
+  generateSecureAlphanumericPassword,
+} from '../lib/securePassword';
 
 function formatINR(amount) {
   if (amount == null) return '--';
@@ -55,30 +60,30 @@ const tooltipStyle = {
 const TONE_STYLES = {
   positive: {
     border: 'border-l-emerald-400/60',
-    badge: 'bg-emerald-400/10 text-emerald-300 border-emerald-400/20',
+    badge: 'bg-emerald-400/10 text-emerald-200 border-emerald-400/20',
     icon: CheckCircle2,
-    text: 'text-emerald-300',
+    text: 'text-emerald-200',
     bg: 'bg-emerald-400/5',
   },
   warning: {
     border: 'border-l-amber-400/60',
-    badge: 'bg-amber-400/10 text-amber-300 border-amber-400/20',
+    badge: 'bg-amber-400/10 text-amber-200 border-amber-400/20',
     icon: AlertTriangle,
-    text: 'text-amber-300',
+    text: 'text-amber-200',
     bg: 'bg-amber-400/5',
   },
   negative: {
     border: 'border-l-rose-400/60',
-    badge: 'bg-rose-400/10 text-rose-300 border-rose-400/20',
+    badge: 'bg-rose-400/10 text-rose-200 border-rose-400/20',
     icon: AlertTriangle,
-    text: 'text-rose-300',
+    text: 'text-rose-200',
     bg: 'bg-rose-400/5',
   },
   neutral: {
     border: 'border-l-white/20',
-    badge: 'bg-white/5 text-white/50 border-white/10',
+    badge: 'bg-white/5 text-ink-muted border-white/10',
     icon: Info,
-    text: 'text-white/50',
+    text: 'text-ink-muted',
     bg: 'bg-white/5',
   },
 };
@@ -97,19 +102,19 @@ function MarkdownCard({ children, className = '' }) {
   return (
     <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-        p: ({ children }) => <p className="text-white/60 text-[0.8rem] leading-relaxed m-0 mb-2 last:mb-0">{children}</p>,
-        strong: ({ children }) => <strong className="text-white/80 font-medium">{children}</strong>,
-        em: ({ children }) => <em className="text-white/50 italic">{children}</em>,
+        p: ({ children }) => <p className="text-ink-secondary text-[0.8rem] leading-relaxed m-0 mb-2 last:mb-0">{children}</p>,
+        strong: ({ children }) => <strong className="text-ink-primary font-medium">{children}</strong>,
+        em: ({ children }) => <em className="text-ink-muted italic">{children}</em>,
         ul: ({ children }) => <ul className="list-disc pl-4 space-y-1 my-2">{children}</ul>,
         ol: ({ children }) => <ol className="list-decimal pl-4 space-y-1 my-2">{children}</ol>,
-        li: ({ children }) => <li className="text-white/60 text-[0.8rem] leading-relaxed">{children}</li>,
-        h1: ({ children }) => <h1 className="text-white/80 text-[1rem] font-medium mt-0 mb-2">{children}</h1>,
-        h2: ({ children }) => <h2 className="text-white/70 text-[0.9rem] font-medium mt-3 mb-2">{children}</h2>,
-        h3: ({ children }) => <h3 className="text-white/60 text-[0.85rem] font-medium mt-2 mb-1">{children}</h3>,
-        blockquote: ({ children }) => <blockquote className="border-l-2 border-white/10 pl-3 my-2 text-white/40 italic">{children}</blockquote>,
-        code: ({ children }) => <code className="bg-white/5 text-white/70 px-1 py-0.5 rounded text-[0.75rem]">{children}</code>,
+        li: ({ children }) => <li className="text-ink-secondary text-[0.8rem] leading-relaxed">{children}</li>,
+        h1: ({ children }) => <h1 className="text-ink-primary text-[1rem] font-medium mt-0 mb-2">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-ink-secondary text-[0.9rem] font-medium mt-3 mb-2">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-ink-secondary text-[0.85rem] font-medium mt-2 mb-1">{children}</h3>,
+        blockquote: ({ children }) => <blockquote className="border-l-2 border-white/10 pl-3 my-2 text-ink-muted italic">{children}</blockquote>,
+        code: ({ children }) => <code className="bg-white/5 text-ink-secondary px-1 py-0.5 rounded text-[0.75rem]">{children}</code>,
         pre: ({ children }) => <pre className="bg-white/5 p-3 rounded-lg overflow-x-auto my-2">{children}</pre>,
-        a: ({ children, href }) => <a href={href} className="text-blue-400 hover:text-blue-300 underline" target="_blank" rel="noreferrer">{children}</a>,
+        a: ({ children, href }) => <a href={href} className="text-blue-200 hover:text-blue-200 underline" target="_blank" rel="noreferrer">{children}</a>,
       }}>
         {children}
       </ReactMarkdown>
@@ -127,6 +132,9 @@ export default function Reports() {
   const [taxPackOpen, setTaxPackOpen] = useState(false);
   const [taxPackPassphrase, setTaxPackPassphrase] = useState('');
   const [taxPackConfirmation, setTaxPackConfirmation] = useState('');
+  const [taxPackPassphraseVisible, setTaxPackPassphraseVisible] = useState(false);
+  const [taxPackConfirmationVisible, setTaxPackConfirmationVisible] = useState(false);
+  const [taxPackSecretStatus, setTaxPackSecretStatus] = useState('');
   const taxPackPassphraseRef = useRef(null);
   const d = new Date(month + '-01');
   const prev = format(subMonths(d, 1), 'yyyy-MM');
@@ -177,6 +185,9 @@ export default function Reports() {
       setTaxPackOpen(false);
       setTaxPackPassphrase('');
       setTaxPackConfirmation('');
+      setTaxPackPassphraseVisible(false);
+      setTaxPackConfirmationVisible(false);
+      setTaxPackSecretStatus('');
     },
   });
 
@@ -198,6 +209,32 @@ export default function Reports() {
     setTaxPackOpen(false);
     setTaxPackPassphrase('');
     setTaxPackConfirmation('');
+    setTaxPackPassphraseVisible(false);
+    setTaxPackConfirmationVisible(false);
+    setTaxPackSecretStatus('');
+  };
+  const generateTaxPackPassword = () => {
+    try {
+      const generated = generateSecureAlphanumericPassword(12);
+      setTaxPackPassphrase(generated);
+      setTaxPackConfirmation(generated);
+      setTaxPackSecretStatus('Generated a new 12-character password.');
+    } catch {
+      setTaxPackSecretStatus(
+        'Secure password generation is unavailable. Enter your own password instead.',
+      );
+    }
+  };
+  const copyTaxPackPassword = async () => {
+    if (!taxPackPassphrase) return;
+    try {
+      await copySecretToClipboard(taxPackPassphrase);
+      setTaxPackSecretStatus('Password copied to the clipboard.');
+    } catch {
+      setTaxPackSecretStatus(
+        'Could not copy automatically. Show the password and copy it manually.',
+      );
+    }
   };
 
   return (
@@ -205,13 +242,13 @@ export default function Reports() {
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Reports</h1>
-          <p className="text-white/30 text-[0.8rem]">Deterministic reports with optional, consented AI analysis</p>
+          <h1 className="text-ink-primary text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Reports</h1>
+          <p className="text-ink-muted text-[0.8rem]">Deterministic reports with optional, consented AI analysis</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => setMonth(prev)} className="text-white/30 hover:text-white/60 transition-colors p-1" aria-label={`Show ${format(subMonths(d, 1), 'MMMM yyyy')} report`}><ChevronLeft size={18} /></button>
-          <span className="text-white/70 text-[0.85rem] min-w-[130px] text-center" style={{ fontWeight: 400 }}>{monthLabel}</span>
-          <button onClick={() => setMonth(next)} disabled={next > current} className="text-white/30 hover:text-white/60 disabled:opacity-30 transition-colors p-1" aria-label={`Show ${format(new Date(d.getFullYear(), d.getMonth() + 1, 1), 'MMMM yyyy')} report`}><ChevronRight size={18} /></button>
+          <button onClick={() => setMonth(prev)} className="text-ink-muted hover:text-ink-secondary transition-colors p-1" aria-label={`Show ${format(subMonths(d, 1), 'MMMM yyyy')} report`}><ChevronLeft size={18} /></button>
+          <span className="text-ink-secondary text-[0.85rem] min-w-[130px] text-center" style={{ fontWeight: 400 }}>{monthLabel}</span>
+          <button onClick={() => setMonth(next)} disabled={next > current} className="text-ink-muted hover:text-ink-secondary disabled:opacity-30 transition-colors p-1" aria-label={`Show ${format(new Date(d.getFullYear(), d.getMonth() + 1, 1), 'MMMM yyyy')} report`}><ChevronRight size={18} /></button>
         </div>
       </motion.div>
 
@@ -221,7 +258,7 @@ export default function Reports() {
           role="status"
           aria-live="polite"
         >
-          <p className="text-white/45 text-sm">Preparing report details…</p>
+          <p className="text-ink-muted text-sm">Preparing report details…</p>
           <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4" aria-hidden="true">
             {Array.from({ length: 4 }, (_, index) => (
               <div key={index} className="h-24 rounded-2xl bg-white/[0.05] animate-pulse" />
@@ -233,25 +270,25 @@ export default function Reports() {
       <section className="mb-6 grid gap-4 rounded-[24px] border border-white/[0.14] bg-gradient-to-br from-white/[0.09] to-white/[0.045] p-5 md:grid-cols-[1fr_auto] md:items-center">
         <div>
           <p className="text-[#54E1D0]/60 text-[0.66rem] uppercase tracking-[0.16em]">Your financial report</p>
-          <h2 className="mt-2 text-white/90 text-2xl font-light">{monthLabel}</h2>
-          <p className="mt-2 max-w-xl text-white/35 text-sm">
+          <h2 className="mt-2 text-ink-primary text-2xl font-light">{monthLabel}</h2>
+          <p className="mt-2 max-w-xl text-ink-muted text-sm">
             Here is how your recorded money moved this month. Every total below comes from included transactions.
           </p>
         </div>
         <div className="min-w-[230px] rounded-2xl border border-white/[0.1] bg-black/10 p-4">
           <div className="flex items-center gap-3">
-            <div className="grid h-14 w-14 place-items-center rounded-full border-[5px] border-[#17C3B2]/45 bg-[#17C3B2]/[0.08] text-white/85">
+            <div className="grid h-14 w-14 place-items-center rounded-full border-[5px] border-[#17C3B2]/45 bg-[#17C3B2]/[0.08] text-ink-primary">
               <ShieldCheck size={22} />
             </div>
             <div>
-              <p className="text-white/35 text-[0.68rem]">Savings target progress</p>
+              <p className="text-ink-muted text-[0.68rem]">Savings target progress</p>
               <p className="mt-0.5 text-2xl font-light text-[#54E1D0]">
                 {summary?.financial_health_score ?? '--'}
                 {summary?.financial_health_score != null && (
-                  <span className="text-xs text-white/25">/100</span>
+                  <span className="text-xs text-ink-muted">/100</span>
                 )}
               </p>
-              <p className="text-white/45 text-xs">{summary?.financial_health_label}</p>
+              <p className="text-ink-muted text-xs">{summary?.financial_health_label}</p>
             </div>
           </div>
           <form
@@ -263,7 +300,7 @@ export default function Reports() {
               if (Number.isFinite(value)) targetMutation.mutate(value);
             }}
           >
-            <label className="min-w-0 flex-1 text-[0.62rem] text-white/30">
+            <label className="min-w-0 flex-1 text-[0.62rem] text-ink-muted">
               Your monthly target
               <span className="mt-1 flex min-h-9 items-center rounded-lg border border-white/[0.1] bg-black/10 px-2">
                 <input
@@ -274,10 +311,10 @@ export default function Reports() {
                   step="0.1"
                   key={summary?.savings_target_percent ?? 20}
                   defaultValue={summary?.savings_target_percent ?? 20}
-                  className="w-full bg-transparent text-xs text-white/65 outline-none"
+                  className="w-full bg-transparent text-xs text-ink-secondary outline-none"
                   aria-label="Monthly savings target percentage"
                 />
-                <span className="text-white/25">%</span>
+                <span className="text-ink-muted">%</span>
               </span>
             </label>
             <button
@@ -289,20 +326,20 @@ export default function Reports() {
             </button>
           </form>
           {targetMutation.isError && (
-            <p className="mt-1 text-[0.62rem] text-rose-200/70">
+            <p className="mt-1 text-[0.62rem] text-rose-200">
               {targetMutation.error?.message || 'Use a target between 1% and 80%.'}
             </p>
           )}
-          <p className="mt-3 text-white/22 text-[0.62rem] leading-relaxed">{summary?.financial_health_caveat}</p>
+          <p className="mt-3 text-ink-muted text-[0.62rem] leading-relaxed">{summary?.financial_health_caveat}</p>
         </div>
       </section>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatCard title="Money in" value={summaryLoading ? '--' : formatINR(summary?.total_income)} icon={TrendingUp} color="text-emerald-400" delay={0} />
-        <StatCard title="Money out" value={summaryLoading ? '--' : formatINR(summary?.total_spend)} icon={TrendingDown} color="text-rose-400" delay={0.05} />
-        <StatCard title="Money left" value={summaryLoading ? '--' : formatINR((summary?.total_income || 0) - (summary?.total_spend || 0))} icon={PiggyBank} color={(summary?.total_income || 0) >= (summary?.total_spend || 0) ? 'text-emerald-400' : 'text-rose-400'} delay={0.1} />
-        <StatCard title="Regular monthly costs" value={summaryLoading ? '--' : formatINR(summary?.recurring_total)} icon={Repeat2} color="text-violet-300" delay={0.15} />
+        <StatCard title="Money in" value={summaryLoading ? '--' : formatINR(summary?.total_income)} icon={TrendingUp} color="text-emerald-200" delay={0} />
+        <StatCard title="Money out" value={summaryLoading ? '--' : formatINR(summary?.total_spend)} icon={TrendingDown} color="text-rose-200" delay={0.05} />
+        <StatCard title="Money left" value={summaryLoading ? '--' : formatINR((summary?.total_income || 0) - (summary?.total_spend || 0))} icon={PiggyBank} color={(summary?.total_income || 0) >= (summary?.total_spend || 0) ? 'text-emerald-200' : 'text-rose-200'} delay={0.1} />
+        <StatCard title="Regular monthly costs" value={summaryLoading ? '--' : formatINR(summary?.recurring_total)} icon={Repeat2} color="text-violet-200" delay={0.15} />
       </div>
 
       {/* AI Financial Insights */}
@@ -311,11 +348,11 @@ export default function Reports() {
       >
         <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider flex items-center gap-1.5" style={{ fontWeight: 500 }}>
-            <Sparkles size={14} className="text-amber-300" /> AI Financial Insights
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider flex items-center gap-1.5" style={{ fontWeight: 500 }}>
+            <Sparkles size={14} className="text-amber-200" /> AI Financial Insights
           </h2>
           {insights?.source && (
-            <span className={`text-[0.6rem] px-1.5 py-0.5 rounded border ${insights.source === 'llm' ? 'bg-emerald-400/10 text-emerald-300 border-emerald-400/20' : 'bg-white/5 text-white/30 border-white/10'}`}>
+            <span className={`text-[0.6rem] px-1.5 py-0.5 rounded border ${insights.source === 'llm' ? 'bg-emerald-400/10 text-emerald-200 border-emerald-400/20' : 'bg-white/5 text-ink-muted border-white/10'}`}>
               {insights.source === 'llm'
                 ? `${insightsData?.llm?.provider || 'AI'} · ${insightsData?.llm?.model || 'connected model'}`
                 : 'Verified data notes'}
@@ -330,21 +367,21 @@ export default function Reports() {
           </div>
         ) : !insightsEnabled ? (
           <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] p-4 text-center">
-            <p className="text-white/55 text-sm">AI-written insights are available with GODFIN Max.</p>
-            <p className="text-white/30 text-xs mt-1">Your standard reports and local exports remain available.</p>
+            <p className="text-ink-secondary text-sm">AI-written insights are available with GODFIN Max.</p>
+            <p className="text-ink-muted text-xs mt-1">Your standard reports and local exports remain available.</p>
             <a
               href={websiteUrl('/pricing')}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex mt-3 text-xs text-amber-300/80 hover:text-amber-200 transition-colors"
+              className="inline-flex mt-3 text-xs text-amber-200 hover:text-amber-200 transition-colors"
             >
               View license options
             </a>
           </div>
         ) : !llmLoading && !llmConnected ? (
           <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] p-5 text-center">
-            <p className="text-white/60 text-sm">Connect an AI to create the detailed written analysis.</p>
-            <p className="mx-auto mt-1 max-w-xl text-white/30 text-xs">
+            <p className="text-ink-secondary text-sm">Connect an AI to create the detailed written analysis.</p>
+            <p className="mx-auto mt-1 max-w-xl text-ink-muted text-xs">
               GODFIN gives the AI a verified monthly summary. The AI adds explanations and suggestions; it never changes the totals.
             </p>
             <a href="/settings" className="inline-flex mt-3 text-xs text-[#54E1D0]/80 hover:text-[#54E1D0]">
@@ -359,8 +396,8 @@ export default function Reports() {
           </div>
         ) : insightsMutation.isError && !insights ? (
           <div className="rounded-xl bg-rose-400/[0.05] border border-rose-400/[0.14] p-5 text-center">
-            <p className="text-rose-200/75 text-sm">The connected AI could not create this report.</p>
-            <p className="mx-auto mt-1 max-w-xl text-white/30 text-xs">
+            <p className="text-rose-200 text-sm">The connected AI could not create this report.</p>
+            <p className="mx-auto mt-1 max-w-xl text-ink-muted text-xs">
               {insightsMutation.error?.message || 'Check the model connection and try again.'}
             </p>
             <GlassButton
@@ -376,14 +413,14 @@ export default function Reports() {
             <div className="flex items-start gap-3">
               <ShieldCheck size={18} className="mt-0.5 shrink-0 text-[#54E1D0]/80" />
               <div>
-                <p className="text-white/70 text-sm">Generate an AI explanation only when you choose</p>
-                <p className="mt-1 text-white/35 text-xs leading-relaxed">
+                <p className="text-ink-secondary text-sm">Generate an AI explanation only when you choose</p>
+                <p className="mt-1 text-ink-muted text-xs leading-relaxed">
                   Provider: {llmConfig?.provider || 'connected AI'} · {llmConfig?.model || 'configured model'}.
                   {llmConfig?.is_local
                     ? ' The report data stays on this computer and is processed by your local model.'
                     : ' GODFIN sends redacted amount bands, ratios, counts, categories, and trend direction. It removes merchant names, account/card details, payment addresses, phone numbers, references, exact dates and amounts, raw descriptions, transaction IDs, your PIN, license key, and Gmail credentials.'}
                 </p>
-                <p className="mt-2 text-white/25 text-xs leading-relaxed">
+                <p className="mt-2 text-ink-muted text-xs leading-relaxed">
                   The AI adds plain-language commentary only. Verified local calculations remain authoritative.
                 </p>
                 <GlassButton
@@ -398,7 +435,7 @@ export default function Reports() {
             </div>
           </div>
         ) : !insights?.available && insights?.source === 'none' ? (
-          <p className="text-white/30 text-sm text-center py-4">No transactions recorded for this period.</p>
+          <p className="text-ink-muted text-sm text-center py-4">No transactions recorded for this period.</p>
         ) : (
           <div className="space-y-5">
             {/* Executive Summary */}
@@ -417,9 +454,9 @@ export default function Reports() {
                     <motion.div key={i} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.05 }}
                       className={`rounded-lg border border-white/[0.08] p-3 ${s.bg}`}
                     >
-                      <p className="text-white/30 text-[0.6rem] uppercase tracking-wider mb-1">{h.label}</p>
+                      <p className="text-ink-muted text-[0.6rem] uppercase tracking-wider mb-1">{h.label}</p>
                       <p className={`text-[0.85rem] font-medium ${s.text}`}>{h.value}</p>
-                      {h.delta && <p className="text-white/25 text-[0.7rem] mt-0.5">{h.delta}</p>}
+                      {h.delta && <p className="text-ink-muted text-[0.7rem] mt-0.5">{h.delta}</p>}
                     </motion.div>
                   );
                 })}
@@ -436,7 +473,7 @@ export default function Reports() {
                       className={`rounded-lg border border-white/[0.08] border-l-[3px] ${s.border} p-4`}
                     >
                       <div className="flex items-center gap-2 mb-2">
-                        <h3 className="text-white/70 text-[0.8rem] font-medium">{sec.title}</h3>
+                        <h3 className="text-ink-secondary text-[0.8rem] font-medium">{sec.title}</h3>
                         <ToneBadge tone={sec.tone} />
                       </div>
                       <MarkdownCard>{sec.content}</MarkdownCard>
@@ -450,13 +487,13 @@ export default function Reports() {
             {insights?.recommendations?.length > 0 && (
               <div className="rounded-lg border border-white/[0.08] p-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <Lightbulb size={14} className="text-amber-300" />
-                  <h3 className="text-white/70 text-[0.8rem] font-medium">Recommendations</h3>
+                  <Lightbulb size={14} className="text-amber-200" />
+                  <h3 className="text-ink-secondary text-[0.8rem] font-medium">Recommendations</h3>
                 </div>
                 <div className="space-y-2.5">
                   {insights.recommendations.map((rec, i) => (
                     <div key={i} className="flex gap-3">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-white/[0.06] flex items-center justify-center text-white/30 text-[0.65rem] font-medium mt-0.5">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-white/[0.06] flex items-center justify-center text-ink-muted text-[0.65rem] font-medium mt-0.5">
                         {i + 1}
                       </span>
                       <MarkdownCard className="flex-1">{rec}</MarkdownCard>
@@ -477,9 +514,9 @@ export default function Reports() {
           role="img" aria-label="Category spending breakdown pie chart"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Category Breakdown</h2>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Category Breakdown</h2>
           {!summary?.all_categories?.length ? (
-            <p className="text-sm text-white/30 text-center py-8">No spending data</p>
+            <p className="text-sm text-ink-muted text-center py-8">No spending data</p>
           ) : (
             <div className="flex items-center gap-4">
               <div className="w-36 h-36 flex-shrink-0">
@@ -496,8 +533,8 @@ export default function Reports() {
                 {summary.all_categories.slice(0, 6).map((item, i) => (
                   <div key={item.category} className="flex items-center gap-2 text-[0.7rem]">
                     <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }} />
-                    <span className="text-white/50 truncate flex-1">{item.category}</span>
-                    <span className="text-white/30 tabular-nums">{formatINR(item.amount)}</span>
+                    <span className="text-ink-muted truncate flex-1">{item.category}</span>
+                    <span className="text-ink-muted tabular-nums">{formatINR(item.amount)}</span>
                   </div>
                 ))}
               </div>
@@ -510,12 +547,12 @@ export default function Reports() {
           className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-1" style={{ fontWeight: 500 }}>Completed-Month Category Comparison</h2>
-          <p className="mb-4 text-[0.62rem] text-white/22">
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-1" style={{ fontWeight: 500 }}>Completed-Month Category Comparison</h2>
+          <p className="mb-4 text-[0.62rem] text-ink-muted">
             {detailed?.category_comparison_caveat || 'Waiting for comparable completed months.'}
           </p>
           {!comparison.length ? (
-            <p className="text-sm text-white/30 text-center py-8">No comparison data</p>
+            <p className="text-sm text-ink-muted text-center py-8">No comparison data</p>
           ) : (
             <div className="h-48 min-h-[200px] w-full" role="img" aria-label="Category comparison bar chart">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
@@ -536,9 +573,9 @@ export default function Reports() {
 
       <div className="grid md:grid-cols-2 gap-4 mb-6">
         <section className="rounded-[20px] border border-white/[0.14] bg-white/[0.06] p-5">
-          <h2 className="text-white/55 text-sm font-medium">Where your income came from</h2>
+          <h2 className="text-ink-secondary text-sm font-medium">Where your income came from</h2>
           {!detailed?.income_breakdown?.length ? (
-            <p className="py-8 text-center text-sm text-white/25">No income sources recorded for this month.</p>
+            <p className="py-8 text-center text-sm text-ink-muted">No income sources recorded for this month.</p>
           ) : (
             <div className="mt-4 space-y-3">
               {detailed.income_breakdown.slice(0, 7).map((item, index) => {
@@ -546,8 +583,8 @@ export default function Reports() {
                 return (
                   <div key={`${item.source}-${index}`}>
                     <div className="flex items-center justify-between gap-3 text-xs">
-                      <span className="truncate text-white/45">{item.source}</span>
-                      <span className="text-white/65 tabular-nums">{formatINR(item.amount)} · {percentage.toFixed(1)}%</span>
+                      <span className="truncate text-ink-muted">{item.source}</span>
+                      <span className="text-ink-secondary tabular-nums">{formatINR(item.amount)} · {percentage.toFixed(1)}%</span>
                     </div>
                     <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
                       <div className="h-full rounded-full bg-gradient-to-r from-emerald-400/65 to-[#54E1D0]/65" style={{ width: `${Math.min(100, percentage)}%` }} />
@@ -560,20 +597,20 @@ export default function Reports() {
         </section>
         <section className="rounded-[20px] border border-white/[0.14] bg-white/[0.06] p-5">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-white/55 text-sm font-medium">Regular payments</h2>
-            <span className="text-white/45 text-xs">{formatINR(summary?.recurring_total || 0)} / month</span>
+            <h2 className="text-ink-secondary text-sm font-medium">Regular payments</h2>
+            <span className="text-ink-muted text-xs">{formatINR(summary?.recurring_total || 0)} / month</span>
           </div>
           {!detailed?.recurring_list?.length ? (
-            <p className="py-8 text-center text-sm text-white/25">No confirmed repeating payments for this month.</p>
+            <p className="py-8 text-center text-sm text-ink-muted">No confirmed repeating payments for this month.</p>
           ) : (
             <div className="mt-4 divide-y divide-white/[0.06]">
               {detailed.recurring_list.slice(0, 7).map((item, index) => (
                 <div key={`${item.merchant}-${index}`} className="flex items-center justify-between gap-3 py-2.5 text-xs">
                   <div className="min-w-0">
-                    <p className="truncate text-white/55">{item.merchant || 'Unknown payment'}</p>
-                    <p className="mt-0.5 text-white/22">{item.category || 'Uncategorised'} · {item.frequency}</p>
+                    <p className="truncate text-ink-secondary">{item.merchant || 'Unknown payment'}</p>
+                    <p className="mt-0.5 text-ink-muted">{item.category || 'Uncategorised'} · {item.frequency}</p>
                   </div>
-                  <span className="shrink-0 text-white/65 tabular-nums">{formatINR(item.amount)}</span>
+                  <span className="shrink-0 text-ink-secondary tabular-nums">{formatINR(item.amount)}</span>
                 </div>
               ))}
             </div>
@@ -588,7 +625,7 @@ export default function Reports() {
           className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Spending by Type</h2>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Spending by Type</h2>
           {summary?.spending_by_elasticity ? (
             <div className="space-y-3">
               {[
@@ -601,8 +638,8 @@ export default function Reports() {
                 return (
                   <div key={label}>
                     <div className="flex justify-between text-[0.7rem] mb-1">
-                      <span className="text-white/40">{label}</span>
-                      <span className="text-white/60 tabular-nums">{formatINR(val)}</span>
+                      <span className="text-ink-muted">{label}</span>
+                      <span className="text-ink-secondary tabular-nums">{formatINR(val)}</span>
                     </div>
                     <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
                       <motion.div
@@ -617,7 +654,7 @@ export default function Reports() {
               })}
             </div>
           ) : (
-            <p className="text-sm text-white/30 text-center py-4">No data</p>
+            <p className="text-sm text-ink-muted text-center py-4">No data</p>
           )}
         </motion.div>
 
@@ -626,20 +663,20 @@ export default function Reports() {
           className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Top Merchants</h2>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Top Merchants</h2>
           {!detailed?.top_merchants?.length ? (
-            <p className="text-sm text-white/30 text-center py-4">No merchant data</p>
+            <p className="text-sm text-ink-muted text-center py-4">No merchant data</p>
           ) : (
             <div className="space-y-2.5">
               {detailed.top_merchants.slice(0, 7).map((m, i) => (
                 <div key={i} className="flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span className="text-white/15 text-[0.65rem] w-4 tabular-nums">{i + 1}</span>
-                    <span className="text-white/50 text-[0.85rem] truncate">{m.merchant || 'Unknown'}</span>
+                    <span className="text-ink-muted text-[0.65rem] w-4 tabular-nums">{i + 1}</span>
+                    <span className="text-ink-muted text-[0.85rem] truncate">{m.merchant || 'Unknown'}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-white/20 text-[0.7rem] tabular-nums">{m.count}x</span>
-                    <span className="text-white/60 text-[0.85rem] tabular-nums">{formatINR(m.amount)}</span>
+                    <span className="text-ink-muted text-[0.7rem] tabular-nums">{m.count}x</span>
+                    <span className="text-ink-secondary text-[0.85rem] tabular-nums">{formatINR(m.amount)}</span>
                   </div>
                 </div>
               ))}
@@ -653,7 +690,7 @@ export default function Reports() {
         className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5"
       >
         <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-        <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4 flex items-center gap-1.5" style={{ fontWeight: 500 }}>
+        <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-4 flex items-center gap-1.5" style={{ fontWeight: 500 }}>
           <FileText size={14} /> Export Reports
         </h2>
         <div className="flex flex-wrap gap-3">
@@ -670,12 +707,12 @@ export default function Reports() {
           <GlassButton variant="secondary" icon={<FileSpreadsheet size={14} />} onClick={() => downloadCSV(month)}>Export CSV</GlassButton>
         </div>
         {!llmConnected && !llmLoading && (
-          <p className="mt-2 text-amber-200/45 text-xs">
+          <p className="mt-2 text-amber-200 text-xs">
             Connect an AI in Settings to create the detailed report. Summary PDF and data exports remain available.
           </p>
         )}
         {llmConnected && (
-          <p className="mt-2 max-w-3xl text-white/25 text-xs leading-relaxed">
+          <p className="mt-2 max-w-3xl text-ink-muted text-xs leading-relaxed">
             Clicking the AI PDF button sends the same disclosed monthly aggregates shown above to
             {` ${llmConfig?.provider || 'your connected provider'}`} for this one report. Standard PDF and CSV exports never call an AI.
           </p>
@@ -683,16 +720,16 @@ export default function Reports() {
         <div className="mt-5 pt-5 border-t border-white/[0.07]">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="flex items-center gap-2 text-white/55 text-sm">
+              <div className="flex items-center gap-2 text-ink-secondary text-sm">
                 <CalendarRange size={15} /> Export for CA
               </div>
-              <p className="mt-1 text-white/25 text-xs">AES-256 encrypted ZIP with a multi-sheet workbook, privacy-minimized CSV, manifest, reconciliation summary, and AY filing guide.</p>
+              <p className="mt-1 text-ink-muted text-xs">AES-256 encrypted ZIP with a multi-sheet workbook, privacy-minimized CSV, manifest, reconciliation summary, and AY filing guide.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <select
                 value={fyStart}
                 onChange={event => setFyStart(Number(event.target.value))}
-                className="min-h-11 rounded-xl bg-white/[0.06] border border-white/[0.12] px-3 text-white/60 text-xs"
+                className="min-h-11 rounded-xl bg-white/[0.06] border border-white/[0.12] px-3 text-ink-secondary text-xs"
                 aria-label="Financial year"
               >
                 {Array.from({ length: 6 }, (_, index) => {
@@ -703,14 +740,14 @@ export default function Reports() {
               <button
                 onClick={() => setTaxPackOpen(true)}
                 disabled={!taxPackEnabled}
-                className="min-h-11 px-3 rounded-xl bg-cyan-400/[0.12] border border-cyan-300/[0.16] text-cyan-100/70 disabled:opacity-35 text-xs"
+                className="min-h-11 px-3 rounded-xl bg-cyan-400/[0.12] border border-cyan-300/[0.16] text-cyan-100 disabled:opacity-35 text-xs"
               >
                 Download CA Tax Pack
               </button>
             </div>
           </div>
           {!taxPackEnabled && !licenseLoading && (
-            <p className="mt-2 text-amber-200/45 text-xs">The CA tax pack is included with GODFIN Max.</p>
+            <p className="mt-2 text-amber-200 text-xs">The CA tax pack is included with GODFIN Max.</p>
           )}
         </div>
       </motion.div>
@@ -736,12 +773,12 @@ export default function Reports() {
           >
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
-                <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-cyan-300/15 bg-cyan-300/[0.08] text-cyan-200/75">
+                <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-cyan-300/15 bg-cyan-300/[0.08] text-cyan-200">
                   <KeyRound size={18} />
                 </span>
                 <div>
-                  <h2 id="tax-pack-title" className="text-lg font-medium text-white/90">Protect your CA tax pack</h2>
-                  <p id="tax-pack-description" className="mt-1 text-sm leading-relaxed text-white/45">
+                  <h2 id="tax-pack-title" className="text-lg font-medium text-ink-primary">Protect your CA tax pack</h2>
+                  <p id="tax-pack-description" className="mt-1 text-sm leading-relaxed text-ink-muted">
                     This file contains sensitive dates, amounts, and tax-review details. GODFIN encrypts every file with AES-256 and never stores this passphrase.
                   </p>
                 </div>
@@ -751,7 +788,7 @@ export default function Reports() {
                 onClick={closeTaxPackDialog}
                 disabled={taxPackMutation.isPending}
                 aria-label="Close protected tax pack dialog"
-                className="rounded-lg p-1 text-white/30 hover:text-white/65 disabled:opacity-30"
+                className="rounded-lg p-1 text-ink-muted hover:text-ink-secondary disabled:opacity-30"
               >
                 <X size={18} />
               </button>
@@ -768,52 +805,102 @@ export default function Reports() {
                 });
               }}
             >
-              <label className="block text-sm text-white/60">
+              <label className="block text-sm text-ink-secondary">
                 Archive passphrase
-                <input
-                  ref={taxPackPassphraseRef}
-                  type="password"
-                  value={taxPackPassphrase}
-                  onChange={event => setTaxPackPassphrase(event.target.value)}
-                  minLength={12}
-                  maxLength={128}
-                  autoComplete="new-password"
-                  spellCheck="false"
-                  className="mt-1.5 w-full rounded-xl border border-white/[0.13] bg-white/[0.06] px-3 py-2.5 text-white/85 outline-none focus:border-cyan-300/40"
-                />
+                <span className="relative mt-1.5 block">
+                  <input
+                    ref={taxPackPassphraseRef}
+                    type={taxPackPassphraseVisible ? 'text' : 'password'}
+                    value={taxPackPassphrase}
+                    onChange={event => {
+                      setTaxPackPassphrase(event.target.value);
+                      setTaxPackSecretStatus('');
+                    }}
+                    minLength={12}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    spellCheck="false"
+                    className="w-full rounded-xl border border-white/[0.13] bg-white/[0.06] py-2.5 pl-3 pr-12 text-ink-primary outline-none focus:border-cyan-300/40"
+                  />
+                  <button
+                    type="button"
+                    aria-label={taxPackPassphraseVisible ? 'Hide password' : 'Show password'}
+                    aria-pressed={taxPackPassphraseVisible}
+                    onClick={() => setTaxPackPassphraseVisible(value => !value)}
+                    className="absolute inset-y-0 right-0 grid min-h-11 min-w-11 place-items-center rounded-r-xl text-ink-muted hover:text-ink-primary"
+                  >
+                    {taxPackPassphraseVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </span>
               </label>
-              <label className="block text-sm text-white/60">
+              <label className="block text-sm text-ink-secondary">
                 Confirm archive passphrase
-                <input
-                  type="password"
-                  value={taxPackConfirmation}
-                  onChange={event => setTaxPackConfirmation(event.target.value)}
-                  minLength={12}
-                  maxLength={128}
-                  autoComplete="new-password"
-                  spellCheck="false"
-                  className="mt-1.5 w-full rounded-xl border border-white/[0.13] bg-white/[0.06] px-3 py-2.5 text-white/85 outline-none focus:border-cyan-300/40"
-                />
+                <span className="relative mt-1.5 block">
+                  <input
+                    type={taxPackConfirmationVisible ? 'text' : 'password'}
+                    value={taxPackConfirmation}
+                    onChange={event => {
+                      setTaxPackConfirmation(event.target.value);
+                      setTaxPackSecretStatus('');
+                    }}
+                    minLength={12}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    spellCheck="false"
+                    className="w-full rounded-xl border border-white/[0.13] bg-white/[0.06] py-2.5 pl-3 pr-12 text-ink-primary outline-none focus:border-cyan-300/40"
+                  />
+                  <button
+                    type="button"
+                    aria-label={taxPackConfirmationVisible ? 'Hide password' : 'Show password'}
+                    aria-pressed={taxPackConfirmationVisible}
+                    onClick={() => setTaxPackConfirmationVisible(value => !value)}
+                    className="absolute inset-y-0 right-0 grid min-h-11 min-w-11 place-items-center rounded-r-xl text-ink-muted hover:text-ink-primary"
+                  >
+                    {taxPackConfirmationVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </span>
               </label>
-              <div className="rounded-xl border border-amber-300/15 bg-amber-300/[0.06] p-3 text-xs leading-relaxed text-amber-100/55">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={generateTaxPackPassword}
+                  className="min-h-11 rounded-xl border border-white/[0.13] bg-white/[0.05] px-3 text-sm text-ink-secondary hover:bg-white/[0.09]"
+                >
+                  <Sparkles size={15} className="mr-2 inline" aria-hidden="true" />
+                  Generate 12-character password
+                </button>
+                <button
+                  type="button"
+                  onClick={copyTaxPackPassword}
+                  disabled={!taxPackPassphrase}
+                  className="min-h-11 rounded-xl border border-white/[0.13] bg-white/[0.05] px-3 text-sm text-ink-secondary hover:bg-white/[0.09] disabled:opacity-35"
+                >
+                  <Copy size={15} className="mr-2 inline" aria-hidden="true" />
+                  Copy password
+                </button>
+              </div>
+              <p aria-live="polite" className="min-h-4 text-xs text-cyan-100">
+                {taxPackSecretStatus}
+              </p>
+              <div className="rounded-xl border border-amber-300/15 bg-amber-300/[0.06] p-3 text-xs leading-relaxed text-amber-100">
                 Use at least 12 characters—not your GODFIN PIN. Send the ZIP and passphrase to your CA through different channels. If you forget it, GODFIN cannot recover it. Some built-in archive apps may require an AES-capable extractor.
               </div>
               {taxPackConfirmation && taxPackPassphrase !== taxPackConfirmation && (
-                <p role="alert" className="text-xs text-rose-300/75">The two passphrases do not match.</p>
+                <p role="alert" className="text-xs text-rose-200">The two passphrases do not match.</p>
               )}
               <div className="flex justify-end gap-3 pt-1">
                 <button
                   type="button"
                   onClick={closeTaxPackDialog}
                   disabled={taxPackMutation.isPending}
-                  className="min-h-11 px-4 text-sm text-white/50 hover:text-white/80 disabled:opacity-30"
+                  className="min-h-11 px-4 text-sm text-ink-muted hover:text-ink-primary disabled:opacity-30"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!taxPackPassphraseValid || taxPackMutation.isPending}
-                  className="min-h-11 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.12] px-4 text-sm text-cyan-100/80 disabled:opacity-35"
+                  className="min-h-11 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.12] px-4 text-sm text-cyan-100 disabled:opacity-35"
                 >
                   {taxPackMutation.isPending ? 'Encrypting locally…' : 'Encrypt and download'}
                 </button>

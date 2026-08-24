@@ -99,7 +99,11 @@ def auth_status(request: Request, db: Session = Depends(get_db)):
         request.scope.get("state", {}).get(TRUSTED_DESKTOP_STATE_KEY, False)
     )
     return AuthStatusResponse(
-        is_first_run=is_first_run,
+        is_first_run=(
+            False
+            if runtime_mode() is RuntimeMode.LAN and not trusted_desktop
+            else is_first_run
+        ),
         pin_length=(
             None
             if is_first_run

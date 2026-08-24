@@ -93,7 +93,7 @@ export default function QuickAddModal({ open, onClose }) {
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
               <h2 id="quick-add-title" className="text-base font-semibold text-white">Add Transaction</h2>
-              <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close add transaction dialog">
+              <button onClick={onClose} className="text-ink-muted hover:text-white" aria-label="Close add transaction dialog">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -101,7 +101,7 @@ export default function QuickAddModal({ open, onClose }) {
             <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="quick-add-date" className="block text-xs text-slate-400 mb-1">Date</label>
+                  <label htmlFor="quick-add-date" className="block text-xs text-ink-muted mb-1">Date</label>
                   <input
                     id="quick-add-date"
                     type="date"
@@ -111,7 +111,7 @@ export default function QuickAddModal({ open, onClose }) {
                   />
                 </div>
                 <div>
-                  <span id="quick-add-type-label" className="block text-xs text-slate-400 mb-1">Type</span>
+                  <span id="quick-add-type-label" className="block text-xs text-ink-muted mb-1">Type</span>
                   <div className="flex rounded-lg overflow-hidden border border-slate-600" role="group" aria-labelledby="quick-add-type-label">
                     {['debit', 'credit'].map((t) => (
                       <button
@@ -122,9 +122,9 @@ export default function QuickAddModal({ open, onClose }) {
                         className={`flex-1 py-2 text-sm capitalize transition-colors ${
                           form.type === t
                             ? t === 'debit'
-                              ? 'bg-rose-500/20 text-rose-400'
-                              : 'bg-emerald-500/20 text-emerald-400'
-                            : 'bg-slate-700/50 text-slate-400'
+                              ? 'bg-rose-500/20 text-rose-200'
+                              : 'bg-emerald-500/20 text-emerald-200'
+                            : 'bg-slate-700/50 text-ink-muted'
                         }`}
                       >
                         {t}
@@ -135,7 +135,7 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               <div>
-                <label htmlFor="quick-add-merchant" className="block text-xs text-slate-400 mb-1">Merchant</label>
+                <label htmlFor="quick-add-merchant" className="block text-xs text-ink-muted mb-1">Merchant</label>
                 <input
                   id="quick-add-merchant"
                   type="text"
@@ -147,7 +147,7 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               <div>
-                <label htmlFor="quick-add-amount" className="block text-xs text-slate-400 mb-1">Amount</label>
+                <label htmlFor="quick-add-amount" className="block text-xs text-ink-muted mb-1">Amount</label>
                 <input
                   id="quick-add-amount"
                   type="number"
@@ -161,7 +161,7 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               <div>
-                <label htmlFor="quick-add-account" className="block text-xs text-slate-400 mb-1">Account</label>
+                <label htmlFor="quick-add-account" className="block text-xs text-ink-muted mb-1">Account</label>
                 <select
                   id="quick-add-account"
                   value={form.account_id || accounts?.[0]?.id || ''}
@@ -176,7 +176,7 @@ export default function QuickAddModal({ open, onClose }) {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="quick-add-category" className="block text-xs text-slate-400 mb-1">Category</label>
+                  <label htmlFor="quick-add-category" className="block text-xs text-ink-muted mb-1">Category</label>
                   <select
                     id="quick-add-category"
                     value={form.category}
@@ -190,7 +190,7 @@ export default function QuickAddModal({ open, onClose }) {
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="quick-add-subcategory" className="block text-xs text-slate-400 mb-1">Subcategory</label>
+                  <label htmlFor="quick-add-subcategory" className="block text-xs text-ink-muted mb-1">Subcategory</label>
                   <select
                     id="quick-add-subcategory"
                     value={form.subcategory}
@@ -207,7 +207,7 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               <div>
-                <label htmlFor="quick-add-notes" className="block text-xs text-slate-400 mb-1">Notes</label>
+                <label htmlFor="quick-add-notes" className="block text-xs text-ink-muted mb-1">Notes</label>
                 <input
                   id="quick-add-notes"
                   type="text"
@@ -219,7 +219,7 @@ export default function QuickAddModal({ open, onClose }) {
               </div>
 
               {error && (
-                <p className="text-rose-400 text-sm" role="alert">{error}</p>
+                <p className="text-rose-200 text-sm" role="alert">{error}</p>
               )}
 
               <button

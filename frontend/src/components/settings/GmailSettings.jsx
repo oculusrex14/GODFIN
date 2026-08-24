@@ -18,10 +18,23 @@ import {
   fetchIngestSettings,
   updateIngestSettings,
   fetchLicenseStatus,
+  fetchGmailCoverage,
+  startIncrementalGmailSync,
+  fetchIncrementalGmailSyncStatus,
 } from '../../api/client';
 import { openExternalUrl } from '../../config/external';
 import { openWebsite } from '../../config/website';
 import DialogSurface from '../DialogSurface';
+
+function invalidateIngestionDependents(queryClient) {
+  [
+    'gmailStatus', 'schedulerStatus', 'gmailCoverage', 'ingestSettings',
+    'dashboardStats', 'transactions', 'reviewQueue', 'incomeStats',
+    'incomeCoverage', 'financialProfile', 'behaviorInsights',
+    'reportSummary', 'reportDetailed', 'cashFlow', 'recurring',
+    'subscriptions',
+  ].forEach(queryKey => queryClient.invalidateQueries({ queryKey: [queryKey] }));
+}
 
 function GmailSettings() {
   const queryClient = useQueryClient();
@@ -80,6 +93,13 @@ function GmailSettings() {
     queryFn: fetchSchedulerStatus,
     enabled: gmailStatus?.connected,
     staleTime: 60000,
+  });
+
+  const { data: gmailCoverage } = useQuery({
+    queryKey: ['gmailCoverage'],
+    queryFn: fetchGmailCoverage,
+    enabled: gmailStatus?.connected && gmailAvailable,
+    staleTime: 15000,
   });
 
   // Fetch auto-ingestion settings
@@ -187,6 +207,29 @@ function GmailSettings() {
     onError: (err) => showToast(getErrorMessage(err), 'error'),
   });
 
+  const syncNowMutation = useMutation({
+    mutationFn: startIncrementalGmailSync,
+    onSuccess: (data) => {
+      showToast(
+        data.already_running
+          ? 'A Gmail sync is already running.'
+          : `Sync started for ${data.requested_start} through ${data.requested_end}.`,
+        data.already_running ? 'info' : 'success',
+      );
+    },
+    onError: (err) => showToast(getErrorMessage(err), 'error'),
+  });
+
+  const { data: syncNowStatus } = useQuery({
+    queryKey: ['gmailSyncNowStatus'],
+    queryFn: fetchIncrementalGmailSyncStatus,
+    enabled: !!gmailStatus?.connected,
+    refetchInterval: query => (
+      query.state.data?.status === 'running' ? 2000 : false
+    ),
+    staleTime: 1000,
+  });
+
   // Poll ingestion progress
   const { data: ingestProgress } = useQuery({
     queryKey: ['ingestProgress'],
@@ -209,11 +252,7 @@ function GmailSettings() {
     const curr = ingestProgress?.status;
     if (prev === 'running' && ['completed', 'partial'].includes(curr)) {
       setIngestJustCompleted(true);
-      queryClient.invalidateQueries({ queryKey: ['reviewQueue'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['schedulerStatus'] });
-      queryClient.invalidateQueries({ queryKey: ['gmailStatus'] });
+      invalidateIngestionDependents(queryClient);
       const r = ingestProgress?.result;
       if (curr === 'partial') {
         showToast(
@@ -235,6 +274,24 @@ function GmailSettings() {
     }
     prevIngestStatusRef.current = curr;
   }, [ingestProgress?.status, ingestProgress?.result, queryClient]);
+
+  const previousSyncNowStatusRef = useRef(null);
+  useEffect(() => {
+    const previous = previousSyncNowStatusRef.current;
+    const currentStatus = syncNowStatus?.status;
+    if (previous === 'running' && currentStatus === 'completed') {
+      invalidateIngestionDependents(queryClient);
+      const result = syncNowStatus.result;
+      showToast(
+        result?.eligible_financial_messages === 0
+          ? `Sync complete: 0 eligible transactions from ${result?.processed ?? 0} scanned messages.`
+          : `Sync complete: ${result?.created ?? 0} created and ${result?.skipped_duplicate ?? 0} already present.`,
+      );
+    } else if (previous === 'running' && currentStatus === 'error') {
+      showToast('Gmail sync could not finish. The last safe sync point was preserved.', 'error');
+    }
+    previousSyncNowStatusRef.current = currentStatus;
+  }, [syncNowStatus?.status, syncNowStatus?.result, queryClient]);
 
   // Disconnect mutation
   const disconnectMutation = useMutation({
@@ -271,21 +328,25 @@ function GmailSettings() {
     initialSyncMutation.mutate();
   };
 
-  const handleIngestNow = () => {
-    // Default to last 7 days if no dates set
-    if (!startDate || !endDate) {
-      const today = new Date();
-      const lastWeek = new Date(today);
-      lastWeek.setDate(lastWeek.getDate() - 7);
-      setEndDate(today.toISOString().split('T')[0]);
-      setStartDate(lastWeek.toISOString().split('T')[0]);
-    }
+  const handleImportDateRange = () => {
+    setShowDateRangeModal(true);
+  };
+
+  const handleBackfillMissingHistory = () => {
+    const missing = gmailCoverage?.missing_ranges?.[0];
+    if (!missing) return;
+    setStartDate(missing.start);
+    setEndDate(missing.end);
     setShowDateRangeModal(true);
   };
 
   const handleDateRangeSubmit = () => {
     if (!startDate || !endDate) {
       showToast('Please select both start and end dates', 'error');
+      return;
+    }
+    if (startDate > endDate) {
+      showToast('The start date must be on or before the end date.', 'error');
       return;
     }
     // Close modal immediately, ingestion runs in background
@@ -337,6 +398,14 @@ function GmailSettings() {
     return 'Gmail Not Connected';
   })();
   const history = schedulerStatus?.history;
+  const retainedResult = syncNowStatus?.result
+    || ingestProgress?.result
+    || history?.last_result;
+  const retainedStatus = retainedResult?.source_status || (
+    syncNowStatus?.status === 'error' || ingestProgress?.status === 'error'
+      ? 'error'
+      : null
+  );
 
   // Format date for display
   const formatDate = (isoString) => {
@@ -362,10 +431,10 @@ function GmailSettings() {
             exit={{ opacity: 0, y: -10 }}
             className={`px-4 py-2 rounded-lg text-sm ${
               toast.type === 'error'
-                ? 'bg-red-500/10 border border-red-500/30 text-red-400'
+                ? 'bg-red-500/10 border border-red-500/30 text-red-200'
                 : toast.type === 'info'
-                ? 'bg-blue-500/10 border border-blue-500/30 text-blue-400'
-                : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+                ? 'bg-blue-500/10 border border-blue-500/30 text-blue-200'
+                : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
             }`}
             role={toast.type === 'error' ? 'alert' : 'status'}
             aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
@@ -380,19 +449,19 @@ function GmailSettings() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className={`p-2 rounded-lg ${isConnected ? 'bg-emerald-500/20' : 'bg-slate-700/50'}`}>
-              <Mail className={`h-5 w-5 ${isConnected ? 'text-emerald-400' : 'text-slate-400'}`} />
+              <Mail className={`h-5 w-5 ${isConnected ? 'text-emerald-200' : 'text-ink-muted'}`} />
             </div>
             <div>
               <div className="text-white font-medium">
                 {gmailStatusTitle}
               </div>
-              <div className="text-slate-500 text-xs">
+              <div className="text-ink-muted text-xs">
                 {isConnected
                   ? `Connected as ${gmailStatus?.email || 'your approved Google account'}`
                   : gmailStatus?.message || 'Connect your Gmail to automatically import transactions'}
               </div>
               {!isConnected && gmailStatus?.credentials_present && (
-                <div className="mt-1 space-y-0.5 text-[0.68rem] text-slate-500">
+                <div className="mt-1 space-y-0.5 text-[0.68rem] text-ink-muted">
                   {gmailStatus.token_expiry && (
                     <div>Saved permission check due {formatDate(gmailStatus.token_expiry)}</div>
                   )}
@@ -417,7 +486,7 @@ function GmailSettings() {
                   : handleConnect
               }
               disabled={licenseLoading || authUrlMutation.isPending || gmailStatusRefreshing}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors disabled:opacity-50 text-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-500/20 text-blue-200 rounded-lg hover:bg-blue-500/30 transition-colors disabled:opacity-50 text-sm"
             >
               {authUrlMutation.isPending || gmailStatusRefreshing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -437,7 +506,7 @@ function GmailSettings() {
           ) : (
             <button
               onClick={() => setShowDisconnectModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 transition-colors text-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-200 rounded-lg hover:bg-red-500/20 transition-colors text-sm"
             >
               <Unlink className="h-4 w-4" />
               Disconnect
@@ -447,7 +516,7 @@ function GmailSettings() {
       </div>
 
       {!gmailAvailable && !licenseLoading && (
-        <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm text-amber-100/70">
+        <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm text-amber-100">
           Gmail automation is included with GODFIN Pro and Max. Core statement import remains available without connecting an email account.
         </div>
       )}
@@ -464,11 +533,11 @@ function GmailSettings() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-amber-500/10">
-                  <Database className="h-5 w-5 text-amber-400" />
+                  <Database className="h-5 w-5 text-amber-200" />
                 </div>
                 <div>
                   <div className="text-white font-medium">Initial Sync</div>
-                  <div className="text-slate-500 text-xs">
+                  <div className="text-ink-muted text-xs">
                     Import all transactions from start of year
                   </div>
                 </div>
@@ -477,7 +546,7 @@ function GmailSettings() {
               <button
                 onClick={handleInitialSync}
                 disabled={initialSyncMutation.isPending || syncStatus?.status === 'running'}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 text-amber-400 rounded-lg hover:bg-amber-500/20 transition-colors disabled:opacity-50 text-sm"
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 text-amber-200 rounded-lg hover:bg-amber-500/20 transition-colors disabled:opacity-50 text-sm"
               >
                 {initialSyncMutation.isPending || syncStatus?.status === 'running' ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -491,7 +560,7 @@ function GmailSettings() {
             {/* Progress bar during sync */}
             {syncStatus?.status === 'running' && (
               <div className="mt-3 pt-3 border-t border-slate-700/30">
-                <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+                <div className="flex items-center justify-between text-xs text-ink-muted mb-2">
                   <span>Processing emails...</span>
                   <span>{syncStatus.processed} / {syncStatus.total || '?'} ({syncStatus.percent}%)</span>
                 </div>
@@ -509,7 +578,7 @@ function GmailSettings() {
             {/* Sync completed message with details */}
             {syncStatus?.status === 'completed' && !history?.initial_sync_date_range && (
               <div className="mt-3 pt-3 border-t border-slate-700/30">
-                <div className="flex items-center gap-2 text-xs text-emerald-400 mb-2">
+                <div className="flex items-center gap-2 text-xs text-emerald-200 mb-2">
                   <Check className="h-3 w-3" />
                   <span>Sync complete!</span>
                 </div>
@@ -517,13 +586,13 @@ function GmailSettings() {
                   try {
                     const r = typeof syncStatus.result === 'string' ? JSON.parse(syncStatus.result.replace(/'/g, '"')) : syncStatus.result;
                     return (
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 bg-slate-800/30 rounded-lg p-2.5">
-                        <span>Processed:</span><span className="text-white/70">{r.processed ?? '—'}</span>
-                        <span>Created:</span><span className="text-emerald-400">{r.created ?? '—'}</span>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ink-muted bg-slate-800/30 rounded-lg p-2.5">
+                        <span>Processed:</span><span className="text-ink-secondary">{r.processed ?? '—'}</span>
+                        <span>Created:</span><span className="text-emerald-200">{r.created ?? '—'}</span>
                         <span>Duplicates skipped:</span><span>{r.skipped_duplicate ?? '—'}</span>
                         <span>No pattern match:</span><span>{r.skipped_no_match ?? '—'}</span>
                         <span>Blacklisted:</span><span>{r.skipped_blacklist ?? '—'}</span>
-                        {r.errors > 0 && <><span className="text-red-400">Errors:</span><span className="text-red-400">{r.errors}</span></>}
+                        {r.errors > 0 && <><span className="text-red-200">Errors:</span><span className="text-red-200">{r.errors}</span></>}
                       </div>
                     );
                   } catch { return null; }
@@ -533,14 +602,14 @@ function GmailSettings() {
 
             {/* Sync error */}
             {syncStatus?.status === 'error' && (
-              <div className="mt-3 pt-3 border-t border-slate-700/30 flex items-center gap-2 text-xs text-red-400">
+              <div className="mt-3 pt-3 border-t border-slate-700/30 flex items-center gap-2 text-xs text-red-200">
                 <AlertCircle className="h-3 w-3" />
                 <span>Sync failed: {syncStatus.error}</span>
               </div>
             )}
 
             {syncStatus?.status === 'partial' && (
-              <div className="mt-3 pt-3 border-t border-slate-700/30 flex items-start gap-2 text-xs text-amber-300">
+              <div className="mt-3 pt-3 border-t border-slate-700/30 flex items-start gap-2 text-xs text-amber-200">
                 <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
                 <span>
                   {syncStatus.result?.skipped_finalized_period > 0
@@ -552,130 +621,183 @@ function GmailSettings() {
 
             {/* Initial sync date range display */}
             {history?.initial_sync_date_range && (
-              <div className="mt-3 pt-3 border-t border-slate-700/30 flex items-center gap-2 text-xs text-slate-400">
-                <Check className="h-3 w-3 text-emerald-400" />
+              <div className="mt-3 pt-3 border-t border-slate-700/30 flex items-center gap-2 text-xs text-ink-muted">
+                <Check className="h-3 w-3 text-emerald-200" />
                 <span>Completed:</span>
-                <span className="text-slate-300">{history.initial_sync_date_range}</span>
+                <span className="text-ink-secondary">{history.initial_sync_date_range}</span>
               </div>
             )}
           </div>
 
-          {/* Ingest Now Section */}
-          <div className="bg-slate-800/40 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg transition-colors ${
-                  ingestProgress?.status === 'running' ? 'bg-blue-500/20 animate-pulse' :
-                  ingestJustCompleted ? 'bg-emerald-500/20' : 'bg-blue-500/10'
+          {/* Explicit current sync and historical backfill actions */}
+          <div className="space-y-3 rounded-lg bg-slate-800/40 p-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className={`rounded-lg p-2 ${
+                  syncNowStatus?.status === 'running'
+                    ? 'animate-pulse bg-blue-500/20'
+                    : 'bg-blue-500/10'
                 }`}>
-                  {ingestProgress?.status === 'running' ? (
-                    <Loader2 className="h-5 w-5 text-blue-400 animate-spin" />
-                  ) : ingestJustCompleted ? (
-                    <Check className="h-5 w-5 text-emerald-400" />
-                  ) : (
-                    <Calendar className="h-5 w-5 text-blue-400" />
-                  )}
+                  {syncNowStatus?.status === 'running'
+                    ? <Loader2 className="h-5 w-5 animate-spin text-blue-200" />
+                    : <RefreshCw className="h-5 w-5 text-blue-200" />}
                 </div>
                 <div>
-                  <div className="text-white font-medium">Ingest Now</div>
-                  <div className="text-slate-500 text-xs">
-                    {ingestProgress?.status === 'running' ? 'Syncing transactions...' :
-                     ingestJustCompleted ? 'Ingestion complete!' :
-                     'Manually sync transactions for a date range'}
-                  </div>
-                  {/* Inline progress bar under subtitle - visible when running */}
-                  {ingestProgress?.status === 'running' && (
-                    <div className="mt-2 space-y-1">
-                      <div className="w-full h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
-                        <motion.div
-                          className="h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full"
-                          initial={{ width: 0 }}
-                          animate={{ width: `${ingestProgress.percent ?? 0}%` }}
-                          transition={{ duration: 0.5, ease: 'easeOut' }}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between text-[0.65rem] text-slate-500">
-                        <span className="flex items-center gap-1">
-                          <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                          Batch {ingestProgress.current_batch ?? '?'}/{ingestProgress.total_batches ?? '?'}
-                        </span>
-                        <span>{ingestProgress.percent ?? 0}%</span>
-                      </div>
-                    </div>
-                  )}
-                  {/* Completion summary */}
-                  {ingestJustCompleted && ingestProgress?.result && (
-                    <div className="mt-2 flex items-center gap-3 text-[0.65rem]">
-                      <span className="text-emerald-400 flex items-center gap-1">
-                        <Check className="h-3 w-3" />
-                        {ingestProgress.result.created ?? 0} created
-                      </span>
-                      <span className="text-slate-400">
-                        {ingestProgress.result.processed ?? 0} processed
-                      </span>
-                    </div>
-                  )}
+                  <div className="font-medium text-white">Sync now</div>
+                  <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">
+                    Check Gmail from the last safe sync point through today.
+                  </p>
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    Requested range: {gmailCoverage?.next_sync_start || 'checking…'} through {gmailCoverage?.next_sync_end || 'today'}
+                  </p>
                 </div>
               </div>
-
               <button
-                onClick={handleIngestNow}
-                disabled={ingestProgress?.status === 'running'}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors text-sm ${
-                  ingestProgress?.status === 'running'
-                    ? 'bg-blue-500/20 text-blue-400 cursor-wait'
-                    : ingestJustCompleted
-                    ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                    : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
-                }`}
+                type="button"
+                onClick={() => syncNowMutation.mutate()}
+                disabled={syncNowMutation.isPending || syncNowStatus?.status === 'running'}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-500/20 px-4 text-sm text-blue-200 hover:bg-blue-500/30 disabled:cursor-wait disabled:opacity-50"
               >
-                {ingestProgress?.status === 'running' ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Running...
-                  </>
-                ) : ingestJustCompleted ? (
-                  <>
-                    <Check className="h-4 w-4" />
-                    Done
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-4 w-4" />
-                    Ingest Now
-                  </>
-                )}
+                {syncNowStatus?.status === 'running' && <Loader2 className="h-4 w-4 animate-spin" />}
+                {syncNowStatus?.status === 'running' ? 'Syncing…' : 'Sync now'}
               </button>
             </div>
+
+            <div className="border-t border-slate-700/40 pt-3 sm:flex sm:items-center sm:justify-between">
+              <div>
+                <div className="font-medium text-white">Import date range</div>
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  Choose exact past dates when older transactions are missing.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleImportDateRange}
+                disabled={ingestProgress?.status === 'running'}
+                className="mt-3 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-600 px-4 text-sm text-ink-primary hover:bg-slate-700/50 disabled:opacity-50 sm:mt-0"
+              >
+                <Calendar className="h-4 w-4" />
+                Choose dates
+              </button>
+            </div>
+
+            {gmailCoverage?.missing_ranges?.length > 0 && (
+              <div className="rounded-lg border border-amber-400/20 bg-amber-400/5 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-amber-200">Missing Gmail history found</div>
+                    <p className="mt-1 text-xs text-amber-100">
+                      {gmailCoverage.missing_ranges[0].start} through {gmailCoverage.missing_ranges[0].end}
+                      {gmailCoverage.missing_ranges.length > 1
+                        ? `, plus ${gmailCoverage.missing_ranges.length - 1} other gap(s)`
+                        : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleBackfillMissingHistory}
+                    className="min-h-11 rounded-lg bg-amber-400/10 px-4 text-sm text-amber-100 hover:bg-amber-400/20"
+                  >
+                    Backfill missing history
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(syncNowStatus?.status === 'running' || ingestProgress?.status === 'running') && (
+              <div role="status" aria-live="polite" className="space-y-2">
+                <div className="flex justify-between text-xs text-ink-muted">
+                  <span>{syncNowStatus?.public_message || 'Importing the selected Gmail range…'}</span>
+                  <span>{syncNowStatus?.status === 'running' ? syncNowStatus.percent : ingestProgress.percent}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-700/60">
+                  <motion.div
+                    className="h-full rounded-full bg-blue-400"
+                    animate={{
+                      width: `${syncNowStatus?.status === 'running'
+                        ? syncNowStatus.percent
+                        : ingestProgress.percent || 0}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
       {/* Last Ingestion Info */}
           <div className="bg-slate-800/40 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2">
-              <Clock className="h-4 w-4 text-slate-400" />
-              <span className="text-slate-300 text-sm font-medium">Last Ingestion</span>
+              <Clock className="h-4 w-4 text-ink-muted" />
+              <span className="text-ink-secondary text-sm font-medium">Last Ingestion</span>
             </div>
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Last Run:</span>
-                <span className="text-slate-300">{formatDate(history?.last_ingestion_run)}</span>
+                <span className="text-ink-muted">Last Run:</span>
+                <span className="text-ink-secondary">{formatDate(history?.last_ingestion_run)}</span>
               </div>
+
+              {retainedResult && (
+                <div className="mt-3 rounded-lg border border-slate-700/50 bg-slate-900/25 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-ink-primary">Last retained result</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[0.7rem] ${
+                      retainedStatus === 'partial'
+                        ? 'bg-amber-400/10 text-amber-200'
+                        : 'bg-emerald-400/10 text-emerald-200'
+                    }`}>
+                      {retainedStatus === 'partial' ? 'Partial—retry needed' : 'Completed'}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-xs text-ink-muted">
+                    Requested: {retainedResult.requested_start || 'not recorded'} through {retainedResult.requested_end || 'not recorded'}
+                  </div>
+                  {retainedResult.eligible_financial_messages === 0 && (
+                    <p className="mt-2 rounded-md bg-slate-800/50 p-2 text-xs text-ink-primary">
+                      0 eligible transactions. Gmail was checked successfully; the counts below explain what happened.
+                    </p>
+                  )}
+                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                    <dt className="text-ink-muted">Messages scanned</dt>
+                    <dd className="text-right text-ink-primary">{retainedResult.processed ?? 0}</dd>
+                    <dt className="text-ink-muted">Eligible financial messages</dt>
+                    <dd className="text-right text-ink-primary">{retainedResult.eligible_financial_messages ?? 0}</dd>
+                    <dt className="text-ink-muted">Transactions created</dt>
+                    <dd className="text-right text-emerald-200">{retainedResult.created ?? 0}</dd>
+                    <dt className="text-ink-muted">Already present/reconciled</dt>
+                    <dd className="text-right text-ink-primary">{retainedResult.skipped_duplicate ?? 0}</dd>
+                    <dt className="text-ink-muted">Needs parser/account review</dt>
+                    <dd className="text-right text-ink-primary">{retainedResult.parse_review_count ?? 0}</dd>
+                    <dt className="text-ink-muted">Held in finalized months</dt>
+                    <dd className="text-right text-ink-primary">{retainedResult.skipped_finalized_period ?? 0}</dd>
+                  </dl>
+                  {Object.keys(retainedResult.skip_reasons || {}).length > 0 && (
+                    <div className="mt-3 border-t border-slate-700/40 pt-2 text-xs text-ink-muted">
+                      Skipped by reason: {Object.entries(retainedResult.skip_reasons)
+                        .map(([reason, count]) => `${reason.replaceAll('_', ' ')} (${count})`)
+                        .join(', ')}
+                    </div>
+                  )}
+                  <div className="mt-2 text-xs text-ink-muted">
+                    Last safe Gmail coverage: {retainedResult.last_successful_coverage_end || history?.last_successful_coverage_end || 'not established'}
+                  </div>
+                </div>
+              )}
 
               {/* Tooltip-like hover info for initial sync */}
               {history?.initial_sync_date_range && (
                 <div className="group relative">
-                  <div className="flex items-center gap-1 text-slate-500 hover:text-slate-300 cursor-help">
+                  <div className="flex items-center gap-1 text-ink-muted hover:text-ink-secondary cursor-help">
                     <Info className="h-3 w-3" />
                     <span className="text-xs">Initial Sync Details</span>
                   </div>
                   <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-lg z-10 w-64">
-                    <div className="text-xs text-slate-400 mb-1">Initial Sync Range:</div>
-                    <div className="text-sm text-slate-200">{history.initial_sync_date_range}</div>
+                    <div className="text-xs text-ink-muted mb-1">Initial Sync Range:</div>
+                    <div className="text-sm text-ink-primary">{history.initial_sync_date_range}</div>
                     {history?.last_manual_ingestion_range && (
                       <>
-                        <div className="text-xs text-slate-400 mt-2 mb-1">Last Manual Ingest:</div>
-                        <div className="text-sm text-slate-200">{history.last_manual_ingestion_range}</div>
-                        <div className="text-xs text-slate-500 mt-1">
+                        <div className="text-xs text-ink-muted mt-2 mb-1">Last Manual Ingest:</div>
+                        <div className="text-sm text-ink-primary">{history.last_manual_ingestion_range}</div>
+                        <div className="text-xs text-ink-muted mt-1">
                           {formatDate(history.last_manual_ingestion_date)}
                         </div>
                       </>
@@ -691,11 +813,11 @@ function GmailSettings() {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-lg ${autoIngestEnabled ? 'bg-emerald-500/10' : 'bg-slate-600/20'}`}>
-                  <Clock className={`h-5 w-5 ${autoIngestEnabled ? 'text-emerald-400' : 'text-slate-400'}`} />
+                  <Clock className={`h-5 w-5 ${autoIngestEnabled ? 'text-emerald-200' : 'text-ink-muted'}`} />
                 </div>
                 <div>
                   <div className="text-white font-semibold text-lg">Auto-Ingestion</div>
-                  <div className="text-slate-500 text-sm">
+                  <div className="text-ink-muted text-sm">
                     {autoIngestEnabled
                       ? `Checks every ${ingestFrequency >= 60 ? `${Math.floor(ingestFrequency / 60)} hour${ingestFrequency >= 120 ? 's' : ''}${ingestFrequency % 60 > 0 ? ` ${ingestFrequency % 60} min` : ''}` : `${ingestFrequency} min`}`
                       : 'Disabled'}
@@ -733,7 +855,7 @@ function GmailSettings() {
             <div className="grid grid-cols-2 gap-3 mt-4">
               {/* Last Auto Ingestion */}
               <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
+                <div className="flex items-center gap-2 text-ink-muted text-xs mb-1">
                   <RefreshCw className="h-3 w-3" />
                   Last Auto Ingestion
                 </div>
@@ -744,7 +866,7 @@ function GmailSettings() {
                 </div>
                 {ingestSettings?.last_auto_ingestion?.status && (
                   <div className={`flex items-center gap-1 mt-1 text-xs ${
-                    ingestSettings.last_auto_ingestion.status === 'success' ? 'text-emerald-400' : 'text-red-400'
+                    ingestSettings.last_auto_ingestion.status === 'success' ? 'text-emerald-200' : 'text-red-200'
                   }`}>
                     {ingestSettings.last_auto_ingestion.status === 'success' ? (
                       <CheckCircle className="h-3 w-3" />
@@ -758,7 +880,7 @@ function GmailSettings() {
 
               {/* Next Auto Ingestion */}
               <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
+                <div className="flex items-center gap-2 text-ink-muted text-xs mb-1">
                   <Clock className="h-3 w-3" />
                   Next Auto Ingestion
                 </div>
@@ -768,7 +890,7 @@ function GmailSettings() {
                     : autoIngestEnabled ? 'Calculating...' : 'Disabled'}
                 </div>
                 {ingestSettings?.last_auto_ingestion?.new_transactions !== undefined && (
-                  <div className="text-xs text-slate-500 mt-1">
+                  <div className="text-xs text-ink-muted mt-1">
                     {ingestSettings.last_auto_ingestion.new_transactions} new transactions
                   </div>
                 )}
@@ -777,29 +899,29 @@ function GmailSettings() {
               {/* Error Message */}
               {ingestSettings?.last_auto_ingestion?.error && (
                 <div className="col-span-2 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-                  <div className="flex items-center gap-2 text-red-400 text-xs mb-1">
+                  <div className="flex items-center gap-2 text-red-200 text-xs mb-1">
                     <AlertCircle className="h-3 w-3" />
                     Last Error
                   </div>
-                  <div className="text-red-300 text-sm">{ingestSettings.last_auto_ingestion.error}</div>
+                  <div className="text-red-200 text-sm">{ingestSettings.last_auto_ingestion.error}</div>
                 </div>
               )}
 
               {/* Monthly Transactions */}
               <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
+                <div className="flex items-center gap-2 text-ink-muted text-xs mb-1">
                   <TrendingUp className="h-3 w-3" />
                   This Month
                 </div>
                 <div className="text-white text-2xl font-semibold">
                   {ingestSettings?.monthly_transaction_count ?? 0}
                 </div>
-                <div className="text-xs text-slate-500">transactions</div>
+                <div className="text-xs text-ink-muted">transactions</div>
               </div>
 
               {/* Frequency Selector */}
               <div className="bg-slate-700/30 rounded-lg p-3">
-                <div className="flex items-center gap-2 text-slate-400 text-xs mb-2">
+                <div className="flex items-center gap-2 text-ink-muted text-xs mb-2">
                   <Clock className="h-3 w-3" />
                   Frequency
                 </div>
@@ -849,19 +971,19 @@ function GmailSettings() {
 
             {!oauthUrl ? (
               <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-8 w-8 text-blue-400 animate-spin" />
-                <span className="ml-3 text-slate-400">Loading OAuth URL...</span>
+                <Loader2 className="h-8 w-8 text-blue-200 animate-spin" />
+                <span className="ml-3 text-ink-muted">Loading OAuth URL...</span>
               </div>
             ) : (
             <div className="space-y-4">
-              <p id="gmail-connect-description" className="text-slate-400 text-sm">
+              <p id="gmail-connect-description" className="text-ink-muted text-sm">
                 Google opens in your browser. Approve read-only access, then return
                 to GODFIN; this window updates automatically.
               </p>
 
               <div className="bg-slate-700/50 rounded-lg p-4">
                 <div className="text-white text-sm font-medium mb-2">Secure browser approval</div>
-                <p className="text-slate-400 text-xs mb-3">
+                <p className="text-ink-muted text-xs mb-3">
                   GODFIN asks only to read supported bank-alert emails. It cannot
                   send, edit, or delete your email.
                 </p>
@@ -870,7 +992,7 @@ function GmailSettings() {
                     authUrlMutation.mutate();
                   }}
                   disabled={authUrlMutation.isPending}
-                  className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-blue-500/20 text-blue-200 rounded-lg hover:bg-blue-500/30 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {authUrlMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -888,7 +1010,7 @@ function GmailSettings() {
                 setShowOAuthModal(false);
                 setOauthUrl('');
               }}
-              className="mt-4 w-full px-4 py-2 text-slate-400 hover:text-slate-300 transition-colors text-sm"
+              className="mt-4 w-full px-4 py-2 text-ink-muted hover:text-ink-secondary transition-colors text-sm"
             >
               Cancel
             </button>
@@ -909,22 +1031,22 @@ function GmailSettings() {
             onClose={ingestProgress?.status === 'running' ? undefined : () => setShowDateRangeModal(false)}
             className="bg-slate-800 rounded-xl border border-slate-700 max-w-md w-full p-6"
           >
-            <h3 id="gmail-ingest-title" className="text-lg font-medium text-white mb-4">Ingest Transactions</h3>
+            <h3 id="gmail-ingest-title" className="text-lg font-medium text-white mb-4">Import Gmail date range</h3>
             <p id="gmail-ingest-description" className="sr-only">
-              Choose a date range and monitor Gmail transaction import progress.
+              Choose exact historical dates and monitor Gmail transaction import progress.
             </p>
 
             {ingestProgress?.status === 'running' ? (
               /* Running state — show progress */
               <div className="space-y-4">
-                <p className="text-slate-400 text-sm">
-                  Ingestion is in progress...
+                <p className="text-ink-muted text-sm">
+                  Importing {startDate} through {endDate}…
                 </p>
 
                 <div className="bg-slate-700/30 rounded-lg p-4">
-                  <div className="flex items-center justify-between text-sm text-slate-300 mb-3">
+                  <div className="flex items-center justify-between text-sm text-ink-secondary mb-3">
                     <span>Batch {ingestProgress.current_batch ?? '?'} of {ingestProgress.total_batches ?? '?'}</span>
-                    <span className="text-blue-400 font-medium">{ingestProgress.percent ?? 0}%</span>
+                    <span className="text-blue-200 font-medium">{ingestProgress.percent ?? 0}%</span>
                   </div>
                   <div className="w-full h-3 bg-slate-700/50 rounded-full overflow-hidden">
                     <motion.div
@@ -935,7 +1057,7 @@ function GmailSettings() {
                     />
                   </div>
                   {ingestProgress.processed != null && (
-                    <div className="text-xs text-slate-500 mt-2">
+                    <div className="text-xs text-ink-muted mt-2">
                       Processed {ingestProgress.processed} transactions
                     </div>
                   )}
@@ -944,7 +1066,7 @@ function GmailSettings() {
                 <button
                   onClick={() => setShowDateRangeModal(false)}
                   disabled
-                  className="w-full px-4 py-2 text-slate-500 text-sm cursor-not-allowed flex items-center justify-center gap-2"
+                  className="w-full px-4 py-2 text-ink-muted text-sm cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Processing...
@@ -953,27 +1075,27 @@ function GmailSettings() {
             ) : ingestJustCompleted ? (
               /* Brief completed state before auto-close */
               <div className="space-y-4">
-                <div className="flex items-center gap-2 text-emerald-400">
+                <div className="flex items-center gap-2 text-emerald-200">
                   <Check className="h-5 w-5" />
                   <span className="font-medium">Ingestion Complete</span>
                 </div>
                 {ingestProgress.result && (
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 bg-slate-800/30 rounded-lg p-2.5">
-                    <span>Processed:</span><span className="text-white/70">{ingestProgress.result.processed ?? '—'}</span>
-                    <span>Created:</span><span className="text-emerald-400">{ingestProgress.result.created ?? '—'}</span>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ink-muted bg-slate-800/30 rounded-lg p-2.5">
+                    <span>Processed:</span><span className="text-ink-secondary">{ingestProgress.result.processed ?? '—'}</span>
+                    <span>Created:</span><span className="text-emerald-200">{ingestProgress.result.created ?? '—'}</span>
                   </div>
                 )}
               </div>
             ) : (
               /* Default state — date inputs */
               <>
-                <p className="text-slate-400 text-sm mb-4">
-                  Select a date range to ingest transactions. Leave blank to use default (last 7 days).
+                <p className="text-ink-muted text-sm mb-4">
+                  Choose the exact historical range to check. The end date is included.
                 </p>
 
                 <div className="space-y-4">
                   <div>
-                    <label htmlFor="gmail-ingest-start" className="text-slate-400 text-xs block mb-1">Start Date</label>
+                    <label htmlFor="gmail-ingest-start" className="text-ink-muted text-xs block mb-1">Start Date</label>
                     <input
                       id="gmail-ingest-start"
                       type="date"
@@ -984,7 +1106,7 @@ function GmailSettings() {
                   </div>
 
                   <div>
-                    <label htmlFor="gmail-ingest-end" className="text-slate-400 text-xs block mb-1">End Date</label>
+                    <label htmlFor="gmail-ingest-end" className="text-ink-muted text-xs block mb-1">End Date</label>
                     <input
                       id="gmail-ingest-end"
                       type="date"
@@ -995,22 +1117,28 @@ function GmailSettings() {
                   </div>
                 </div>
 
+                {startDate && endDate && (
+                  <div className="mt-4 rounded-lg border border-blue-400/15 bg-blue-400/5 p-3 text-sm text-blue-100">
+                    Requested range: <strong>{startDate}</strong> through <strong>{endDate}</strong>
+                  </div>
+                )}
+
                 <div className="flex gap-3 mt-6">
                   <button
                     onClick={() => setShowDateRangeModal(false)}
-                    className="flex-1 px-4 py-2 text-slate-400 hover:text-slate-300 transition-colors text-sm"
+                    className="flex-1 px-4 py-2 text-ink-muted hover:text-ink-secondary transition-colors text-sm"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleDateRangeSubmit}
                     disabled={dateRangeMutation.isPending}
-                    className="flex-1 px-4 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors disabled:opacity-50 text-sm"
+                    className="flex-1 px-4 py-2 bg-blue-500/20 text-blue-200 rounded-lg hover:bg-blue-500/30 transition-colors disabled:opacity-50 text-sm"
                   >
                     {dateRangeMutation.isPending ? (
                       <Loader2 className="h-4 w-4 animate-spin mx-auto" />
                     ) : (
-                      'Start Ingestion'
+                      'Import this date range'
                     )}
                   </button>
                 </div>
@@ -1033,11 +1161,11 @@ function GmailSettings() {
             className="bg-slate-800 rounded-xl border border-slate-700 max-w-md w-full p-6"
           >
             <div className="flex items-center gap-3 mb-4">
-              <AlertCircle className="h-6 w-6 text-red-400" />
+              <AlertCircle className="h-6 w-6 text-red-200" />
               <h3 id="gmail-disconnect-title" className="text-lg font-medium text-white">Disconnect Gmail?</h3>
             </div>
 
-            <p id="gmail-disconnect-description" className="text-slate-400 text-sm mb-4">
+            <p id="gmail-disconnect-description" className="text-ink-muted text-sm mb-4">
               This will revoke Gmail access and stop automatic transaction syncing.
             </p>
 
@@ -1047,11 +1175,11 @@ function GmailSettings() {
                   type="checkbox"
                   checked={clearDataOnDisconnect}
                   onChange={(e) => setClearDataOnDisconnect(e.target.checked)}
-                  className="mt-0.5 rounded border-slate-600 bg-slate-800 text-red-500"
+                  className="mt-0.5 rounded border-slate-600 bg-slate-800 text-red-200"
                 />
                 <div>
                   <div className="text-white text-sm">Clear all Gmail transactions</div>
-                  <div className="text-slate-500 text-xs">
+                  <div className="text-ink-muted text-xs">
                     Permanently delete all transactions imported from Gmail
                   </div>
                 </div>
@@ -1066,7 +1194,7 @@ function GmailSettings() {
                   GODFIN creates a safety backup first.
                 </div>
                 <label className="block">
-                  <span className="block text-xs text-slate-400 mb-1">Current PIN</span>
+                  <span className="block text-xs text-ink-muted mb-1">Current PIN</span>
                   <input
                     type="password"
                     inputMode="numeric"
@@ -1078,7 +1206,7 @@ function GmailSettings() {
                   />
                 </label>
                 <label className="block">
-                  <span className="block text-xs text-slate-400 mb-1">
+                  <span className="block text-xs text-ink-muted mb-1">
                     Type DELETE GMAIL DATA
                   </span>
                   <input
@@ -1095,7 +1223,7 @@ function GmailSettings() {
             <div className="flex gap-3">
               <button
                 onClick={() => setShowDisconnectModal(false)}
-                className="flex-1 px-4 py-2 text-slate-400 hover:text-slate-300 transition-colors text-sm"
+                className="flex-1 px-4 py-2 text-ink-muted hover:text-ink-secondary transition-colors text-sm"
               >
                 Cancel
               </button>
@@ -1108,7 +1236,7 @@ function GmailSettings() {
                     disconnectConfirmation !== 'DELETE GMAIL DATA'
                   ))
                 }
-                className="flex-1 px-4 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors disabled:opacity-50 text-sm"
+                className="flex-1 px-4 py-2 bg-red-500/20 text-red-200 rounded-lg hover:bg-red-500/30 transition-colors disabled:opacity-50 text-sm"
               >
                 {disconnectMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin mx-auto" />

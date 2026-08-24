@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from time import perf_counter
 
 import pytest
 
 from app.core.llm_privacy import (
+    HOSTED_REDACTION_BUDGET_SECONDS,
     HOSTED_DATA_CONSENT_VERSION,
+    MAX_HOSTED_PROMPT_CHARS,
     has_hosted_data_consent,
+    redact_hosted_prompt,
     record_hosted_data_consent,
 )
 from app.core.llm_runtime import (
@@ -143,6 +147,10 @@ def test_hosted_configuration_api_requires_explicit_consent(
 ):
     _enable_max(db_session)
     monkeypatch.setattr(
+        "app.api.v1.endpoints.llm.get_available_providers",
+        lambda: {"openai": {"models": ["gpt-test"]}},
+    )
+    monkeypatch.setattr(
         "app.api.v1.endpoints.llm.activate_configuration",
         lambda config: config,
     )
@@ -195,3 +203,44 @@ def test_local_configuration_api_does_not_require_hosted_consent(
     )
     assert response.status_code == 200, response.text
     assert response.json()["is_local"] is True
+
+
+@pytest.mark.parametrize("size", [1_000, 10_000, MAX_HOSTED_PROMPT_CHARS])
+def test_hosted_redaction_worst_case_latency_is_bounded(size):
+    attack = (
+        "a" * 37
+        + " alice@example.com Rs 12,345.67 9876543210 UTR 504123456789 "
+        + "spent 5000 on 2026-08-25 "
+    )
+    prompt = (attack * ((size // len(attack)) + 2))[:size]
+
+    started_at = perf_counter()
+    redacted = redact_hosted_prompt(prompt)
+    elapsed = perf_counter() - started_at
+
+    assert elapsed <= HOSTED_REDACTION_BUDGET_SECONDS
+    assert len(redacted) <= MAX_HOSTED_PROMPT_CHARS
+    for forbidden in (
+        "alice@example.com",
+        "9876543210",
+        "504123456789",
+        "12,345.67",
+        "2026-08-25",
+    ):
+        assert forbidden not in redacted
+
+
+def test_hosted_redaction_prebounds_before_unicode_normalization(monkeypatch):
+    oversized = "safe " * MAX_HOSTED_PROMPT_CHARS + "alice@example.com"
+    original_normalize = __import__("unicodedata").normalize
+    observed_lengths: list[int] = []
+
+    def observing_normalize(form, value):
+        observed_lengths.append(len(value))
+        return original_normalize(form, value)
+
+    monkeypatch.setattr("app.core.llm_privacy.unicodedata.normalize", observing_normalize)
+    redacted = redact_hosted_prompt(oversized)
+
+    assert observed_lengths == [MAX_HOSTED_PROMPT_CHARS]
+    assert len(redacted) <= MAX_HOSTED_PROMPT_CHARS

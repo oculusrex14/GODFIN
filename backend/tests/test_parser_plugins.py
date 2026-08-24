@@ -3,9 +3,13 @@ from __future__ import annotations
 import io
 import uuid
 from datetime import date
+from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from openpyxl import Workbook
 
+from app.api.v1.endpoints.statement import _resolve_account_id
 from app.core.account_mapping import save_sender_mappings
 from app.core.ingestion import run_ingestion
 from app.core.parsers import parse_registered_statement
@@ -266,7 +270,37 @@ def test_parser_profiles_are_discoverable(auth_client):
     response = auth_client.get("/api/v1/accounts/parser-profiles")
     assert response.status_code == 200
     profiles = {item["profile"] for item in response.json()}
-    assert profiles == {"hdfc_savings", "hdfc_credit"}
+    assert profiles == {
+        "hdfc_savings",
+        "hdfc_credit",
+        "kotak_savings",
+        "sbi_savings",
+    }
+
+
+def test_selected_statement_account_must_match_bank_type_and_last_four(db_session):
+    account = Account(
+        id=str(uuid.uuid4()),
+        bank="KOTAK",
+        account_type="savings",
+        last_4_digits="2468",
+        nickname="Synthetic routing account",
+        is_active=True,
+    )
+    db_session.add(account)
+    db_session.flush()
+    parsed = SimpleNamespace(
+        statement_type="kotak_savings",
+        account_last4="2468",
+    )
+
+    assert _resolve_account_id(db_session, parsed, account.id) == account.id
+
+    parsed.account_last4 = "1357"
+    with pytest.raises(HTTPException) as mismatch:
+        _resolve_account_id(db_session, parsed, account.id)
+    assert mismatch.value.status_code == 409
+    assert "last four" in str(mismatch.value.detail).lower()
 
 
 def test_gmail_sender_mapping_routes_to_configured_account(db_session):

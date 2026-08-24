@@ -765,8 +765,8 @@ def create_provider(
     )
 
 
-def get_available_providers() -> Dict[str, Dict[str, Any]]:
-    """Get list of available providers with their supported models."""
+def _provider_catalog() -> Dict[str, Dict[str, Any]]:
+    """Describe implemented adapters; this is not the production support list."""
     return {
         "ollama_local": {
             "name": "Ollama (Local)",
@@ -896,3 +896,37 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
             "description": "Minimax models"
         },
     }
+
+
+# Hosted providers remain implemented for controlled acceptance testing, but a
+# provider/model is not advertised as production-supported until its exact pair
+# passes the release acceptance matrix on the candidate build. Add only exact
+# accepted model IDs here together with retained evidence for the candidate SHA.
+PRODUCTION_ACCEPTED_HOSTED_MODELS: dict[str, frozenset[str]] = {}
+
+
+def _accepted_models(
+    models: dict[str, object] | list[str],
+    accepted: frozenset[str],
+) -> dict[str, object] | list[str]:
+    if isinstance(models, list):
+        return [model for model in models if model in accepted]
+    return {
+        tier: model
+        for tier, model in models.items()
+        if isinstance(model, str) and model in accepted
+    }
+
+
+def get_available_providers() -> Dict[str, Dict[str, Any]]:
+    """Return only providers/models accepted for production presentation."""
+    catalog = _provider_catalog()
+    available = {"ollama_local": catalog["ollama_local"]}
+    for provider_id, accepted in PRODUCTION_ACCEPTED_HOSTED_MODELS.items():
+        provider = catalog.get(provider_id)
+        if provider is None or not accepted:
+            continue
+        models = _accepted_models(provider["models"], accepted)
+        if models:
+            available[provider_id] = {**provider, "models": models}
+    return available

@@ -2,10 +2,10 @@ import { memo } from "react";
 import { motion } from "framer-motion";
 
 const variants = {
-  primary: "bg-cyan-500/20 text-cyan-300 border-cyan-400/20 hover:bg-cyan-500/30 shadow-[0_0_16px_rgba(34,211,238,0.1)]",
-  secondary: "bg-white/[0.08] text-white/70 border-white/[0.12] hover:bg-white/[0.14] hover:text-white",
-  danger: "bg-rose-500/15 text-rose-300 border-rose-400/20 hover:bg-rose-500/25",
-  ghost: "bg-transparent text-white/50 border-transparent hover:bg-white/[0.06] hover:text-white/80",
+  primary: "bg-cyan-500/20 text-cyan-200 border-cyan-400/20 hover:bg-cyan-500/30 shadow-[0_0_16px_rgba(34,211,238,0.1)]",
+  secondary: "bg-white/[0.08] text-ink-secondary border-white/[0.12] hover:bg-white/[0.14] hover:text-white",
+  danger: "bg-rose-500/15 text-rose-200 border-rose-400/20 hover:bg-rose-500/25",
+  ghost: "bg-transparent text-ink-muted border-transparent hover:bg-white/[0.06] hover:text-ink-primary",
 };
 
 export const GlassButton = memo(function GlassButton({

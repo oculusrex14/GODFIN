@@ -114,7 +114,11 @@ export default function UploadPage() {
 
   // Step 1: Preview
   const previewMutation = useMutation({
-    mutationFn: entry => previewStatement(entry.file, entry.password || null),
+    mutationFn: entry => previewStatement(
+      entry.file,
+      entry.password || null,
+      entry.accountId || null,
+    ),
     onMutate: entry => updateAutomatic(entry.id, { status: 'parsing', error: '' }),
     onSuccess: (_, entry) => {
       updateAutomatic(entry.id, { step: 2, status: 'reconciling' });
@@ -282,8 +286,8 @@ export default function UploadPage() {
   return (
     <div>
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-        <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Upload Statement</h1>
-        <p className="text-white/30 text-[0.8rem]">Import transactions from a recognized statement or map a spreadsheet safely</p>
+        <h1 className="text-ink-primary text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Upload Statement</h1>
+        <p className="text-ink-muted text-[0.8rem]">Import transactions from a recognized statement or map a spreadsheet safely</p>
       </motion.div>
 
       <div className="mb-5 inline-flex rounded-[14px] border border-white/[0.1] bg-white/[0.04] p-1" role="tablist" aria-label="Statement import method">
@@ -294,8 +298,8 @@ export default function UploadPage() {
           onClick={() => setImportMode('automatic')}
           className={`rounded-[10px] px-4 py-2 text-[0.73rem] transition-colors ${
             importMode === 'automatic'
-              ? 'bg-cyan-400/[0.12] text-cyan-200/80'
-              : 'text-white/35 hover:text-white/60'
+              ? 'bg-cyan-400/[0.12] text-cyan-200'
+              : 'text-ink-muted hover:text-ink-secondary'
           }`}
         >
           Recognized HDFC statement
@@ -311,8 +315,8 @@ export default function UploadPage() {
           )}
           className={`rounded-[10px] px-4 py-2 text-[0.73rem] transition-colors ${
             importMode === 'guided'
-              ? 'bg-cyan-400/[0.12] text-cyan-200/80'
-              : 'text-white/35 hover:text-white/60'
+              ? 'bg-cyan-400/[0.12] text-cyan-200'
+              : 'text-ink-muted hover:text-ink-secondary'
           }`}
         >
           Guided CSV / XLSX{mappedImportAvailable ? '' : ' · Pro'}
@@ -326,14 +330,14 @@ export default function UploadPage() {
       <section className="mb-5 rounded-[16px] border border-white/[0.1] bg-white/[0.04] p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-[0.73rem] text-white/55">Statement queue</p>
-            <p className="mt-0.5 text-[0.65rem] text-white/25">
+            <p className="text-[0.73rem] text-ink-secondary">Statement queue</p>
+            <p className="mt-0.5 text-[0.65rem] text-ink-muted">
               {batchAvailable
                 ? 'Files are reviewed one at a time, so a large batch cannot overwhelm your computer.'
                 : 'Core imports one statement at a time. Pro and Max add a reviewed batch queue.'}
             </p>
           </div>
-          <label className="cursor-pointer rounded-[10px] border border-cyan-400/20 bg-cyan-400/[0.06] px-3 py-2 text-[0.7rem] text-cyan-200/70 hover:bg-cyan-400/[0.1]">
+          <label className="cursor-pointer rounded-[10px] border border-cyan-400/20 bg-cyan-400/[0.06] px-3 py-2 text-[0.7rem] text-cyan-200 hover:bg-cyan-400/[0.1]">
             <Plus size={12} className="mr-1 inline" /> Add statements
             <input
               type="file"
@@ -365,13 +369,13 @@ export default function UploadPage() {
                     onClick={() => setActiveAutomaticId(item.id)}
                     className="min-w-0 flex-1 px-3 py-2 text-left disabled:cursor-not-allowed"
                   >
-                    <span className="block truncate text-[0.68rem] text-white/60">{item.file.name}</span>
+                    <span className="block truncate text-[0.68rem] text-ink-secondary">{item.file.name}</span>
                     <span className={`block text-[0.58rem] capitalize ${
                       item.status === 'complete'
-                        ? 'text-emerald-300/65'
+                        ? 'text-emerald-200'
                         : item.status === 'failed'
-                          ? 'text-rose-300/70'
-                          : 'text-white/25'
+                          ? 'text-rose-200'
+                          : 'text-ink-muted'
                     }`}>{item.status}</span>
                   </button>
                   <button
@@ -379,7 +383,7 @@ export default function UploadPage() {
                     aria-label={`Remove ${item.file.name}`}
                     disabled={isProcessing}
                     onClick={() => removeAutomatic(item.id)}
-                    className="mr-2 rounded p-1 text-white/20 hover:text-rose-300/70 disabled:cursor-not-allowed"
+                    className="mr-2 rounded p-1 text-ink-muted hover:text-rose-200 disabled:cursor-not-allowed"
                   >
                     <Trash2 size={12} />
                   </button>
@@ -387,7 +391,7 @@ export default function UploadPage() {
               ))}
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-2">
-              <label className="flex items-center gap-2 text-[0.66rem] text-white/35">
+              <label className="flex items-center gap-2 text-[0.66rem] text-ink-muted">
                 <input
                   type="checkbox"
                   checked={reviewAllFirst}
@@ -396,18 +400,18 @@ export default function UploadPage() {
                 />
                 Review every file before importing any of them
               </label>
-              <span className="text-[0.63rem] text-white/25">
+              <span className="text-[0.63rem] text-ink-muted">
                 {automaticComplete} complete · {automaticFailed} failed · {automaticQueue.length} total
               </span>
             </div>
             {(automaticComplete > 0 || automaticFailed > 0) && (
-              <p className="mt-2 text-[0.63rem] text-white/28">
+              <p className="mt-2 text-[0.63rem] text-ink-muted">
                 Batch summary: {automaticTotals.imported} imported · {automaticTotals.duplicates} duplicates skipped · {automaticTotals.review} need category review · {automaticFailed} failed
               </p>
             )}
           </>
         )}
-        {fileError && <p className="mt-2 text-[0.68rem] text-rose-300/75">{fileError}</p>}
+        {fileError && <p className="mt-2 text-[0.68rem] text-rose-200">{fileError}</p>}
       </section>
 
       {/* Step indicator */}
@@ -421,10 +425,10 @@ export default function UploadPage() {
             {i > 0 && <div className={`w-8 h-[1px] ${step >= s.num ? 'bg-cyan-400/40' : 'bg-white/[0.08]'}`} />}
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[0.7rem] border transition-all ${
               step === s.num
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/30'
+                ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/30'
                 : step > s.num
-                  ? 'bg-emerald-500/10 text-emerald-400/70 border-emerald-400/20'
-                  : 'bg-white/[0.04] text-white/30 border-white/[0.08]'
+                  ? 'bg-emerald-500/10 text-emerald-200 border-emerald-400/20'
+                  : 'bg-white/[0.04] text-ink-muted border-white/[0.08]'
             }`}>
               {step > s.num ? <CheckCircle size={11} /> : <span>{s.num}</span>}
               {s.label}
@@ -447,7 +451,7 @@ export default function UploadPage() {
                 className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-6"
               >
                 <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-                <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Bank Statement</h2>
+                <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>Bank Statement</h2>
 
                 <div
                   onDragOver={(e) => e.preventDefault()}
@@ -457,24 +461,24 @@ export default function UploadPage() {
                   }`}
                 >
                   {fileError && (
-                    <p className="mb-2 text-rose-400 text-sm">{fileError}</p>
+                    <p className="mb-2 text-rose-200 text-sm">{fileError}</p>
                   )}
                   {file ? (
                     <div className="flex items-center justify-center gap-3">
-                      <FileText className="h-7 w-7 text-emerald-400/80" />
+                      <FileText className="h-7 w-7 text-emerald-200" />
                       <div className="text-left">
-                        <p className="text-white/80 text-[0.85rem]">{file.name}</p>
-                        <p className="text-white/30 text-[0.7rem]">{(file.size / 1024).toFixed(1)} KB</p>
+                        <p className="text-ink-primary text-[0.85rem]">{file.name}</p>
+                        <p className="text-ink-muted text-[0.7rem]">{(file.size / 1024).toFixed(1)} KB</p>
                       </div>
-                      <button onClick={() => removeAutomatic()} className="ml-2 text-white/30 hover:text-rose-400/70" aria-label={`Remove selected file ${file.name}`}>
+                      <button onClick={() => removeAutomatic()} className="ml-2 text-ink-muted hover:text-rose-200" aria-label={`Remove selected file ${file.name}`}>
                         <Trash2 size={15} />
                       </button>
                     </div>
                   ) : (
                     <label className="cursor-pointer">
-                      <UploadIcon className="h-9 w-9 text-white/20 mx-auto mb-3" />
-                      <p className="text-white/40 text-[0.85rem] mb-1">Drop one or more PDF or Excel files here, or click to browse</p>
-                      <p className="text-white/20 text-[0.7rem]">HDFC Savings or Credit Card statement (PDF, XLS, XLSX)</p>
+                      <UploadIcon className="h-9 w-9 text-ink-muted mx-auto mb-3" />
+                      <p className="text-ink-muted text-[0.85rem] mb-1">Drop one or more PDF or Excel files here, or click to browse</p>
+                      <p className="text-ink-muted text-[0.7rem]">HDFC Savings or Credit Card statement (PDF, XLS, XLSX)</p>
                       <input
                         type="file"
                         accept=".pdf,.xls,.xlsx"
@@ -490,7 +494,7 @@ export default function UploadPage() {
                 </div>
 
                 {fileError && (
-                  <p className="mt-2 text-rose-400 text-sm">{fileError}</p>
+                  <p className="mt-2 text-rose-200 text-sm">{fileError}</p>
                 )}
 
                 {!isExcelFile(file) && (
@@ -506,18 +510,18 @@ export default function UploadPage() {
 
                 {file && (
                   <label className="mt-4 grid gap-1.5">
-                    <span className="text-[0.68rem] text-white/35">Import into account</span>
+                    <span className="text-[0.68rem] text-ink-muted">Import into account</span>
                     <select
                       value={activeAutomatic?.accountId || ''}
                       onChange={event => updateAutomatic(activeAutomatic.id, { accountId: event.target.value })}
-                      className="rounded-[10px] border border-white/[0.12] bg-[#15294a] px-3 py-2 text-[0.75rem] text-white/70 focus:border-cyan-400/40 focus:outline-none"
+                      className="rounded-[10px] border border-white/[0.12] bg-[#15294a] px-3 py-2 text-[0.75rem] text-ink-secondary focus:border-cyan-400/40 focus:outline-none"
                     >
                       <option value="">Detect from the statement</option>
                       {importAccounts.filter(account => account.is_active !== false).map(account => (
                         <option key={account.id} value={account.id}>{automaticAccountLabel(account)}</option>
                       ))}
                     </select>
-                    <span className="text-[0.62rem] leading-relaxed text-white/22">
+                    <span className="text-[0.62rem] leading-relaxed text-ink-muted">
                       Choose an account when you have more than one matching account. GODFIN still verifies the statement before import.
                     </span>
                   </label>
@@ -539,7 +543,7 @@ export default function UploadPage() {
 
                 {activeAutomatic?.status === 'failed' && activeAutomatic?.error && (
                   <div className="mt-3 p-3 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px]">
-                    <p className="text-rose-400/70 text-[0.8rem]">{activeAutomatic.error}</p>
+                    <p className="text-rose-200 text-[0.8rem]">{activeAutomatic.error}</p>
                   </div>
                 )}
               </motion.div>
@@ -557,50 +561,50 @@ export default function UploadPage() {
                 <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
 
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Reconciliation Review</h2>
-                  <button onClick={() => resetResults()} className="text-white/30 hover:text-white/60 text-[0.7rem] flex items-center gap-1 transition-colors">
+                  <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Reconciliation Review</h2>
+                  <button onClick={() => resetResults()} className="text-ink-muted hover:text-ink-secondary text-[0.7rem] flex items-center gap-1 transition-colors">
                     <ArrowLeft size={12} /> Start Over
                   </button>
                 </div>
 
                 {reconcileMutation.isPending ? (
                   <div className="flex flex-col items-center gap-3 py-8">
-                    <Loader2 size={28} className="animate-spin text-cyan-400/60" />
-                    <p className="text-white/40 text-[0.85rem]">Reconciling against existing records...</p>
+                    <Loader2 size={28} className="animate-spin text-cyan-200" />
+                    <p className="text-ink-muted text-[0.85rem]">Reconciling against existing records...</p>
                   </div>
                 ) : activeAutomatic?.status === 'failed' ? (
                   <div className="p-4 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px]">
-                    <p className="text-rose-400/70 text-[0.8rem] flex items-center gap-2">
+                    <p className="text-rose-200 text-[0.8rem] flex items-center gap-2">
                       <XCircle size={14} /> {activeAutomatic?.error}
                     </p>
-                    <button onClick={() => resetResults()} className="mt-2 text-white/40 text-[0.75rem] hover:text-white/60">
+                    <button onClick={() => resetResults()} className="mt-2 text-ink-muted text-[0.75rem] hover:text-ink-secondary">
                       Try again
                     </button>
                   </div>
                 ) : reconcileData ? (
                   <>
                     <div className="mb-4 rounded-[12px] border border-emerald-400/15 bg-emerald-400/[0.05] p-3">
-                      <p className="flex items-center gap-2 text-[0.75rem] text-emerald-300/80">
+                      <p className="flex items-center gap-2 text-[0.75rem] text-emerald-200">
                         <CheckCircle size={14} /> Financial controls passed
                       </p>
-                      <p className="mt-1 text-[0.68rem] leading-relaxed text-white/35">
+                      <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-muted">
                         GODFIN recognized {reconcileData.parser_profile?.replaceAll('_', ' ')} and verified the statement&apos;s explicit amount columns{reconcileData.reconciliation_method === 'explicit_columns_and_running_balance' ? ' against its running balances' : ''}. Import starts only after you confirm below.
                       </p>
-                      <p className="mt-1 text-[0.62rem] text-white/25">
+                      <p className="mt-1 text-[0.62rem] text-ink-muted">
                         Parser {reconcileData.parser_profile?.replaceAll('_', ' ')} · reviewed file {reconcileData.parse_fingerprint?.slice(0, 12)}…
                       </p>
                     </div>
                     {/* Summary counters */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                       {[
-                        { label: 'Total Parsed', val: reconcileData.total_parsed, color: 'text-white/80' },
-                        { label: 'Matched', val: reconcileData.matched_count, color: 'text-emerald-400/80' },
-                        { label: 'Possible Dupes', val: reconcileData.possible_count, color: 'text-amber-400/80' },
-                        { label: 'New', val: reconcileData.new_count, color: 'text-cyan-400/80' },
+                        { label: 'Total Parsed', val: reconcileData.total_parsed, color: 'text-ink-primary' },
+                        { label: 'Matched', val: reconcileData.matched_count, color: 'text-emerald-200' },
+                        { label: 'Possible Dupes', val: reconcileData.possible_count, color: 'text-amber-200' },
+                        { label: 'New', val: reconcileData.new_count, color: 'text-cyan-200' },
                       ].map((s) => (
                         <div key={s.label} className="text-center p-2 bg-white/[0.03] rounded-[12px]">
                           <p className={`text-[1.3rem] tabular-nums ${s.color}`} style={{ fontWeight: 300 }}>{s.val}</p>
-                          <p className="text-white/30 text-[0.65rem]">{s.label}</p>
+                          <p className="text-ink-muted text-[0.65rem]">{s.label}</p>
                         </div>
                       ))}
                     </div>
@@ -608,17 +612,17 @@ export default function UploadPage() {
                     {/* New transactions list */}
                     {reconcileData.new_transactions?.length > 0 && (
                       <div className="mb-4">
-                        <h3 className="text-cyan-400/70 text-[0.75rem] mb-2" style={{ fontWeight: 500 }}>
+                        <h3 className="text-cyan-200 text-[0.75rem] mb-2" style={{ fontWeight: 500 }}>
                           New Transactions ({reconcileData.new_count})
                         </h3>
                         <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1">
                           {reconcileData.new_transactions.map((t, i) => (
                             <div key={i} className="flex justify-between items-center text-[0.75rem] py-1.5 px-2 bg-white/[0.02] rounded-[8px]">
                               <div className="flex-1 min-w-0">
-                                <span className="text-white/50 truncate block">{t.description}</span>
-                                <span className="text-white/25 text-[0.65rem]">{t.date}</span>
+                                <span className="text-ink-muted truncate block">{t.description}</span>
+                                <span className="text-ink-muted text-[0.65rem]">{t.date}</span>
                               </div>
-                              <span className={`ml-2 tabular-nums ${t.type === 'credit' ? 'text-emerald-400/70' : 'text-white/60'}`}>
+                              <span className={`ml-2 tabular-nums ${t.type === 'credit' ? 'text-emerald-200' : 'text-ink-secondary'}`}>
                                 {t.type === 'credit' ? '+' : '-'}{formatINR(t.amount)}
                               </span>
                             </div>
@@ -630,15 +634,15 @@ export default function UploadPage() {
                     {/* Potential duplicates */}
                     {reconcileData.potential_duplicates?.length > 0 && (
                       <div className="mb-4">
-                        <h3 className="text-amber-400/70 text-[0.75rem] mb-2" style={{ fontWeight: 500 }}>
+                        <h3 className="text-amber-200 text-[0.75rem] mb-2" style={{ fontWeight: 500 }}>
                           <AlertTriangle className="h-3 w-3 inline mr-1" />
                           Possible Duplicates ({reconcileData.possible_count})
                         </h3>
                         <div className="space-y-1 max-h-[150px] overflow-y-auto pr-1">
                           {reconcileData.potential_duplicates.map((d, i) => (
                             <div key={i} className="text-[0.7rem] py-1.5 px-2 bg-amber-400/[0.03] rounded-[8px] border border-amber-400/[0.08]">
-                              <div className="text-white/50">{d.parsed.description} — {formatINR(d.parsed.amount)}</div>
-                              <div className="text-white/25">Matches: {d.existing.merchant} — {formatINR(d.existing.amount)} ({d.existing.date})</div>
+                              <div className="text-ink-muted">{d.parsed.description} — {formatINR(d.parsed.amount)}</div>
+                              <div className="text-ink-muted">Matches: {d.existing.merchant} — {formatINR(d.existing.amount)} ({d.existing.date})</div>
                             </div>
                           ))}
                         </div>
@@ -648,15 +652,15 @@ export default function UploadPage() {
                     {/* Income detected */}
                     {reconcileData.income_detected?.length > 0 && (
                       <div className="mb-4 p-3 bg-emerald-400/[0.04] rounded-[12px] border border-emerald-400/[0.1]">
-                        <h3 className="text-emerald-400/70 text-[0.75rem] mb-2" style={{ fontWeight: 500 }}>
+                        <h3 className="text-emerald-200 text-[0.75rem] mb-2" style={{ fontWeight: 500 }}>
                           <DollarSign className="h-3 w-3 inline mr-1" />
                           Income Detected ({reconcileData.income_count})
                         </h3>
                         <div className="space-y-1">
                           {reconcileData.income_detected.map((item, i) => (
                             <div key={i} className="flex justify-between text-[0.75rem]">
-                              <span className="text-white/50">{item.description}</span>
-                              <span className="text-emerald-400/70 tabular-nums">{formatINR(item.amount)}</span>
+                              <span className="text-ink-muted">{item.description}</span>
+                              <span className="text-emerald-200 tabular-nums">{formatINR(item.amount)}</span>
                             </div>
                           ))}
                         </div>
@@ -667,16 +671,16 @@ export default function UploadPage() {
                     {importMutation.isPending ? (
                       <div className="mt-2 p-4 bg-cyan-400/[0.04] rounded-[14px] border border-cyan-400/[0.12]">
                         <div className="flex items-center gap-3 mb-3">
-                          <Loader2 size={20} className="animate-spin text-cyan-400/70" />
+                          <Loader2 size={20} className="animate-spin text-cyan-200" />
                           <div>
-                            <p className="text-white/70 text-[0.85rem]" style={{ fontWeight: 500 }}>Importing transactions...</p>
-                            <p className="text-white/30 text-[0.7rem]">Classifying and deduplicating {reconcileData.new_count} transactions</p>
+                            <p className="text-ink-secondary text-[0.85rem]" style={{ fontWeight: 500 }}>Importing transactions...</p>
+                            <p className="text-ink-muted text-[0.7rem]">Classifying and deduplicating {reconcileData.new_count} transactions</p>
                           </div>
                         </div>
                         <div className="w-full bg-white/[0.06] rounded-full h-1.5 overflow-hidden">
                           <div className="h-full bg-cyan-400/50 rounded-full animate-pulse" style={{ width: '60%' }} />
                         </div>
-                        <p className="text-white/20 text-[0.65rem] mt-2">This may take a moment. Other tabs remain usable.</p>
+                        <p className="text-ink-muted text-[0.65rem] mt-2">This may take a moment. Other tabs remain usable.</p>
                       </div>
                     ) : (
                       <GlassButton
@@ -696,7 +700,7 @@ export default function UploadPage() {
 
                     {activeAutomatic?.error && (
                       <div className="mt-3 p-3 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px]">
-                        <p className="text-rose-400/70 text-[0.8rem]">{activeAutomatic.error}</p>
+                        <p className="text-rose-200 text-[0.8rem]">{activeAutomatic.error}</p>
                       </div>
                     )}
                   </>
@@ -716,27 +720,27 @@ export default function UploadPage() {
                 <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-emerald-400/30 to-transparent" />
 
                 <div className="flex items-center gap-2 mb-4">
-                  <CheckCircle className="h-5 w-5 text-emerald-400/80" />
-                  <h2 className="text-emerald-400/80 text-[0.85rem]" style={{ fontWeight: 500 }}>Import Complete</h2>
+                  <CheckCircle className="h-5 w-5 text-emerald-200" />
+                  <h2 className="text-emerald-200 text-[0.85rem]" style={{ fontWeight: 500 }}>Import Complete</h2>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                   {[
-                    { label: 'Total Parsed', val: importResult.total_parsed, color: 'text-white/80' },
-                    { label: 'Matched (Skipped)', val: importResult.matched, color: 'text-emerald-400/80' },
-                    { label: 'New Imported', val: importResult.new_imported, color: 'text-cyan-400/80' },
-                    { label: 'Auto-Classified', val: importResult.classified, color: 'text-blue-400/80' },
+                    { label: 'Total Parsed', val: importResult.total_parsed, color: 'text-ink-primary' },
+                    { label: 'Matched (Skipped)', val: importResult.matched, color: 'text-emerald-200' },
+                    { label: 'New Imported', val: importResult.new_imported, color: 'text-cyan-200' },
+                    { label: 'Auto-Classified', val: importResult.classified, color: 'text-blue-200' },
                   ].map((s) => (
                     <div key={s.label} className="text-center p-2 bg-white/[0.03] rounded-[12px]">
                       <p className={`text-[1.3rem] tabular-nums ${s.color}`} style={{ fontWeight: 300 }}>{s.val}</p>
-                      <p className="text-white/30 text-[0.65rem]">{s.label}</p>
+                      <p className="text-ink-muted text-[0.65rem]">{s.label}</p>
                     </div>
                   ))}
                 </div>
 
                 {importResult.review_queue > 0 && (
                   <div className="mb-3 p-2.5 bg-amber-400/[0.05] rounded-[10px] border border-amber-400/[0.1]">
-                    <p className="text-amber-400/70 text-[0.75rem]">
+                    <p className="text-amber-200 text-[0.75rem]">
                       <AlertTriangle className="h-3 w-3 inline mr-1" />
                       {importResult.review_queue} transaction(s) need manual review
                     </p>
@@ -745,7 +749,7 @@ export default function UploadPage() {
 
                 {importResult.income_items?.length > 0 && (
                   <div className="mb-3 p-3 bg-emerald-400/[0.04] rounded-[12px] border border-emerald-400/[0.1]">
-                    <h3 className="text-emerald-400/70 text-[0.75rem] mb-2" style={{ fontWeight: 500 }}>
+                    <h3 className="text-emerald-200 text-[0.75rem] mb-2" style={{ fontWeight: 500 }}>
                       <DollarSign className="h-3 w-3 inline mr-1" />
                       Income Detected ({importResult.income_detected})
                     </h3>
@@ -753,8 +757,8 @@ export default function UploadPage() {
                       {importResult.income_items.map((item, i) => (
                         <div key={i} className="flex items-center justify-between text-[0.75rem] p-2 bg-white/[0.02] rounded-[8px]">
                           <div className="flex-1 min-w-0">
-                            <span className="text-white/50 block truncate">{item.description}</span>
-                            <span className="text-emerald-400/70 tabular-nums">{formatINR(item.amount)}</span>
+                            <span className="text-ink-muted block truncate">{item.description}</span>
+                            <span className="text-emerald-200 tabular-nums">{formatINR(item.amount)}</span>
                           </div>
                           <button
                             onClick={() => {
@@ -766,7 +770,7 @@ export default function UploadPage() {
                                 queryClient.invalidateQueries({ queryKey: ['incomeSources'] });
                               });
                             }}
-                            className="ml-2 px-2.5 py-1 text-[0.65rem] bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-colors whitespace-nowrap"
+                            className="ml-2 px-2.5 py-1 text-[0.65rem] bg-emerald-500/20 text-emerald-200 rounded-lg hover:bg-emerald-500/30 transition-colors whitespace-nowrap"
                           >
                             <Plus size={10} className="inline mr-0.5" /> Add as Income
                           </button>
@@ -781,7 +785,7 @@ export default function UploadPage() {
                     <UploadIcon size={15} /> Continue With Next Statement
                   </GlassButton>
                 ) : (
-                  <label className="mt-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-[12px] border border-cyan-400/20 bg-cyan-400/[0.08] px-4 py-2.5 text-[0.75rem] text-cyan-200/75 hover:bg-cyan-400/[0.12]">
+                  <label className="mt-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-[12px] border border-cyan-400/20 bg-cyan-400/[0.08] px-4 py-2.5 text-[0.75rem] text-cyan-200 hover:bg-cyan-400/[0.12]">
                     <UploadIcon size={15} /> Add Another Statement
                     <input
                       type="file"
@@ -810,9 +814,9 @@ export default function UploadPage() {
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Needs Review</h2>
+              <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Needs Review</h2>
               {(uploadReviewData?.items?.length || 0) > 0 && (
-                <span className="px-1.5 py-0.5 text-[0.6rem] bg-amber-400/20 text-amber-300 rounded-full tabular-nums" style={{ fontWeight: 600 }}>
+                <span className="px-1.5 py-0.5 text-[0.6rem] bg-amber-400/20 text-amber-200 rounded-full tabular-nums" style={{ fontWeight: 600 }}>
                   {uploadReviewData.items.length}
                 </span>
               )}
@@ -820,10 +824,10 @@ export default function UploadPage() {
           </div>
 
           {!uploadReviewData?.items?.length ? (
-            <div className="flex flex-col items-center py-8 text-white/30">
-              <Check className="h-8 w-8 mb-2 text-emerald-400/60" />
+            <div className="flex flex-col items-center py-8 text-ink-muted">
+              <Check className="h-8 w-8 mb-2 text-emerald-200" />
               <p className="text-[0.85rem]" style={{ fontWeight: 400 }}>All classified!</p>
-              <p className="text-[0.75rem] text-white/20">No uploaded transactions need review.</p>
+              <p className="text-[0.75rem] text-ink-muted">No uploaded transactions need review.</p>
             </div>
           ) : (
             <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
@@ -842,20 +846,20 @@ export default function UploadPage() {
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className="w-7 h-7 rounded-[10px] bg-amber-400/[0.1] border border-amber-400/[0.12] flex items-center justify-center flex-shrink-0">
-                          <AlertCircle className="h-3.5 w-3.5 text-amber-400/70" />
+                          <AlertCircle className="h-3.5 w-3.5 text-amber-200" />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-white/70 text-[0.8rem] truncate" style={{ fontWeight: 400 }}>{item.merchant_normalized || item.merchant_raw}</p>
-                          <p className="text-white/25 text-[0.65rem]">
+                          <p className="text-ink-secondary text-[0.8rem] truncate" style={{ fontWeight: 400 }}>{item.merchant_normalized || item.merchant_raw}</p>
+                          <p className="text-ink-muted text-[0.65rem]">
                             {format(new Date(item.date), 'dd MMM yyyy')}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className={`text-[0.8rem] tabular-nums ${item.type === 'credit' ? 'text-emerald-400/80' : 'text-white/60'}`} style={{ fontWeight: 500 }}>
+                        <span className={`text-[0.8rem] tabular-nums ${item.type === 'credit' ? 'text-emerald-200' : 'text-ink-secondary'}`} style={{ fontWeight: 500 }}>
                           {item.type === 'credit' ? '+' : '-'}{formatINR(item.amount)}
                         </span>
-                        <ChevronDown className={`h-3 w-3 text-white/25 transition-transform ${expandedReviewId === item.id ? 'rotate-180' : ''}`} />
+                        <ChevronDown className={`h-3 w-3 text-ink-muted transition-transform ${expandedReviewId === item.id ? 'rotate-180' : ''}`} />
                       </div>
                     </div>
 
@@ -869,7 +873,7 @@ export default function UploadPage() {
                           className="border-t border-white/[0.06]"
                         >
                           <div className="p-3 bg-white/[0.02]">
-                            <p className="text-white/25 text-[0.65rem] mb-2">Select a category:</p>
+                            <p className="text-ink-muted text-[0.65rem] mb-2">Select a category:</p>
                             <div className="grid grid-cols-2 gap-1.5 mb-3">
                               {categories && Object.keys(categories).map((cat) => (
                                 <button
@@ -880,8 +884,8 @@ export default function UploadPage() {
                                   }}
                                   className={`px-2 py-1.5 text-[0.65rem] rounded-[8px] transition-all text-left ${
                                     reviewCategory[item.id] === cat
-                                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/30'
-                                      : 'bg-white/[0.04] text-white/50 border border-white/[0.06] hover:bg-white/[0.08]'
+                                      ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-400/30'
+                                      : 'bg-white/[0.04] text-ink-muted border border-white/[0.06] hover:bg-white/[0.08]'
                                   }`}
                                   style={{ fontWeight: 500 }}
                                 >
@@ -892,12 +896,12 @@ export default function UploadPage() {
 
                             {reviewCategory[item.id] && categories[reviewCategory[item.id]] && (
                               <div className="mb-3">
-                                <p className="text-white/25 text-[0.65rem] mb-1.5">Subcategory (optional):</p>
+                                <p className="text-ink-muted text-[0.65rem] mb-1.5">Subcategory (optional):</p>
                                 <select
                                   aria-label={`Subcategory for ${item.merchant_normalized || item.merchant_raw}`}
                                   value={reviewSubcategory[item.id] || ''}
                                   onChange={(e) => setReviewSubcategory(prev => ({ ...prev, [item.id]: e.target.value }))}
-                                  className="w-full bg-white/[0.06] border border-white/[0.12] rounded-[8px] px-2 py-1.5 text-[0.7rem] text-white/70 focus:outline-none focus:border-cyan-400/30"
+                                  className="w-full bg-white/[0.06] border border-white/[0.12] rounded-[8px] px-2 py-1.5 text-[0.7rem] text-ink-secondary focus:outline-none focus:border-cyan-400/30"
                                 >
                                   <option value="" className="bg-[#1a2a4a]">No subcategory</option>
                                   {categories[reviewCategory[item.id]].map((sub) => (

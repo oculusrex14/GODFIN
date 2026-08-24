@@ -275,6 +275,33 @@ def test_hosted_provider_receives_only_redacted_prompt():
     assert "Rs <10,000-50,000>" in provider.prompt
 
 
+def test_hosted_redaction_timeout_never_reaches_provider(monkeypatch):
+    class HostedProvider(MockLLMProvider):
+        is_local = False
+        hosted_data_consent = True
+
+        def __init__(self):
+            super().__init__("must not be returned")
+            self.calls = 0
+
+        def call(self, prompt, temperature=0.1):
+            self.calls += 1
+            return super().call(prompt, temperature)
+
+    timestamps = iter((0.0, 1.0))
+    monkeypatch.setattr(
+        "app.core.llm_privacy.monotonic",
+        lambda: next(timestamps, 1.0),
+    )
+    provider = HostedProvider()
+    set_llm_provider(provider)
+    try:
+        assert call_llm("Income Rs 12,345", purpose="report") is None
+        assert provider.calls == 0
+    finally:
+        set_llm_provider(StubLLMProvider())
+
+
 def test_classify_with_stub_provider():
     set_llm_provider(StubLLMProvider())
     result = classify_with_llm('SOMETHING', 100.0, 'upi')

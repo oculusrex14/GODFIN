@@ -49,9 +49,9 @@ export function ToastProvider({ children }) {
 
 function Toast({ toast, onClose }) {
   const icons = {
-    success: <CheckCircle className="h-5 w-5 text-emerald-400" />,
-    error: <AlertCircle className="h-5 w-5 text-rose-400" />,
-    info: <Info className="h-5 w-5 text-blue-400" />,
+    success: <CheckCircle className="h-5 w-5 text-emerald-200" />,
+    error: <AlertCircle className="h-5 w-5 text-rose-200" />,
+    info: <Info className="h-5 w-5 text-blue-200" />,
   };
 
   const bgColors = {
@@ -74,7 +74,7 @@ function Toast({ toast, onClose }) {
       <p className="text-sm text-white max-w-xs">{toast.message}</p>
       <button
         onClick={onClose}
-        className="text-slate-400 hover:text-white transition-colors"
+        className="text-ink-muted hover:text-white transition-colors"
         aria-label="Dismiss notification"
       >
         <X className="h-4 w-4" />

@@ -39,6 +39,7 @@ def test_gmail_background_routes_enqueue_one_durable_single_flight_job(
         "/api/v1/ingest/gmail/range/start",
         json={"start_date": "2026-01-01", "end_date": "2026-01-31"},
     )
+    incremental = auth_client.post("/api/v1/ingest/gmail/sync-now/start")
 
     assert initial.status_code == 200
     assert initial.json()["started"] is True
@@ -46,6 +47,11 @@ def test_gmail_background_routes_enqueue_one_durable_single_flight_job(
     assert ranged.status_code == 200
     assert ranged.json()["started"] is True
     assert ranged.json()["job_id"] == "job-2"
+    assert incremental.status_code == 200
+    assert incremental.json()["started"] is True
+    assert incremental.json()["job_id"] == "job-3"
+    assert incremental.json()["requested_start"]
+    assert incremental.json()["requested_end"]
     assert calls == [
         (
             "gmail_initial_sync",
@@ -65,6 +71,14 @@ def test_gmail_background_routes_enqueue_one_durable_single_flight_job(
                 "active_key": "gmail-ingestion",
                 "max_attempts": 3,
                 "public_message": "Preparing the selected Gmail date range…",
+            },
+        ),
+        (
+            "gmail_scheduled",
+            {
+                "active_key": "gmail-ingestion",
+                "max_attempts": 3,
+                "public_message": "Checking Gmail from the last safe sync point…",
             },
         ),
     ]

@@ -375,6 +375,18 @@ export function fetchIngestionStatus() {
   return apiFetch('/ingest/status');
 }
 
+export function fetchGmailCoverage() {
+  return apiFetch('/ingest/gmail/coverage');
+}
+
+export function startIncrementalGmailSync() {
+  return apiFetch('/ingest/gmail/sync-now/start', { method: 'POST' });
+}
+
+export function fetchIncrementalGmailSyncStatus() {
+  return apiFetch('/ingest/gmail/sync-now/status');
+}
+
 export function fetchSchedulerStatus() {
   return apiFetch('/ingest/scheduler/status');
 }
@@ -419,10 +431,11 @@ export function fetchIngestionProgress() {
 }
 
 // Statement Upload - GLM multi-step flow
-export async function previewStatement(file, password = null) {
+export async function previewStatement(file, password = null, accountId = null) {
   const formData = new FormData();
   formData.append('file', file);
   if (password) formData.append('password', password);
+  if (accountId) formData.append('account_id', accountId);
 
   return apiFetch('/ingest/upload/preview', {
     method: 'POST',
@@ -539,6 +552,27 @@ export function fetchIncomeStats(month) {
 
 export function fetchIncomeCoverage() {
   return apiFetch('/income/coverage');
+}
+
+export function recordActualIncome(data) {
+  return apiFetch('/income/actual', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function previewActualIncomePeriod(data) {
+  return apiFetch('/income/actual/period/preview', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function confirmActualIncomePeriod(data) {
+  return apiFetch('/income/actual/period/confirm', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 export function scanIncomeMatches(sourceId) {
@@ -824,6 +858,10 @@ export function resetData(pin, createBackup = true) {
 // License
 export function fetchLicenseStatus() {
   return apiFetch('/license');
+}
+
+export function fetchLicenseNavigation() {
+  return apiFetch('/license/navigation');
 }
 
 export function activateLicense(licenseKey) {

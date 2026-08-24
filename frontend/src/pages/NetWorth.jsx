@@ -181,11 +181,11 @@ export default function NetWorth() {
   if (license && !entitled) {
     return (
       <div className="space-y-5">
-        <h1 className="text-white/90 text-[1.6rem] font-light">Net Worth</h1>
+        <h1 className="text-ink-primary text-[1.6rem] font-light">Net Worth</h1>
         <div className="rounded-[20px] border border-violet-400/15 bg-violet-400/[0.05] p-8 text-center">
-          <Scale className="mx-auto text-violet-200/45" size={34} />
-          <h2 className="mt-3 text-white/75">Available with GODFIN Max</h2>
-          <p className="mx-auto mt-2 max-w-lg text-sm text-white/35">
+          <Scale className="mx-auto text-violet-200" size={34} />
+          <h2 className="mt-3 text-ink-secondary">Available with GODFIN Max</h2>
+          <p className="mx-auto mt-2 max-w-lg text-sm text-ink-muted">
             Assets, liabilities, quote history, freshness, and provenance stay
             local. Live quotes use your own Twelve Data key.
           </p>
@@ -198,8 +198,8 @@ export default function NetWorth() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-white/90 text-[1.6rem] font-light">Net Worth</h1>
-          <p className="text-white/30 text-sm">Local assets, liabilities, freshness, and provenance</p>
+          <h1 className="text-ink-primary text-[1.6rem] font-light">Net Worth</h1>
+          <p className="text-ink-muted text-sm">Local assets, liabilities, freshness, and provenance</p>
         </div>
         <GlassButton
           icon={<Plus size={15} />}
@@ -214,14 +214,14 @@ export default function NetWorth() {
       </div>
 
       {recentDeletion && (
-        <div role="status" className="flex flex-wrap items-center gap-3 rounded-[14px] border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-50/65">
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-[14px] border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-50">
           <span className="flex-1">Removed {recentDeletion.item.name}. {recentDeletion.affected_records} local record{recentDeletion.affected_records === 1 ? '' : 's'} can be recovered.</span>
           <button
             ref={undoRef}
             type="button"
             onClick={() => restoreMutation.mutate(recentDeletion.id)}
             disabled={restoreMutation.isPending}
-            className="min-h-10 rounded-lg border border-amber-200/25 px-3 text-amber-50/80 hover:bg-amber-200/[0.08] disabled:opacity-40"
+            className="min-h-10 rounded-lg border border-amber-200/25 px-3 text-amber-50 hover:bg-amber-200/[0.08] disabled:opacity-40"
           >
             {restoreMutation.isPending ? 'Restoring…' : 'Undo'}
           </button>
@@ -230,14 +230,14 @@ export default function NetWorth() {
 
       <div className="grid sm:grid-cols-3 gap-3">
         {[
-          ['Assets', summary?.total_assets, WalletCards, 'text-emerald-200/70'],
-          ['Liabilities', summary?.total_liabilities, Landmark, 'text-rose-200/70'],
-          ['Net worth', summary?.net_worth, Scale, 'text-cyan-200/75'],
+          ['Assets', summary?.total_assets, WalletCards, 'text-emerald-200'],
+          ['Liabilities', summary?.total_liabilities, Landmark, 'text-rose-200'],
+          ['Net worth', summary?.net_worth, Scale, 'text-cyan-200'],
         ].map(([label, value, Icon, tone]) => (
           <div key={label} className="rounded-[18px] border border-white/[0.12] bg-white/[0.06] p-4">
             <Icon size={16} className={`${tone} mb-3`} />
-            <div className="text-white/30 text-[0.68rem] uppercase tracking-wider">{label}</div>
-            <div className="mt-1 text-white/85 text-xl font-light tabular-nums">
+            <div className="text-ink-muted text-[0.68rem] uppercase tracking-wider">{label}</div>
+            <div className="mt-1 text-ink-primary text-xl font-light tabular-nums">
               {money(value, summary?.base_currency)}
             </div>
           </div>
@@ -249,10 +249,10 @@ export default function NetWorth() {
           role="status"
           className="flex items-start gap-3 rounded-[16px] border border-amber-300/20 bg-amber-300/[0.07] p-4"
         >
-          <AlertTriangle size={17} className="mt-0.5 shrink-0 text-amber-200/70" />
+          <AlertTriangle size={17} className="mt-0.5 shrink-0 text-amber-200" />
           <div>
-            <div className="text-sm text-amber-100/75">Net-worth totals are temporarily hidden</div>
-            <p className="mt-1 text-xs leading-relaxed text-white/40">
+            <div className="text-sm text-amber-100">Net-worth totals are temporarily hidden</div>
+            <p className="mt-1 text-xs leading-relaxed text-ink-muted">
               {summary.unavailable_item_count} active item{summary.unavailable_item_count === 1 ? '' : 's'} cannot be valued safely. Review the item message or refresh its quote; GODFIN will not relabel an old value or assume currencies are equal.
             </p>
           </div>
@@ -261,8 +261,8 @@ export default function NetWorth() {
 
       <div className="rounded-[18px] border border-white/[0.1] bg-white/[0.04] p-4">
         <div className="flex items-center gap-2">
-          <KeyRound size={15} className="text-white/35" />
-          <h2 className="text-white/65 text-sm">Optional live quotes</h2>
+          <KeyRound size={15} className="text-ink-muted" />
+          <h2 className="text-ink-secondary text-sm">Optional live quotes</h2>
           <CalculationInfo
             title="Live valuation"
             meaning="Liquid holdings use the latest saved unit price and exchange rate."
@@ -273,7 +273,7 @@ export default function NetWorth() {
             caveat="Market data can be delayed or unavailable. Saved manual values remain usable."
           />
         </div>
-        <p className="mt-2 text-white/30 text-xs">
+        <p className="mt-2 text-ink-muted text-xs">
           {marketData?.configured
             ? `Twelve Data configured · base currency ${marketData.base_currency}`
             : 'Add your own Twelve Data key. Property, land, gems, and private assets always use sourced manual values.'}
@@ -294,14 +294,14 @@ export default function NetWorth() {
             value={apiKey}
             onChange={event => setApiKey(event.target.value)}
             placeholder={marketData?.configured ? 'Replace encrypted API key' : 'Twelve Data API key'}
-            className="min-w-0 flex-1 rounded-[12px] border border-white/[0.12] bg-white/[0.05] px-3 py-2 text-sm text-white/70 placeholder:text-white/20 focus:outline-none"
+            className="min-w-0 flex-1 rounded-[12px] border border-white/[0.12] bg-white/[0.05] px-3 py-2 text-sm text-ink-secondary placeholder:text-ink-muted focus:outline-none"
           />
           <label className="sr-only" htmlFor="net-worth-base-currency">Net-worth base currency</label>
           <select
             id="net-worth-base-currency"
             value={baseCurrency || marketData?.base_currency || 'INR'}
             onChange={event => setBaseCurrency(event.target.value)}
-            className="w-24 rounded-[12px] border border-white/[0.12] bg-[#102443] px-3 py-2 text-sm text-white/70 focus:outline-none"
+            className="w-24 rounded-[12px] border border-white/[0.12] bg-[#102443] px-3 py-2 text-sm text-ink-secondary focus:outline-none"
           >
             {(marketData?.supported_base_currencies || ['INR', 'USD', 'EUR', 'GBP']).map(currency => (
               <option key={currency} value={currency}>{currency}</option>
@@ -318,11 +318,11 @@ export default function NetWorth() {
 
       {['assets', 'liabilities'].map(group => (
         <section key={group}>
-          <h2 className="mb-3 text-white/35 text-[0.7rem] uppercase tracking-wider">
+          <h2 className="mb-3 text-ink-muted text-[0.7rem] uppercase tracking-wider">
             {group} ({grouped[group].length})
           </h2>
           {grouped[group].length === 0 ? (
-            <div className="rounded-[18px] border border-dashed border-white/[0.1] p-6 text-center text-white/25 text-sm">
+            <div className="rounded-[18px] border border-dashed border-white/[0.1] p-6 text-center text-ink-muted text-sm">
               No {group} added yet.
             </div>
           ) : (
@@ -333,32 +333,32 @@ export default function NetWorth() {
                   <article key={item.id} className="rounded-[18px] border border-white/[0.1] bg-white/[0.055] p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-white/75 truncate">{item.name}</div>
-                        <div className="mt-1 text-white/25 text-xs">
+                        <div className="text-ink-secondary truncate">{item.name}</div>
+                        <div className="mt-1 text-ink-muted text-xs">
                           {item.asset_class.replaceAll('_', ' ')} · {item.provenance.replaceAll('_', ' ')}
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className={item.available ? 'text-white/85 tabular-nums' : 'text-amber-100/70 text-sm'}>
+                        <div className={item.available ? 'text-ink-primary tabular-nums' : 'text-amber-100 text-sm'}>
                           {money(item.value_base, summary?.base_currency)}
                         </div>
                         {item.currency !== summary?.base_currency && item.native_value != null && (
-                          <div className="mt-0.5 text-white/25 text-[0.65rem]">
+                          <div className="mt-0.5 text-ink-muted text-[0.65rem]">
                             Native {money(item.native_value, item.currency)}
                           </div>
                         )}
-                        {item.symbol && <div className="text-cyan-200/40 text-xs">{item.symbol}</div>}
+                        {item.symbol && <div className="text-cyan-200 text-xs">{item.symbol}</div>}
                       </div>
                     </div>
                     <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
                       <div className={`h-full rounded-full ${fresh.tone}`} style={{ width: `${fresh.width}%` }} />
                     </div>
                     <div className="mt-2 flex items-center justify-between text-[0.65rem]">
-                      <span className={item.stale ? 'text-rose-200/55' : 'text-white/25'}>{fresh.label}</span>
-                      <span className="text-white/25 truncate max-w-[45%]">{item.source}</span>
+                      <span className={item.stale ? 'text-rose-200' : 'text-ink-muted'}>{fresh.label}</span>
+                      <span className="text-ink-muted truncate max-w-[45%]">{item.source}</span>
                     </div>
                     {!item.available && (
-                      <p className="mt-3 rounded-[10px] border border-amber-300/15 bg-amber-300/[0.05] px-3 py-2 text-[0.7rem] leading-relaxed text-amber-100/60">
+                      <p className="mt-3 rounded-[10px] border border-amber-300/15 bg-amber-300/[0.05] px-3 py-2 text-[0.7rem] leading-relaxed text-amber-100">
                         {item.unavailable_reason}
                       </p>
                     )}
@@ -367,7 +367,7 @@ export default function NetWorth() {
                         <button
                           onClick={() => quoteMutation.mutate(item.id)}
                           disabled={!marketData?.configured || quoteMutation.isPending}
-                          className="inline-flex items-center gap-1.5 text-cyan-200/55 disabled:opacity-30 text-xs"
+                          className="inline-flex items-center gap-1.5 text-cyan-200 disabled:opacity-30 text-xs"
                         >
                           <RefreshCw size={12} /> Refresh quote
                         </button>
@@ -392,14 +392,14 @@ export default function NetWorth() {
                           });
                           setOpen(true);
                         }}
-                        className="inline-flex items-center gap-1.5 text-white/35 hover:text-white/65 text-xs"
+                        className="inline-flex items-center gap-1.5 text-ink-muted hover:text-ink-secondary text-xs"
                       >
                         <Pencil size={12} /> Edit
                       </button>
                       <button
                         onClick={() => requestDelete(item)}
                         disabled={deleteMutation.isPending}
-                        className="ml-auto inline-flex items-center gap-1.5 text-rose-200/40 text-xs"
+                        className="ml-auto inline-flex items-center gap-1.5 text-rose-200 text-xs"
                       >
                         <Trash2 size={12} /> Remove
                       </button>
@@ -412,7 +412,7 @@ export default function NetWorth() {
         </section>
       ))}
 
-      <p className="text-white/22 text-xs leading-relaxed">
+      <p className="text-ink-muted text-xs leading-relaxed">
         {summary?.provenance} GODFIN does not treat market quotes or manual
         estimates as audited values.
       </p>
@@ -454,7 +454,7 @@ export default function NetWorth() {
               className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[22px] border border-white/[0.14] bg-[#102443]/95 p-5 shadow-2xl"
             >
               <div className="mb-5 flex items-center justify-between">
-                <h2 id="net-worth-item-title" className="text-white/85">{editingId ? 'Edit valuation' : 'Add asset or liability'}</h2>
+                <h2 id="net-worth-item-title" className="text-ink-primary">{editingId ? 'Edit valuation' : 'Add asset or liability'}</h2>
                 <button
                   type="button"
                   onClick={() => {
@@ -462,7 +462,7 @@ export default function NetWorth() {
                     setEditingId(null);
                     setForm(INITIAL_FORM);
                   }}
-                  className="text-white/35"
+                  className="text-ink-muted"
                   aria-label="Close asset or liability dialog"
                 >
                   <X size={18} />
@@ -471,17 +471,17 @@ export default function NetWorth() {
               <div className="grid sm:grid-cols-2 gap-3">
                 <GlassInput label="Name" value={form.name} required onChange={e => setForm({ ...form, name: e.target.value })} />
                 <div>
-                  <label htmlFor="net-worth-item-type" className="block text-white/40 text-[0.75rem] mb-1.5">Type</label>
+                  <label htmlFor="net-worth-item-type" className="block text-ink-muted text-[0.75rem] mb-1.5">Type</label>
                   <GlassSelect id="net-worth-item-type" value={form.item_type} onChange={value => setForm({ ...form, item_type: value })} options={[
                     { value: 'asset', label: 'Asset' }, { value: 'liability', label: 'Liability' },
                   ]} />
                 </div>
                 <div>
-                  <label htmlFor="net-worth-asset-class" className="block text-white/40 text-[0.75rem] mb-1.5">Class</label>
+                  <label htmlFor="net-worth-asset-class" className="block text-ink-muted text-[0.75rem] mb-1.5">Class</label>
                   <GlassSelect id="net-worth-asset-class" value={form.asset_class} onChange={value => setForm({ ...form, asset_class: value })} options={ASSET_CLASSES.map(value => ({ value, label: value.replaceAll('_', ' ') }))} />
                 </div>
                 <div>
-                  <label htmlFor="net-worth-valuation-mode" className="block text-white/40 text-[0.75rem] mb-1.5">Valuation</label>
+                  <label htmlFor="net-worth-valuation-mode" className="block text-ink-muted text-[0.75rem] mb-1.5">Valuation</label>
                   <GlassSelect id="net-worth-valuation-mode" value={form.valuation_mode} onChange={value => setForm({ ...form, valuation_mode: value })} options={[
                     { value: 'manual', label: 'Manual sourced value' }, { value: 'market', label: 'Live liquid-asset quote' },
                   ]} />

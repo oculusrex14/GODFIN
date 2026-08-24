@@ -203,6 +203,13 @@ assert.match(webhook, /payment_amount_mismatch/);
 assert.match(webhook, /account_email_mismatch/);
 assert.match(webhook, /billing_country_unverified/);
 assert.match(webhook, /provisioned\?\.license_status === "active"/);
+assert.match(webhook, /readCappedWebhookBody/);
+assert.match(webhook, /checkRateLimit/);
+assert.match(webhook, /limit: 600/);
+assert.match(webhook, /email_claimed_at/);
+assert.match(webhook, /maybeSingle/);
+assert.match(webhook, /errorType/);
+assert.doesNotMatch(webhook, /error instanceof Error \? error\.message/);
 
 const cashfree = await text("src/lib/cashfree.ts");
 assert.match(cashfree, /CASHFREE_API_VERSION = "2025-01-01"/);

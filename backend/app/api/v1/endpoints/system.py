@@ -60,7 +60,11 @@ class SupportDiagnostics(BaseModel):
 
 
 class LocalModelAction(BaseModel):
-    model: str = Field(min_length=3, max_length=129)
+    model: str = Field(
+        min_length=3,
+        max_length=129,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,128}$",
+    )
     confirmed: bool = False
     current_pin: str | None = Field(
         default=None,

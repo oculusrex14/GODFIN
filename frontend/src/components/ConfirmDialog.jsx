@@ -32,21 +32,21 @@ export function ConfirmDialog({ isOpen, title, message, confirmLabel = 'Confirm'
           >
             <div className="p-6">
               <div className="flex items-start justify-between mb-4">
-                <h2 id="confirm-title" className="text-white/90 text-[1.1rem]" style={{ fontWeight: 500 }}>{title}</h2>
+                <h2 id="confirm-title" className="text-ink-primary text-[1.1rem]" style={{ fontWeight: 500 }}>{title}</h2>
                 <button
                   onClick={onCancel}
-                  className="text-white/30 hover:text-white/60 transition-colors p-1"
+                  className="text-ink-muted hover:text-ink-secondary transition-colors p-1"
                   aria-label="Close dialog"
                 >
                   <X size={18} />
                 </button>
               </div>
-              <p id="confirm-description" className="text-white/50 text-[0.9rem] mb-6">{message}</p>
+              <p id="confirm-description" className="text-ink-muted text-[0.9rem] mb-6">{message}</p>
               <div className="flex gap-3 justify-end">
                 <button
                   ref={cancelRef}
                   onClick={onCancel}
-                  className="px-4 py-2 text-white/60 hover:text-white text-[0.85rem] transition-colors"
+                  className="px-4 py-2 text-ink-secondary hover:text-white text-[0.85rem] transition-colors"
                 >
                   {cancelLabel}
                 </button>
@@ -54,8 +54,8 @@ export function ConfirmDialog({ isOpen, title, message, confirmLabel = 'Confirm'
                   onClick={onConfirm}
                   className={`px-4 py-2 rounded-[10px] text-white text-[0.85rem] transition-colors ${
                     danger
-                      ? 'bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:bg-rose-500/30'
-                      : 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/30'
+                      ? 'bg-rose-500/20 border border-rose-500/30 text-rose-200 hover:bg-rose-500/30'
+                      : 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-200 hover:bg-emerald-500/30'
                   }`}
                 >
                   {confirmLabel}

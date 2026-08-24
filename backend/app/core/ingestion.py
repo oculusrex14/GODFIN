@@ -26,6 +26,7 @@ from app.core.email_parser import (
 )
 from app.core.gmail_service import GmailFetchResult, GmailSyncError, fetch_messages
 from app.core.merchant_memory_service import upsert_merchant_memory
+from app.core.manual_income import link_manual_income_provenance
 from app.core.transaction_semantics import (
     TransactionSemantic,
     infer_semantic_type,
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 class IngestionResult:
     def __init__(self):
         self.processed = 0
+        self.eligible_financial_messages = 0
         self.created = 0
         self.skipped_blacklist = 0
         self.skipped_no_match = 0
@@ -54,10 +56,21 @@ class IngestionResult:
         self.source_status = "complete"
         self.retryable = False
         self.full_resync = False
+        self.parse_review_count = 0
+        self.skip_reasons: dict[str, int] = {}
+        self.requested_start: str | None = None
+        self.requested_end: str | None = None
+        self.coverage_advanced = False
+        self.last_successful_coverage_end: str | None = None
+        self.cursor_advanced = False
+
+    def skip(self, reason: str) -> None:
+        self.skip_reasons[reason] = self.skip_reasons.get(reason, 0) + 1
 
     def to_dict(self):
         return {
             'processed': self.processed,
+            'eligible_financial_messages': self.eligible_financial_messages,
             'created': self.created,
             'skipped_blacklist': self.skipped_blacklist,
             'skipped_no_match': self.skipped_no_match,
@@ -68,7 +81,165 @@ class IngestionResult:
             'source_status': self.source_status,
             'retryable': self.retryable,
             'full_resync': self.full_resync,
+            'parse_review_count': self.parse_review_count,
+            'skip_reasons': dict(sorted(self.skip_reasons.items())),
+            'requested_start': self.requested_start,
+            'requested_end': self.requested_end,
+            'coverage_advanced': self.coverage_advanced,
+            'last_successful_coverage_end': self.last_successful_coverage_end,
+            'cursor_advanced': self.cursor_advanced,
         }
+
+
+GMAIL_COVERAGE_RANGES_KEY = "gmail_coverage_ranges"
+GMAIL_LAST_RESULT_KEY = "gmail_last_ingestion_result"
+GMAIL_LAST_REQUEST_START_KEY = "gmail_last_requested_start"
+GMAIL_LAST_REQUEST_END_KEY = "gmail_last_requested_end"
+
+
+def _date_setting(db: Session, key: str) -> date | None:
+    setting = db.query(AppSetting).filter_by(key=key).first()
+    if not setting or not setting.value:
+        return None
+    try:
+        return date.fromisoformat(setting.value[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _coverage_ranges(db: Session) -> list[tuple[date, date]]:
+    setting = db.query(AppSetting).filter_by(key=GMAIL_COVERAGE_RANGES_KEY).first()
+    try:
+        raw = json.loads(setting.value if setting and setting.value else "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    parsed: list[tuple[date, date]] = []
+    if not isinstance(raw, list):
+        return parsed
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            start = date.fromisoformat(str(item.get("start")))
+            end = date.fromisoformat(str(item.get("end")))
+        except ValueError:
+            continue
+        if start <= end:
+            parsed.append((start, end))
+    return _merge_coverage_ranges(parsed)
+
+
+def _merge_coverage_ranges(
+    ranges: list[tuple[date, date]],
+) -> list[tuple[date, date]]:
+    merged: list[tuple[date, date]] = []
+    for start, end in sorted(ranges):
+        if not merged or start > merged[-1][1] + timedelta(days=1):
+            merged.append((start, end))
+            continue
+        prior_start, prior_end = merged[-1]
+        merged[-1] = (prior_start, max(prior_end, end))
+    return merged
+
+
+def _record_successful_coverage(
+    db: Session,
+    start: date,
+    end: date,
+) -> list[tuple[date, date]]:
+    if start > end:
+        return _coverage_ranges(db)
+    merged = _merge_coverage_ranges([*_coverage_ranges(db), (start, end)])
+    _update_setting(
+        db,
+        GMAIL_COVERAGE_RANGES_KEY,
+        json.dumps(
+            [
+                {"start": range_start.isoformat(), "end": range_end.isoformat()}
+                for range_start, range_end in merged
+            ],
+            separators=(",", ":"),
+        ),
+    )
+    return merged
+
+
+def gmail_coverage_summary(
+    db: Session,
+    *,
+    through: date | None = None,
+) -> dict[str, object]:
+    window_end = through or date.today()
+    window_start = date(window_end.year, 1, 1)
+    ranges = _coverage_ranges(db)
+    clipped = [
+        (max(start, window_start), min(end, window_end))
+        for start, end in ranges
+        if end >= window_start and start <= window_end
+    ]
+    clipped = _merge_coverage_ranges(clipped)
+    missing: list[tuple[date, date]] = []
+    cursor = window_start
+    for start, end in clipped:
+        if cursor < start:
+            missing.append((cursor, start - timedelta(days=1)))
+        cursor = max(cursor, end + timedelta(days=1))
+    if cursor <= window_end:
+        missing.append((cursor, window_end))
+
+    last_end = max((end for _, end in ranges), default=None)
+    fallback = _date_setting(db, "last_ingestion_run")
+    next_start = last_end or fallback or window_start
+    return {
+        "coverage_ranges": [
+            {"start": start.isoformat(), "end": end.isoformat()}
+            for start, end in clipped
+        ],
+        "missing_ranges": [
+            {"start": start.isoformat(), "end": end.isoformat()}
+            for start, end in missing
+        ],
+        "coverage_window_start": window_start.isoformat(),
+        "coverage_window_end": window_end.isoformat(),
+        "last_successful_coverage_start": (
+            min((start for start, _ in ranges), default=None).isoformat()
+            if ranges
+            else None
+        ),
+        "last_successful_coverage_end": last_end.isoformat() if last_end else None,
+        "next_sync_start": next_start.isoformat(),
+        "next_sync_end": window_end.isoformat(),
+    }
+
+
+def _prepare_result_range(
+    result: IngestionResult,
+    start: date,
+    end: date,
+) -> None:
+    result.requested_start = start.isoformat()
+    result.requested_end = end.isoformat()
+
+
+def _finalize_successful_range(
+    db: Session,
+    result: IngestionResult,
+    start: date,
+    end: date,
+) -> None:
+    if result.source_status not in {"complete", "empty"}:
+        return
+    ranges = _record_successful_coverage(db, start, end)
+    result.coverage_advanced = True
+    result.last_successful_coverage_end = max(item[1] for item in ranges).isoformat()
+
+
+def _store_last_result(db: Session, result: IngestionResult) -> None:
+    _update_setting(db, GMAIL_LAST_RESULT_KEY, json.dumps(result.to_dict()))
+    if result.requested_start:
+        _update_setting(db, GMAIL_LAST_REQUEST_START_KEY, result.requested_start)
+    if result.requested_end:
+        _update_setting(db, GMAIL_LAST_REQUEST_END_KEY, result.requested_end)
 
 
 def _record_fetch_status(
@@ -103,10 +274,11 @@ def _process_message_with_savepoint(
             _process_message(db, message, result)
     except FinalizedPeriodError:
         result.skipped_finalized_period += 1
+        result.skip("finalized_period")
         result.source_status = "partial"
         result.retryable = True
         result.error_details.append(
-            f"Message {message.get('id', '?')}: finalized month is read-only"
+            "A transaction was held because its finalized month is read-only."
         )
         logger.info(
             "A Gmail transaction was held because its accounting period is finalized"
@@ -114,8 +286,9 @@ def _process_message_with_savepoint(
     except IntegrityError as exc:
         if not _is_email_identity_conflict(exc):
             result.errors += 1
+            result.skip("database_validation")
             result.error_details.append(
-                f"Message {message.get('id', '?')}: database validation failed"
+                "A transaction failed local validation."
             )
             logger.warning(
                 "A Gmail message failed database validation; "
@@ -123,13 +296,15 @@ def _process_message_with_savepoint(
             )
             return
         result.skipped_duplicate += 1
+        result.skip("duplicate")
         logger.info(
             "A concurrently imported Gmail message was safely deduplicated"
         )
     except Exception as exc:
         result.errors += 1
+        result.skip("import_error")
         result.error_details.append(
-            f"Message {message.get('id', '?')}: import could not be completed"
+            "A transaction could not be imported."
         )
         logger.warning(
             "A Gmail message could not be imported; the rest of the batch will continue",
@@ -176,11 +351,15 @@ def _run_post_ingestion_detection(
 
 def run_ingestion(db: Session, mock_messages: Optional[list] = None) -> IngestionResult:
     result = IngestionResult()
-
+    requested_end = date.today()
+    requested_start = date(requested_end.year, 1, 1)
     if mock_messages is not None:
         messages = mock_messages
         new_history_id = None
     else:
+        coverage = gmail_coverage_summary(db, through=requested_end)
+        requested_start = date.fromisoformat(str(coverage["next_sync_start"]))
+        _prepare_result_range(result, requested_start, requested_end)
         history_setting = db.query(AppSetting).filter_by(key='last_gmail_history_id').first()
         history_id = history_setting.value if history_setting and history_setting.value else None
 
@@ -206,6 +385,8 @@ def run_ingestion(db: Session, mock_messages: Optional[list] = None) -> Ingestio
                 before_date=(date.today() + timedelta(days=1)).isoformat(),
                 max_results=1000,
             )
+            requested_start = fallback_start
+            _prepare_result_range(result, requested_start, requested_end)
             result.full_resync = True
         messages, new_history_id = fetched
         _record_fetch_status(result, fetched)
@@ -216,10 +397,20 @@ def run_ingestion(db: Session, mock_messages: Optional[list] = None) -> Ingestio
     completed = result.source_status in {"complete", "empty"}
     if new_history_id and mock_messages is None and completed:
         _update_setting(db, 'last_gmail_history_id', new_history_id)
+        result.cursor_advanced = True
 
     _run_post_ingestion_detection(db, result)
     if completed:
+        if mock_messages is None:
+            _finalize_successful_range(
+                db,
+                result,
+                requested_start,
+                requested_end,
+            )
         _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
+    if mock_messages is None:
+        _store_last_result(db, result)
     db.commit()
 
     return result
@@ -254,6 +445,9 @@ def run_scheduled_ingestion_background(
             if last_run_setting and last_run_setting.value
             else None
         )
+        coverage = gmail_coverage_summary(cursor_db)
+        requested_start = date.fromisoformat(str(coverage["next_sync_start"]))
+        requested_end = date.today()
         cursor_db.rollback()
     finally:
         cursor_db.close()
@@ -263,6 +457,7 @@ def run_scheduled_ingestion_background(
         job_context.check_cancelled()
 
     result = IngestionResult()
+    _prepare_result_range(result, requested_start, requested_end)
     try:
         fetched = fetch_messages(history_id=history_id)
     except GmailSyncError as exc:
@@ -282,6 +477,8 @@ def run_scheduled_ingestion_background(
             before_date=(date.today() + timedelta(days=1)).isoformat(),
             max_results=1000,
         )
+        requested_start = fallback_start
+        _prepare_result_range(result, requested_start, requested_end)
         result.full_resync = True
 
     messages, new_history_id = fetched
@@ -324,12 +521,20 @@ def run_scheduled_ingestion_background(
         completed = result.source_status in {"complete", "empty"}
         if new_history_id and completed:
             _update_setting(import_db, "last_gmail_history_id", new_history_id)
+            result.cursor_advanced = True
         if completed:
+            _finalize_successful_range(
+                import_db,
+                result,
+                requested_start,
+                requested_end,
+            )
             _update_setting(
                 import_db,
                 "last_ingestion_run",
                 datetime.now(timezone.utc).isoformat(),
             )
+        _store_last_result(import_db, result)
         import_db.commit()
         if job_context is not None:
             job_context.progress(
@@ -359,17 +564,22 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
     )
     if not parser_profile:
         result.skipped_no_match += 1
+        result.skip("unsupported_sender")
         return
     # Check subject blacklist
     if is_blacklisted_subject(subject):
         result.skipped_blacklist += 1
+        result.skip("non_transaction_message")
         return
+
+    result.eligible_financial_messages += 1
 
     # Check email_message_id dedup
     if message_id:
         existing = db.query(Transaction).filter_by(email_message_id=message_id).first()
         if existing:
             result.skipped_duplicate += 1
+            result.skip("duplicate")
             return
 
     # Parse the email body
@@ -381,6 +591,8 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
             type(exc).__name__,
         )
         result.skipped_no_match += 1
+        result.parse_review_count += 1
+        result.skip("parse_review")
         return
 
     if not parsed:
@@ -393,6 +605,8 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
                 parser_profile,
             )
         result.skipped_no_match += 1
+        result.parse_review_count += 1
+        result.skip("parse_review")
         return
 
     # Sender addresses are only hints. Explicit message content and its last
@@ -410,6 +624,8 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
 
     if not account_id:
         result.skipped_no_match += 1
+        result.parse_review_count += 1
+        result.skip("account_mapping_required")
         return
 
     # Compute checksums
@@ -423,13 +639,59 @@ def _process_message(db: Session, msg: dict, result: IngestionResult) -> None:
     existing = db.query(Transaction).filter_by(checksum_source=checksum_source).first()
     if existing:
         result.skipped_duplicate += 1
+        result.skip("duplicate")
         return
 
     # Check canonical checksum dedup
     existing = db.query(Transaction).filter_by(checksum_canonical=checksum_canonical).first()
     if existing:
         result.skipped_duplicate += 1
+        result.skip("duplicate")
         return
+
+    parsed_semantic = infer_semantic_type(
+        transaction_type=parsed.txn_type,
+        text_parts=(parsed.raw_text, parsed.merchant_raw, parsed.merchant_normalized),
+    )
+    if parsed_semantic == TransactionSemantic.INCOME.value:
+        manual_matches = (
+            db.query(Transaction)
+            .filter(
+                Transaction.source == "manual_income",
+                Transaction.account_id == account_id,
+                Transaction.date == parsed.txn_date,
+                Transaction.amount == parsed.amount,
+                Transaction.type == "credit",
+                Transaction.semantic_type == TransactionSemantic.INCOME.value,
+                Transaction.status != "deleted",
+            )
+            .all()
+        )
+        if len(manual_matches) == 1:
+            assert_period_writable(db, parsed.txn_date)
+            manual_match = manual_matches[0]
+            link_manual_income_provenance(
+                db,
+                manual_match,
+                evidence_kind="gmail",
+                evidence_id=checksum_source,
+            )
+            manual_match.email_message_id = message_id or None
+            manual_match.checksum_canonical = checksum_canonical
+            if not manual_match.reference_number:
+                manual_match.reference_number = parsed.upi_ref_number
+            result.skipped_duplicate += 1
+            result.skip("reconciled_manual_income")
+            return
+        if len(manual_matches) > 1:
+            result.skipped_duplicate += 1
+            result.parse_review_count += 1
+            result.skip("ambiguous_income_match")
+            result.source_status = "partial"
+            result.error_details.append(
+                "A Gmail income credit matched more than one manual entry and needs review"
+            )
+            return
 
     assert_period_writable(db, parsed.txn_date)
 
@@ -546,7 +808,12 @@ def run_initial_sync(db: Session) -> IngestionResult:
     before_date = (today + timedelta(days=1)).strftime('%Y-%m-%d')
 
     # Run ingestion with date range
-    result = run_ingestion_with_dates(db, after_date=after_date, before_date=before_date)
+    result = run_ingestion_with_dates(
+        db,
+        after_date=after_date,
+        before_date=before_date,
+        is_manual=False,
+    )
 
     # Store the date range
     date_range = f"{after_date} to {today.isoformat()}"
@@ -606,6 +873,7 @@ def run_initial_sync_background(
             )
 
         result = IngestionResult()
+        _prepare_result_range(result, start_of_year, today)
         _record_fetch_status(result, fetched)
         batch_size = 25
 
@@ -640,9 +908,12 @@ def run_initial_sync_background(
         completed = result.source_status in {"complete", "empty"}
         _update_setting(db, 'initial_sync_completed', 'true' if completed else 'false')
         if completed:
+            _finalize_successful_range(db, result, start_of_year, today)
             _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
             if new_history_id:
                 _update_setting(db, 'last_gmail_history_id', new_history_id)
+                result.cursor_advanced = True
+        _store_last_result(db, result)
         _update_setting(db, 'sync_status', 'completed' if completed else 'partial')
         _update_setting(db, 'sync_result', json.dumps(result.to_dict()))
         _update_setting(db, 'sync_progress_processed', str(total))
@@ -743,6 +1014,8 @@ def run_ingestion_with_dates_background(
             )
 
         result = IngestionResult()
+        requested_end = end - timedelta(days=1)
+        _prepare_result_range(result, start, requested_end)
 
         for batch_idx, (batch_after, batch_before) in enumerate(batches):
             if job_context is not None:
@@ -791,10 +1064,12 @@ def run_ingestion_with_dates_background(
         # Finalize
         completed = result.source_status in {"complete", "empty"}
         if completed:
+            _finalize_successful_range(db, result, start, requested_end)
             _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
-        date_range = f"{start_date_str} to {end_date_str}"
+        date_range = f"{start_date_str} to {requested_end.isoformat()}"
         _update_setting(db, 'last_manual_ingestion_range', date_range)
         _update_setting(db, 'last_manual_ingestion_date', datetime.now(timezone.utc).isoformat())
+        _store_last_result(db, result)
         _update_setting(db, 'ingest_now_status', 'completed' if completed else 'partial')
         _update_setting(db, 'ingest_now_result', json.dumps(result.to_dict()))
         _update_setting(db, 'ingest_now_processed', str(total_batches))
@@ -857,6 +1132,10 @@ def run_ingestion_with_dates(
         is_manual: Whether this is a manual ingestion (for tracking)
     """
     result = IngestionResult()
+    start = date.fromisoformat(after_date)
+    exclusive_end = date.fromisoformat(before_date)
+    requested_end = exclusive_end - timedelta(days=1)
+    _prepare_result_range(result, start, requested_end)
 
     # Fetch messages with date range
     fetched = fetch_messages(
@@ -874,12 +1153,14 @@ def run_ingestion_with_dates(
 
     # Update settings
     if is_manual:
-        date_range = f"{after_date} to {before_date}"
+        date_range = f"{after_date} to {requested_end.isoformat()}"
         _update_setting(db, 'last_manual_ingestion_range', date_range)
         _update_setting(db, 'last_manual_ingestion_date', datetime.now(timezone.utc).isoformat())
 
     if result.source_status in {"complete", "empty"}:
+        _finalize_successful_range(db, result, start, requested_end)
         _update_setting(db, 'last_ingestion_run', datetime.now(timezone.utc).isoformat())
+    _store_last_result(db, result)
     db.commit()
 
     return result
@@ -899,5 +1180,13 @@ def get_ingestion_history(db: Session) -> dict:
     for key in settings_to_fetch:
         setting = db.query(AppSetting).filter_by(key=key).first()
         history[key] = setting.value if setting else None
+
+    history.update(gmail_coverage_summary(db))
+    last_result = db.query(AppSetting).filter_by(key=GMAIL_LAST_RESULT_KEY).first()
+    try:
+        parsed_result = json.loads(last_result.value) if last_result and last_result.value else None
+    except (TypeError, json.JSONDecodeError):
+        parsed_result = None
+    history["last_result"] = parsed_result if isinstance(parsed_result, dict) else None
 
     return history

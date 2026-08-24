@@ -52,11 +52,11 @@ const CHOICES = [
 function Detail({ icon: Icon, label, value }) {
   return (
     <div className="rounded-xl border border-white/[0.1] bg-white/[0.04] p-3">
-      <div className="flex items-center gap-2 text-white/30 text-[0.67rem] uppercase tracking-wide">
+      <div className="flex items-center gap-2 text-ink-muted text-[0.67rem] uppercase tracking-wide">
         <Icon size={13} />
         {label}
       </div>
-      <p className="mt-1.5 text-white/65 text-sm">{value}</p>
+      <p className="mt-1.5 text-ink-secondary text-sm">{value}</p>
     </div>
   );
 }
@@ -147,7 +147,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
 
   if (isLoading) {
     return (
-      <div className="min-h-24 grid place-items-center text-white/35 text-sm">
+      <div className="min-h-24 grid place-items-center text-ink-muted text-sm">
         <Loader2 className="animate-spin" size={18} aria-hidden="true" />
         <span className="sr-only">Checking this device</span>
       </div>
@@ -157,8 +157,8 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
   return (
     <div className={compact ? 'space-y-4' : 'space-y-5'}>
       <div>
-        <h3 className="text-white/80 text-lg">How should GODFIN handle AI?</h3>
-        <p className="mt-1 text-white/35 text-sm">
+        <h3 className="text-ink-primary text-lg">How should GODFIN handle AI?</h3>
+        <p className="mt-1 text-ink-muted text-sm">
           This is optional. Financial totals always come from verified local calculations, never an LLM.
         </p>
       </div>
@@ -181,11 +181,11 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
               }`}
             >
               <div className="flex items-start justify-between gap-2">
-                <Icon size={19} className="text-cyan-200/70" />
-                {selected && <Check size={16} className="text-emerald-300" />}
+                <Icon size={19} className="text-cyan-200" />
+                {selected && <Check size={16} className="text-emerald-200" />}
               </div>
-              <div className="mt-3 text-white/75 text-sm">{choice.title}</div>
-              <p className="mt-1 text-white/35 text-xs leading-relaxed">{choice.description}</p>
+              <div className="mt-3 text-ink-secondary text-sm">{choice.title}</div>
+              <p className="mt-1 text-ink-muted text-xs leading-relaxed">{choice.description}</p>
             </button>
           );
         })}
@@ -194,24 +194,24 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
       {activeChoice === 'local' && (
         <div className="rounded-2xl border border-white/[0.1] bg-white/[0.04] p-4 space-y-4">
           {!registryVerified && (
-            <div role="alert" className="rounded-xl border border-rose-300/25 bg-rose-400/[0.07] p-3 text-rose-100/75 text-sm">
+            <div role="alert" className="rounded-xl border border-rose-300/25 bg-rose-400/[0.07] p-3 text-rose-100 text-sm">
               GODFIN could not verify its signed model list. Downloads and benchmarks are disabled so an untrusted model cannot be installed.
               {profile?.registry?.error && (
-                <p className="mt-1 text-rose-100/45 text-xs">{profile.registry.error}</p>
+                <p className="mt-1 text-rose-100 text-xs">{profile.registry.error}</p>
               )}
             </div>
           )}
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-white/30 text-xs uppercase tracking-wide">Device check</p>
-              <h4 className="mt-1 text-white/75">
+              <p className="text-ink-muted text-xs uppercase tracking-wide">Device check</p>
+              <h4 className="mt-1 text-ink-secondary">
                 {model
                   ? recommendation.status === 'benchmarked'
                     ? `${recommendation.label} is verified for this device`
                     : `${recommendation.label} is the current candidate`
                   : 'No local model recommended'}
               </h4>
-              <p className="mt-1 max-w-2xl text-white/35 text-xs leading-relaxed">
+              <p className="mt-1 max-w-2xl text-ink-muted text-xs leading-relaxed">
                 {recommendation?.reason}
               </p>
             </div>
@@ -219,7 +219,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
               <button
                 type="button"
                 onClick={() => openExternalUrl(profile.installer_url)}
-                className="min-h-11 px-4 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.08] text-cyan-100/75 text-sm flex items-center gap-2"
+                className="min-h-11 px-4 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.08] text-cyan-100 text-sm flex items-center gap-2"
               >
                 Open official Ollama installer
                 <ExternalLink size={14} />
@@ -235,22 +235,22 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
           </div>
 
           {model && (
-            <div className="rounded-xl border border-white/[0.1] bg-black/10 p-3 text-xs text-white/40 space-y-1">
-              <p><span className="text-white/65">Signed-list download estimate:</span> about {recommendation.size_gb} GB</p>
+            <div className="rounded-xl border border-white/[0.1] bg-black/10 p-3 text-xs text-ink-muted space-y-1">
+              <p><span className="text-ink-secondary">Signed-list download estimate:</span> about {recommendation.size_gb} GB</p>
               {profile.installed_model_metadata?.installed_size_gb && (
-                <p><span className="text-white/65">Installed model size:</span> {profile.installed_model_metadata.installed_size_gb} GB reported by Ollama</p>
+                <p><span className="text-ink-secondary">Installed model size:</span> {profile.installed_model_metadata.installed_size_gb} GB reported by Ollama</p>
               )}
-              <p><span className="text-white/65">Estimated model memory:</span> {recommendation.memory_gb} GB</p>
-              <p><span className="text-white/65">Required current free memory:</span> {recommendation.required_available_ram_gb} GB</p>
-              <p><span className="text-white/65">Required free disk:</span> {recommendation.required_disk_free_gb} GB</p>
-              <p><span className="text-white/65">Expected speed:</span> {recommendation.expected_speed}</p>
-              <p><span className="text-white/65">Context policy:</span> {profile.context_policy}</p>
+              <p><span className="text-ink-secondary">Estimated model memory:</span> {recommendation.memory_gb} GB</p>
+              <p><span className="text-ink-secondary">Required current free memory:</span> {recommendation.required_available_ram_gb} GB</p>
+              <p><span className="text-ink-secondary">Required free disk:</span> {recommendation.required_disk_free_gb} GB</p>
+              <p><span className="text-ink-secondary">Expected speed:</span> {recommendation.expected_speed}</p>
+              <p><span className="text-ink-secondary">Context policy:</span> {profile.context_policy}</p>
               {profile.installed_model_metadata?.maximum_context_tokens && (
-                <p><span className="text-white/65">Installed model maximum:</span> {profile.installed_model_metadata.maximum_context_tokens.toLocaleString()} tokens</p>
+                <p><span className="text-ink-secondary">Installed model maximum:</span> {profile.installed_model_metadata.maximum_context_tokens.toLocaleString()} tokens</p>
               )}
-              <p><span className="text-white/65">Privacy:</span> {profile.privacy}</p>
-              <p><span className="text-white/65">Signed model list:</span> version {profile.registry.registry_version}</p>
-              <p className="font-mono break-all"><span className="font-sans text-white/65">Expected digest:</span> {recommendation.expected_digest}</p>
+              <p><span className="text-ink-secondary">Privacy:</span> {profile.privacy}</p>
+              <p><span className="text-ink-secondary">Signed model list:</span> version {profile.registry.registry_version}</p>
+              <p className="font-mono break-all"><span className="font-sans text-ink-secondary">Expected digest:</span> {recommendation.expected_digest}</p>
             </div>
           )}
 
@@ -263,14 +263,14 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
                     style={{ width: `${downloadStatus.progress || 0}%` }}
                   />
                 </div>
-                <span className="text-white/45 text-xs tabular-nums">{downloadStatus.progress || 0}%</span>
+                <span className="text-ink-muted text-xs tabular-nums">{downloadStatus.progress || 0}%</span>
               </div>
               <div className="mt-2 flex items-center justify-between gap-3">
-                <p className="text-white/35 text-xs">{downloadStatus.message}</p>
+                <p className="text-ink-muted text-xs">{downloadStatus.message}</p>
                 <button
                   type="button"
                   onClick={() => cancelMutation.mutate()}
-                  className="min-h-11 px-3 rounded-xl text-rose-200/70 hover:bg-rose-400/[0.08] text-xs flex items-center gap-2"
+                  className="min-h-11 px-3 rounded-xl text-rose-200 hover:bg-rose-400/[0.08] text-xs flex items-center gap-2"
                 >
                   <Square size={12} />
                   Cancel
@@ -280,15 +280,15 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
           )}
 
           {['failed', 'interrupted', 'cancelled'].includes(downloadStatus?.status) && (
-            <div className="rounded-xl border border-rose-300/20 bg-rose-400/[0.06] p-3 text-rose-100/70 text-xs">
+            <div className="rounded-xl border border-rose-300/20 bg-rose-400/[0.06] p-3 text-rose-100 text-xs">
               {downloadStatus.message}
             </div>
           )}
 
           {downloadStatus?.status === 'complete' && installedModelVerified && (
             <div className="rounded-xl border border-emerald-300/20 bg-emerald-400/[0.06] p-3">
-              <p className="text-emerald-100/75 text-sm">Model matches GODFIN’s signed model list.</p>
-              <div className="mt-2 space-y-1 text-white/35 text-[0.65rem]">
+              <p className="text-emerald-100 text-sm">Model matches GODFIN’s signed model list.</p>
+              <div className="mt-2 space-y-1 text-ink-muted text-[0.65rem]">
                 <p>Registry {downloadStatus.registry_version} · {downloadStatus.ollama_version || 'Ollama version unavailable'}</p>
                 <p className="font-mono break-all">{downloadStatus.digest}</p>
                 {downloadStatus.accepted_at && <p>Verified {new Date(downloadStatus.accepted_at).toLocaleString()}</p>}
@@ -301,7 +301,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
               <button
                 type="button"
                 onClick={() => openApproval('download')}
-                className="min-h-11 px-4 rounded-xl bg-cyan-400/10 border border-cyan-300/20 text-cyan-100/75 text-sm flex items-center gap-2"
+                className="min-h-11 px-4 rounded-xl bg-cyan-400/10 border border-cyan-300/20 text-cyan-100 text-sm flex items-center gap-2"
               >
                 <Download size={15} />
                 Review download
@@ -312,7 +312,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
                 type="button"
                 onClick={() => openApproval('benchmark')}
                 disabled={benchmarkMutation.isPending}
-                className="min-h-11 px-4 rounded-xl bg-white/[0.07] border border-white/[0.12] text-white/65 text-sm flex items-center gap-2"
+                className="min-h-11 px-4 rounded-xl bg-white/[0.07] border border-white/[0.12] text-ink-secondary text-sm flex items-center gap-2"
               >
                 {benchmarkMutation.isPending ? <Loader2 className="animate-spin" size={15} /> : <Zap size={15} />}
                 Run short finance benchmark
@@ -321,7 +321,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
           </div>
 
           {benchmark && (
-            <p className="text-white/45 text-xs" aria-live="polite">
+            <p className="text-ink-muted text-xs" aria-live="polite">
               Benchmark: {benchmark.tokens_per_second} tokens/second using a {(benchmark.context_tokens || profile.context_tokens).toLocaleString()}-token working context.
               {' '}{benchmark.activation_ready
                 ? 'This model is ready to activate.'
@@ -333,13 +333,13 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
       )}
 
       {activeChoice === 'provider' && (
-        <p className="rounded-xl border border-white/[0.1] bg-white/[0.04] p-3 text-white/45 text-sm">
+        <p className="rounded-xl border border-white/[0.1] bg-white/[0.04] p-3 text-ink-muted text-sm">
           Use the provider configuration below to add an API key. You can change this choice at any time.
         </p>
       )}
 
       {activeChoice === 'none' && (
-        <p className="rounded-xl border border-emerald-300/15 bg-emerald-400/[0.05] p-3 text-emerald-100/65 text-sm">
+        <p className="rounded-xl border border-emerald-300/15 bg-emerald-400/[0.05] p-3 text-emerald-100 text-sm">
           AI is off. GODFIN’s deterministic imports, learned rules, calculations, and reports remain available.
         </p>
       )}
@@ -352,22 +352,22 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
             onClose={closeApproval}
             className="w-full max-w-lg rounded-2xl border border-white/[0.14] bg-[#102342] p-5 shadow-2xl"
           >
-            <h3 id="local-model-approval-title" className="text-white/85 text-lg">
+            <h3 id="local-model-approval-title" className="text-ink-primary text-lg">
               {approvalOpen === 'download' ? 'Approve local model download' : 'Approve local model benchmark'}
             </h3>
-            <p id="local-model-approval-description" className="mt-2 text-white/40 text-sm leading-relaxed">
+            <p id="local-model-approval-description" className="mt-2 text-ink-muted text-sm leading-relaxed">
               {approvalOpen === 'download'
                 ? `Ollama will download ${recommendation.label} (${recommendation.size_gb} GB). This can use significant bandwidth and disk space.`
                 : 'GODFIN will send one short finance prompt to the selected model on this computer and measure its response speed.'}
             </p>
             {approvalOpen === 'download' && (
-              <div className="mt-3 rounded-xl border border-white/[0.1] bg-black/10 p-3 text-white/40 text-xs space-y-1">
+              <div className="mt-3 rounded-xl border border-white/[0.1] bg-black/10 p-3 text-ink-muted text-xs space-y-1">
                 <p>Signed model list: version {profile.registry.registry_version}</p>
                 <p className="font-mono break-all">Expected digest: {recommendation.expected_digest}</p>
                 <p>GODFIN will remove the model if the downloaded digest does not match.</p>
               </div>
             )}
-            <label className="mt-4 flex items-start gap-3 rounded-xl border border-white/[0.1] p-3 text-white/55 text-sm">
+            <label className="mt-4 flex items-start gap-3 rounded-xl border border-white/[0.1] p-3 text-ink-secondary text-sm">
               <input
                 type="checkbox"
                 checked={approved}
@@ -379,7 +379,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
                 : 'I approve this short local benchmark.'}
             </label>
             <div className="mt-4">
-              <p className="mb-2 text-center text-white/45 text-xs">Enter your current PIN to continue.</p>
+              <p className="mb-2 text-center text-ink-muted text-xs">Enter your current PIN to continue.</p>
               <div className="flex justify-center">
                 <PinInput
                   minLength={4}
@@ -394,13 +394,13 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
               </div>
             </div>
             {actionError && (
-              <p role="alert" className="mt-3 text-center text-rose-200/75 text-xs">{actionError}</p>
+              <p role="alert" className="mt-3 text-center text-rose-200 text-xs">{actionError}</p>
             )}
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={closeApproval}
-                className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] text-sm"
+                className="min-h-11 px-4 rounded-xl text-ink-muted hover:bg-white/[0.06] text-sm"
               >
                 Not now
               </button>
@@ -415,7 +415,7 @@ export default function LocalAISetup({ onChoiceComplete, compact = false }) {
                   if (approvalOpen === 'download') downloadMutation.mutate(payload);
                   else benchmarkMutation.mutate(payload);
                 }}
-                className="min-h-11 px-4 rounded-xl bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 disabled:opacity-40 text-sm"
+                className="min-h-11 px-4 rounded-xl bg-cyan-400/15 border border-cyan-300/20 text-cyan-100 disabled:opacity-40 text-sm"
               >
                 {downloadMutation.isPending || benchmarkMutation.isPending
                   ? 'Working…'

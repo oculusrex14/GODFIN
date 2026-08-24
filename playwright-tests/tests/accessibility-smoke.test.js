@@ -1,5 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
+const fs = require('node:fs');
+const path = require('node:path');
 
 test.use({
   viewport: { width: 390, height: 844 },
@@ -191,4 +193,43 @@ test('app keeps essential content available at 400% text scaling and reduced mot
     (element) => getComputedStyle(element).transitionDuration,
   );
   expect(['0s', '0.00001s']).toContain(transitionDuration);
+});
+
+test('representative glass surfaces retain contrast at 100, 200, and 400 percent zoom', async ({ page }, testInfo) => {
+  await mockIsolatedAccessibilityApp(page);
+  await page.goto('/pin');
+  await page.locator('input[type="password"]').fill('2468');
+  await page.getByRole('button', { name: /Set PIN|Unlock/ }).click();
+  const onboardingHeading = page.getByRole('heading', { name: 'Make GODFIN yours' });
+  if (await onboardingHeading.isVisible()) {
+    await page.getByRole('button', { name: 'Finish setup later' }).click();
+  }
+  await page.getByRole('button', { name: 'Open navigation menu' }).click();
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+
+  const evidenceDirectory = path.resolve(
+    __dirname,
+    '../reports/a11y-evidence',
+    testInfo.project.name,
+  );
+  fs.mkdirSync(evidenceDirectory, { recursive: true });
+  for (const zoom of [100, 200, 400]) {
+    await page.evaluate((percent) => {
+      document.documentElement.style.fontSize = `${percent}%`;
+    }, zoom);
+    await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+    await expectNoSeriousAxeViolations(page, '#main-content');
+    await page.screenshot({
+      path: path.join(evidenceDirectory, `settings-${zoom}-percent.png`),
+      fullPage: true,
+    });
+  }
+  fs.writeFileSync(
+    path.join(evidenceDirectory, 'candidate.json'),
+    `${JSON.stringify({
+      sha: process.env.GITHUB_SHA || 'local-unfrozen',
+      project: testInfo.project.name,
+      zoom: [100, 200, 400],
+    }, null, 2)}\n`,
+  );
 });

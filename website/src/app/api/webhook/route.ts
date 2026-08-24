@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
@@ -24,6 +24,11 @@ import {
   regionalPrice,
 } from "@/lib/regional-pricing";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
+import {
+  readCappedWebhookBody,
+  WebhookPayloadTooLarge,
+} from "@/lib/webhook-body";
 
 export const runtime = "nodejs";
 
@@ -37,6 +42,7 @@ const CASHFREE_EVENT_TYPES = new Set([
   "DISPUTE_UPDATED",
   "DISPUTE_CLOSED",
 ]);
+const EMAIL_CLAIM_TTL_MS = 10 * 60 * 1000;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -68,6 +74,47 @@ function eventIdentity(
 ): string {
   const safeHeader = idempotencyKey?.trim().slice(0, 180);
   return `cashfree:${safeHeader || createHash("sha256").update(rawBody).digest("hex")}`;
+}
+
+async function claimPurchaseEmail(
+  admin: ReturnType<typeof createAdminClient>,
+  purchaseId: string,
+): Promise<string | null> {
+  const claimedAt = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - EMAIL_CLAIM_TTL_MS).toISOString();
+  const { data, error } = await admin
+    .from("purchases")
+    .update({ email_claimed_at: claimedAt })
+    .eq("id", purchaseId)
+    .is("email_sent_at", null)
+    .or(`email_claimed_at.is.null,email_claimed_at.lt.${staleBefore}`)
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id ? claimedAt : null;
+}
+
+async function finishPurchaseEmailClaim({
+  admin,
+  purchaseId,
+  claimedAt,
+  delivered,
+}: {
+  admin: ReturnType<typeof createAdminClient>;
+  purchaseId: string;
+  claimedAt: string;
+  delivered: boolean;
+}) {
+  const { error } = await admin
+    .from("purchases")
+    .update(
+      delivered
+        ? { email_sent_at: new Date().toISOString(), email_claimed_at: null }
+        : { email_claimed_at: null },
+    )
+    .eq("id", purchaseId)
+    .eq("email_claimed_at", claimedAt);
+  if (error) throw error;
 }
 
 function paymentEventFields(event: JsonRecord) {
@@ -289,26 +336,45 @@ async function provisionCashfreePurchase(incoming: JsonRecord) {
   if (
     review.verified &&
     provisioned?.license_status === "active" &&
-    !provisioned?.email_sent_at
+    !provisioned?.email_sent_at &&
+    typeof provisioned?.purchase_id === "string"
   ) {
-    if (isUpgrade) {
-      await sendPlanUpgradeEmail({
-        to: account.user.email,
-        idempotencyKey: `cashfree-upgrade:${order.order_id}`,
+    const claimedAt = await claimPurchaseEmail(admin, provisioned.purchase_id);
+    if (!claimedAt) return;
+    try {
+      if (isUpgrade) {
+        await sendPlanUpgradeEmail({
+          to: account.user.email,
+          idempotencyKey: `cashfree-upgrade:${order.order_id}`,
+        });
+      } else if (licenseKey) {
+        await sendLicenseEmail({
+          to: account.user.email,
+          licenseKey,
+          tier,
+          idempotencyKey: `cashfree-license:${order.order_id}`,
+        });
+      }
+      await finishPurchaseEmailClaim({
+        admin,
+        purchaseId: provisioned.purchase_id,
+        claimedAt,
+        delivered: true,
       });
-    } else if (licenseKey) {
-      await sendLicenseEmail({
-        to: account.user.email,
-        licenseKey,
-        tier,
-        idempotencyKey: `cashfree-license:${order.order_id}`,
-      });
+    } catch (error) {
+      try {
+        await finishPurchaseEmailClaim({
+          admin,
+          purchaseId: provisioned.purchase_id,
+          claimedAt,
+          delivered: false,
+        });
+      } catch {
+        // A crashed or failed release is recoverable after the ten-minute
+        // claim lease. Resend's idempotency key prevents duplicate delivery.
+      }
+      throw error;
     }
-    await admin
-      .from("purchases")
-      .update({ email_sent_at: new Date().toISOString() })
-      .eq("provider_order_id", order.order_id)
-      .eq("payment_provider", "cashfree");
   }
 }
 
@@ -336,7 +402,21 @@ async function recordCashfreeEvent({
 }
 
 export async function POST(request: Request) {
-  const rawBody = await request.text();
+  const requestId = randomUUID();
+  let rawBody: string;
+  try {
+    rawBody = await readCappedWebhookBody(request);
+  } catch (error) {
+    const tooLarge = error instanceof WebhookPayloadTooLarge;
+    console.warn("Cashfree webhook body rejected", {
+      requestId,
+      reason: tooLarge ? "payload_too_large" : "invalid_encoding",
+    });
+    return NextResponse.json(
+      { message: tooLarge ? "Payload too large." : "Invalid payload." },
+      { status: tooLarge ? 413 : 400 },
+    );
+  }
   let signatureValid = false;
   try {
     signatureValid = verifyCashfreeWebhook({
@@ -345,11 +425,40 @@ export async function POST(request: Request) {
       timestamp: request.headers.get("x-webhook-timestamp"),
       version: request.headers.get("x-webhook-version"),
     });
-  } catch {
+  } catch (error) {
+    console.warn("Cashfree webhook signature check failed safely", {
+      requestId,
+      errorType: error instanceof Error ? error.name : "UnknownError",
+    });
     signatureValid = false;
   }
   if (!signatureValid) {
+    console.warn("Cashfree webhook signature rejected", {
+      requestId,
+      reason: "invalid_signature",
+    });
     return NextResponse.json({ message: "Invalid signature." }, { status: 400 });
+  }
+
+  const providerEventId = eventIdentity(
+    request.headers.get("x-idempotency-key"),
+    rawBody,
+  );
+  try {
+    const limit = await checkRateLimit(request, {
+      bucket: "cashfree-webhook",
+      limit: 600,
+      windowSeconds: 60,
+    });
+    if (!limit.allowed) {
+      return rateLimitResponse(limit, "Webhook rate limit exceeded.");
+    }
+  } catch {
+    console.error("Cashfree webhook abuse control unavailable", { requestId });
+    return NextResponse.json(
+      { message: "Webhook processing is temporarily unavailable." },
+      { status: 503 },
+    );
   }
 
   let event: JsonRecord;
@@ -367,10 +476,7 @@ export async function POST(request: Request) {
   try {
     await recordCashfreeEvent({
       event,
-      providerEventId: eventIdentity(
-        request.headers.get("x-idempotency-key"),
-        rawBody,
-      ),
+      providerEventId,
       payloadSha256: createHash("sha256").update(rawBody).digest("hex"),
     });
     if (eventType === "PAYMENT_SUCCESS_WEBHOOK") {
@@ -379,8 +485,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true });
   } catch (error) {
     console.error("Cashfree fulfillment failed", {
+      requestId,
       eventType,
-      error: error instanceof Error ? error.message : "unknown error",
+      errorType: error instanceof Error ? error.name : "UnknownError",
     });
     return NextResponse.json(
       { message: "Fulfillment failed and will be retried." },

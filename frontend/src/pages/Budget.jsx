@@ -32,21 +32,21 @@ function formatINR(amount) {
   }).format(amount);
 }
 
-function HealthGauge({ label, value, max = 100, invert = false, icon: Icon, calculation }) {
+function HealthGauge({ label, value, max = 100, invert = false, icon: Icon, calculation, availability }) {
   const hasValue = value != null && !isNaN(value);
   const safeValue = hasValue ? value : 0;
   const pct = max > 0 ? Math.max(0, Math.min(safeValue / max, 1)) * 100 : 0;
   const good = invert ? pct < 40 : pct > 60;
   const warn = invert ? pct >= 40 && pct < 70 : pct >= 30 && pct <= 60;
   const gradientClass = !hasValue ? 'from-white/15 to-white/10' : good ? 'from-emerald-400 to-emerald-500' : warn ? 'from-amber-400 to-amber-500' : 'from-rose-400 to-rose-500';
-  const textColor = !hasValue ? 'text-white/35' : good ? 'text-emerald-400/80' : warn ? 'text-amber-400/80' : 'text-rose-400/80';
+  const textColor = !hasValue ? 'text-ink-muted' : good ? 'text-emerald-200' : warn ? 'text-amber-200' : 'text-rose-200';
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Icon size={13} className="text-white/30" aria-hidden="true" />
-          <span className="text-white/40 text-[0.7rem]">{label}</span>
+          <Icon size={13} className="text-ink-muted" aria-hidden="true" />
+          <span className="text-ink-muted text-[0.7rem]">{label}</span>
           {calculation && <CalculationInfo title={label} {...calculation} />}
         </div>
         <span className={`text-[0.8rem] tabular-nums ${textColor}`} style={{ fontWeight: 500 }}>
@@ -61,6 +61,11 @@ function HealthGauge({ label, value, max = 100, invert = false, icon: Icon, calc
           className={`h-full rounded-full bg-gradient-to-r ${gradientClass}`}
         />
       </div>
+      {!hasValue && availability?.unavailable_reason && (
+        <p className="text-[0.62rem] leading-relaxed text-ink-muted">
+          {availability.unavailable_reason}
+        </p>
+      )}
     </div>
   );
 }
@@ -202,8 +207,8 @@ export default function Budget() {
     <div>
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Budget & Goals</h1>
-          <p className="text-white/30 text-[0.8rem]">Track goals, subscriptions & financial health</p>
+          <h1 className="text-ink-primary text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Budget & Goals</h1>
+          <p className="text-ink-muted text-[0.8rem]">Track goals, subscriptions & financial health</p>
         </div>
         <GlassButton icon={<Plus size={15} />} onClick={() => setAddOpen(true)}>New Goal</GlassButton>
       </motion.div>
@@ -218,19 +223,23 @@ export default function Budget() {
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
           <div className="mb-4">
-            <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Your Money Patterns</h2>
-            <p className="mt-1 text-[0.68rem] text-white/30">
+            <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Your Money Patterns</h2>
+            <p className="mt-1 text-[0.68rem] text-ink-muted">
               {profile.data_status === 'insufficient_history'
                 ? 'Add a complete month of transactions to calculate these patterns.'
                 : profile.data_status === 'income_unavailable'
                   ? `Based on ${profile.period_start} to ${profile.period_end}. Income-based patterns need verified income.`
-                  : `Based on the complete month ${profile.period_start} to ${profile.period_end}.`}
+                  : `Using the latest completed month with data: ${profile.period_start} to ${profile.period_end}.`}
+            </p>
+            <p className="mt-1 text-[0.62rem] text-ink-muted">
+              {profile.complete_month_count} completed month{profile.complete_month_count === 1 ? '' : 's'} with data · {profile.verified_income_count} verified income entr{profile.verified_income_count === 1 ? 'y' : 'ies'} · {profile.spending_transaction_count} purchase{profile.spending_transaction_count === 1 ? '' : 's'}
             </p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <HealthGauge
               label="How much income you kept"
               value={profile.savings_rate}
+              availability={profile.metrics?.savings_rate}
               icon={PiggyBank}
               calculation={{
                 meaning: 'For every ₹100 that came in as verified income, this is how much was left after everyday spending.',
@@ -243,6 +252,7 @@ export default function Budget() {
             <HealthGauge
               label="Small-spend habit"
               value={profile.impulse_index}
+              availability={profile.metrics?.impulse_index}
               invert
               icon={Gauge}
               calculation={{
@@ -256,6 +266,7 @@ export default function Budget() {
             <HealthGauge
               label="Income already committed"
               value={profile.fixed_expense_ratio}
+              availability={profile.metrics?.fixed_expense_ratio}
               invert
               icon={Wallet}
               calculation={{
@@ -269,6 +280,7 @@ export default function Budget() {
             <HealthGauge
               label="Repeat-payment load"
               value={profile.recurring_burden}
+              availability={profile.metrics?.recurring_burden}
               invert
               icon={Repeat}
               calculation={{
@@ -282,6 +294,7 @@ export default function Budget() {
             <HealthGauge
               label="Subscription share"
               value={profile.subscription_dependency}
+              availability={profile.metrics?.subscription_dependency}
               invert
               icon={CreditCard}
               calculation={{
@@ -295,6 +308,7 @@ export default function Budget() {
             <HealthGauge
               label="Optional-spending change"
               value={profile.lifestyle_inflation}
+              availability={profile.metrics?.lifestyle_inflation}
               max={200}
               invert
               icon={TrendingUp}
@@ -313,14 +327,14 @@ export default function Budget() {
       {/* Goals */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="mb-6">
         <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider flex items-center gap-1.5" style={{ fontWeight: 500 }}>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider flex items-center gap-1.5" style={{ fontWeight: 500 }}>
             <Target size={14} /> Goals ({goals.length})
           </h2>
           {suggestions.length > 0 && (
             <button
               type="button"
               onClick={() => setSuggestionsOpen(true)}
-              className="inline-flex items-center gap-1 rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[0.65rem] text-amber-300/90 hover:bg-amber-400/15"
+              className="inline-flex items-center gap-1 rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[0.65rem] text-amber-200 hover:bg-amber-400/15"
               aria-label={`${suggestions.length} deposit contribution suggestions need review`}
             >
               <AlertTriangle size={11} />
@@ -330,8 +344,8 @@ export default function Budget() {
         </div>
         {goals.length === 0 ? (
           <div className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-8 text-center">
-            <Target className="h-8 w-8 text-white/20 mx-auto mb-2" />
-            <p className="text-sm text-white/40">No goals yet. Create one to start tracking.</p>
+            <Target className="h-8 w-8 text-ink-muted mx-auto mb-2" />
+            <p className="text-sm text-ink-muted">No goals yet. Create one to start tracking.</p>
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 gap-4">
@@ -350,36 +364,36 @@ export default function Budget() {
                   <div className="flex items-start justify-between mb-3">
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-white/80 text-[0.9rem]" style={{ fontWeight: 400 }}>{goal.name}</h3>
+                        <h3 className="text-ink-primary text-[0.9rem]" style={{ fontWeight: 400 }}>{goal.name}</h3>
                         {suggestions.some((item) => item.goal_id === goal.id) && (
                           <button
                             type="button"
                             onClick={() => setSuggestionsOpen(true)}
-                            className="rounded-full p-1 text-amber-300/80 hover:bg-amber-400/10"
+                            className="rounded-full p-1 text-amber-200 hover:bg-amber-400/10"
                             aria-label={`Review detected deposits for ${goal.name}`}
                           >
                             <AlertTriangle size={13} />
                           </button>
                         )}
                       </div>
-                      <p className="text-white/25 text-[0.7rem] mt-0.5">
+                      <p className="text-ink-muted text-[0.7rem] mt-0.5">
                         {daysLeft} days left · {format(new Date(goal.deadline_date), 'dd MMM yyyy')}
                       </p>
-                      <p className="text-white/25 text-[0.65rem] mt-0.5">
+                      <p className="text-ink-muted text-[0.65rem] mt-0.5">
                         Expected return {(goal.annual_return_rate * 100).toFixed(1)}% yearly
                       </p>
                     </div>
                     <button
                       onClick={() => deleteMutation.mutate(goal.id)}
-                      className="text-white/15 hover:text-rose-400/60 transition-colors p-1"
+                      className="text-ink-muted hover:text-rose-200 transition-colors p-1"
                       aria-label={`Delete goal ${goal.name}`}
                     >
                       <Trash2 size={13} />
                     </button>
                   </div>
                   <div className="flex items-end justify-between mb-2">
-                    <span className="text-white/90 text-[1.2rem] tabular-nums" style={{ fontWeight: 300 }}>{formatINR(goal.current_saved)}</span>
-                    <span className="text-white/30 text-[0.7rem]">of {formatINR(goal.target_amount)}</span>
+                    <span className="text-ink-primary text-[1.2rem] tabular-nums" style={{ fontWeight: 300 }}>{formatINR(goal.current_saved)}</span>
+                    <span className="text-ink-muted text-[0.7rem]">of {formatINR(goal.target_amount)}</span>
                   </div>
                   <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden mb-3">
                     <motion.div
@@ -393,7 +407,7 @@ export default function Budget() {
                     <button
                       onClick={() => simulateMutation.mutate(goal.id)}
                       disabled={simulateMutation.isPending && simGoalId === goal.id}
-                      className="text-cyan-400/50 text-[0.7rem] hover:text-cyan-300/70 transition-colors flex items-center gap-1"
+                      className="text-cyan-200 text-[0.7rem] hover:text-cyan-200 transition-colors flex items-center gap-1"
                     >
                       <Sparkles size={12} className={simulateMutation.isPending && simGoalId === goal.id ? 'animate-spin' : ''} />
                       {simulateMutation.isPending && simGoalId === goal.id ? 'Simulating...' : 'Run Simulation'}
@@ -417,21 +431,21 @@ export default function Budget() {
       {/* Recurring */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider flex items-center gap-1.5" style={{ fontWeight: 500 }}>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider flex items-center gap-1.5" style={{ fontWeight: 500 }}>
             <Repeat size={14} /> Recurring ({recurring.length})
           </h2>
           <button
             onClick={() => detectMutation.mutate()}
             disabled={detectMutation.isPending}
-            className="text-white/30 text-[0.7rem] hover:text-white/60 transition-colors flex items-center gap-1"
+            className="text-ink-muted text-[0.7rem] hover:text-ink-secondary transition-colors flex items-center gap-1"
           >
             <RefreshCw size={12} className={detectMutation.isPending ? 'animate-spin' : ''} /> {detectMutation.isPending ? 'Detecting...' : 'Re-detect'}
           </button>
         </div>
         {recurring.length === 0 ? (
           <div className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-8 text-center">
-            <Repeat className="h-8 w-8 text-white/20 mx-auto mb-2" />
-            <p className="text-sm text-white/40">No recurring patterns detected yet.</p>
+            <Repeat className="h-8 w-8 text-ink-muted mx-auto mb-2" />
+            <p className="text-sm text-ink-muted">No recurring patterns detected yet.</p>
           </div>
         ) : (
           <div className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)]">
@@ -440,22 +454,22 @@ export default function Budget() {
               {recurring.map((p) => (
                 <div key={p.id} className="flex items-center justify-between px-5 py-3.5">
                   <div>
-                    <p className="text-white/70 text-[0.85rem] flex items-center gap-2">
+                    <p className="text-ink-secondary text-[0.85rem] flex items-center gap-2">
                       {p.merchant}
                       {p.review_required && (
-                        <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[0.6rem] text-amber-300/80">
+                        <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[0.6rem] text-amber-200">
                           Review candidate
                         </span>
                       )}
                     </p>
-                    <p className="text-white/25 text-[0.7rem]">
+                    <p className="text-ink-muted text-[0.7rem]">
                       {p.frequency} · {p.category || 'Uncategorized'}
                       {p.next_expected && ` · Next: ${format(new Date(p.next_expected), 'dd MMM')}`}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-white/70 text-[0.85rem] tabular-nums">{formatINR(p.avg_amount)}</p>
-                    <p className="text-white/20 text-[0.6rem]">
+                    <p className="text-ink-secondary text-[0.85rem] tabular-nums">{formatINR(p.avg_amount)}</p>
+                    <p className="text-ink-muted text-[0.6rem]">
                       {p.times_detected}x · {Math.round((p.confidence || 0) * 100)}% confidence
                     </p>
                   </div>
@@ -481,44 +495,44 @@ export default function Budget() {
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-5">
-                <h3 id="goal-simulation-title" className="text-white/90 text-[1.1rem] flex items-center gap-2" style={{ fontWeight: 400 }}>
-                  <Sparkles size={16} className="text-cyan-400/60" /> Simulation Results
+                <h3 id="goal-simulation-title" className="text-ink-primary text-[1.1rem] flex items-center gap-2" style={{ fontWeight: 400 }}>
+                  <Sparkles size={16} className="text-cyan-200" /> Simulation Results
                 </h3>
-                <button onClick={() => setSimResult(null)} className="text-white/30 hover:text-white/60" aria-label="Close simulation results"><X size={18} /></button>
+                <button onClick={() => setSimResult(null)} className="text-ink-muted hover:text-ink-secondary" aria-label="Close simulation results"><X size={18} /></button>
               </div>
 
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-[0.8rem]">
+                  <span className="text-ink-muted text-[0.8rem]">
                     {simResult.months_remaining === 0
                       ? 'Amount Needed Before Deadline'
                       : 'Required Monthly Saving'}
                   </span>
-                  <span className="text-white/90 text-[0.95rem] tabular-nums" style={{ fontWeight: 500 }}>{formatINR(simResult.required_monthly)}</span>
+                  <span className="text-ink-primary text-[0.95rem] tabular-nums" style={{ fontWeight: 500 }}>{formatINR(simResult.required_monthly)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-[0.8rem]">Current Flexible Spend</span>
-                  <span className="text-white/70 text-[0.85rem] tabular-nums">{formatINR(simResult.flexible_spend)}</span>
+                  <span className="text-ink-muted text-[0.8rem]">Current Flexible Spend</span>
+                  <span className="text-ink-secondary text-[0.85rem] tabular-nums">{formatINR(simResult.flexible_spend)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-[0.8rem]">Max Saveable</span>
-                  <span className="text-white/70 text-[0.85rem] tabular-nums">{formatINR(simResult.max_saveable)}</span>
+                  <span className="text-ink-muted text-[0.8rem]">Max Saveable</span>
+                  <span className="text-ink-secondary text-[0.85rem] tabular-nums">{formatINR(simResult.max_saveable)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-[0.8rem]">Month-end Deposits Remaining</span>
-                  <span className="text-white/70 text-[0.85rem] tabular-nums">{simResult.months_remaining}</span>
+                  <span className="text-ink-muted text-[0.8rem]">Month-end Deposits Remaining</span>
+                  <span className="text-ink-secondary text-[0.85rem] tabular-nums">{simResult.months_remaining}</span>
                 </div>
 
                 <div className="h-[1px] bg-white/[0.08] my-2" />
 
                 <div className="flex justify-between items-center">
-                  <span className="text-white/40 text-[0.8rem]">Feasibility</span>
+                  <span className="text-ink-muted text-[0.8rem]">Feasibility</span>
                   <span className={`text-[0.85rem] px-2.5 py-0.5 rounded-full ${
                     simResult.is_feasible === null
-                      ? 'bg-amber-500/10 text-amber-300'
+                      ? 'bg-amber-500/10 text-amber-200'
                       : simResult.is_feasible
-                        ? 'bg-emerald-500/10 text-emerald-400'
-                        : 'bg-rose-500/10 text-rose-400'
+                        ? 'bg-emerald-500/10 text-emerald-200'
+                        : 'bg-rose-500/10 text-rose-200'
                   }`}>
                     {simResult.is_feasible === null
                       ? 'Insufficient history'
@@ -530,24 +544,24 @@ export default function Budget() {
 
                 {simResult.is_feasible === false && simResult.extended_deadline_months && (
                   <div className="flex justify-between items-center">
-                    <span className="text-white/40 text-[0.8rem]">Extended Timeline</span>
-                    <span className="text-amber-400/80 text-[0.85rem] tabular-nums">{simResult.extended_deadline_months} months needed</span>
+                    <span className="text-ink-muted text-[0.8rem]">Extended Timeline</span>
+                    <span className="text-amber-200 text-[0.85rem] tabular-nums">{simResult.extended_deadline_months} months needed</span>
                   </div>
                 )}
 
                 {simResult.pressure_savings && Object.keys(simResult.pressure_savings).length > 0 && (
                   <>
                     <div className="h-[1px] bg-white/[0.08] my-2" />
-                    <p className="text-white/30 text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Pressure Levels</p>
+                    <p className="text-ink-muted text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 500 }}>Pressure Levels</p>
                     {Object.entries(simResult.pressure_savings).map(([level, amount]) => (
                       <div key={level} className="flex justify-between items-center">
-                        <span className="text-white/40 text-[0.8rem] capitalize">{level}</span>
-                        <span className="text-white/60 text-[0.85rem] tabular-nums">{formatINR(amount)}/mo</span>
+                        <span className="text-ink-muted text-[0.8rem] capitalize">{level}</span>
+                        <span className="text-ink-secondary text-[0.85rem] tabular-nums">{formatINR(amount)}/mo</span>
                       </div>
                     ))}
                   </>
                 )}
-                <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 text-[0.7rem] leading-relaxed text-white/35">
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 text-[0.7rem] leading-relaxed text-ink-muted">
                   {simResult.coverage_months > 0 ? (
                     <p>
                       Capacity uses {simResult.coverage_months} complete month{simResult.coverage_months === 1 ? '' : 's'}
@@ -559,7 +573,7 @@ export default function Budget() {
                     <p>GODFIN needs at least two complete months of transaction history before estimating saving capacity.</p>
                   )}
                   <p className="mt-1">{simResult.caveat}</p>
-                  <p className="mt-1 text-white/25">
+                  <p className="mt-1 text-ink-muted">
                     Calculation version {simResult.calculation_version}; GODFIN counted the actual calendar month ends on or before your deadline.
                   </p>
                 </div>
@@ -584,12 +598,12 @@ export default function Budget() {
             >
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <h3 id="goal-savings-title" className="text-white/90 text-[1.1rem]">
+                  <h3 id="goal-savings-title" className="text-ink-primary text-[1.1rem]">
                     Update {savingsGoal.name}
                   </h3>
-                  <p id="goal-savings-description" className="mt-1 text-[0.72rem] text-white/30">Every change stays in an auditable ledger.</p>
+                  <p id="goal-savings-description" className="mt-1 text-[0.72rem] text-ink-muted">Every change stays in an auditable ledger.</p>
                 </div>
-                <button onClick={() => setSavingsGoal(null)} className="text-white/30 hover:text-white/60" aria-label="Close savings history">
+                <button onClick={() => setSavingsGoal(null)} className="text-ink-muted hover:text-ink-secondary" aria-label="Close savings history">
                   <X size={18} />
                 </button>
               </div>
@@ -607,12 +621,12 @@ export default function Budget() {
                   });
                 }}
               >
-                <label className="text-[0.72rem] text-white/40">
+                <label className="text-[0.72rem] text-ink-muted">
                   Change
                   <select
                     value={savingsForm.entry_type}
                     onChange={(event) => setSavingsForm((previous) => ({ ...previous, entry_type: event.target.value }))}
-                    className="mt-1 w-full rounded-xl border border-white/[0.12] bg-white/[0.06] px-3 py-2.5 text-sm text-white/80"
+                    className="mt-1 w-full rounded-xl border border-white/[0.12] bg-white/[0.06] px-3 py-2.5 text-sm text-ink-primary"
                   >
                     <option value="deposit">Add savings</option>
                     <option value="withdrawal">Record withdrawal</option>
@@ -644,24 +658,24 @@ export default function Budget() {
                 </GlassButton>
               </form>
               <div className="mt-6">
-                <h4 className="mb-2 flex items-center gap-1.5 text-[0.7rem] uppercase tracking-wider text-white/35">
+                <h4 className="mb-2 flex items-center gap-1.5 text-[0.7rem] uppercase tracking-wider text-ink-muted">
                   <History size={13} /> Contribution history
                 </h4>
                 {contributions.length === 0 ? (
-                  <p className="rounded-xl bg-white/[0.03] p-3 text-sm text-white/30">No savings entries yet.</p>
+                  <p className="rounded-xl bg-white/[0.03] p-3 text-sm text-ink-muted">No savings entries yet.</p>
                 ) : (
                   <div className="divide-y divide-white/[0.05] rounded-xl border border-white/[0.08]">
                     {contributions.map((entry) => (
                       <div key={entry.id} className={`flex items-start justify-between gap-3 p-3 ${entry.is_voided ? 'opacity-40' : ''}`}>
                         <div>
-                          <p className={`text-sm ${entry.amount >= 0 ? 'text-emerald-300/80' : 'text-amber-300/80'}`}>
+                          <p className={`text-sm ${entry.amount >= 0 ? 'text-emerald-200' : 'text-amber-200'}`}>
                             {entry.amount >= 0 ? '+' : '−'}{formatINR(Math.abs(entry.amount))}
                           </p>
-                          <p className="text-[0.65rem] text-white/30">
+                          <p className="text-[0.65rem] text-ink-muted">
                             {format(new Date(`${entry.contribution_date}T00:00:00`), 'dd MMM yyyy')} · {entry.source_type.replaceAll('_', ' ')}
                           </p>
-                          {entry.note && <p className="mt-1 text-[0.68rem] text-white/35">{entry.note}</p>}
-                          {entry.is_voided && <p className="mt-1 text-[0.65rem] text-rose-300/60">Voided: {entry.void_reason}</p>}
+                          {entry.note && <p className="mt-1 text-[0.68rem] text-ink-muted">{entry.note}</p>}
+                          {entry.is_voided && <p className="mt-1 text-[0.65rem] text-rose-200">Voided: {entry.void_reason}</p>}
                         </div>
                         {!entry.is_voided && (
                           <button
@@ -670,7 +684,7 @@ export default function Budget() {
                               goalId: savingsGoal.id,
                               contributionId: entry.id,
                             })}
-                            className="text-[0.65rem] text-white/25 hover:text-rose-300/70"
+                            className="text-[0.65rem] text-ink-muted hover:text-rose-200"
                           >
                             Void
                           </button>
@@ -700,29 +714,29 @@ export default function Budget() {
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 id="deposit-review-title" className="flex items-center gap-2 text-white/90 text-[1.1rem]">
-                    <AlertTriangle size={16} className="text-amber-300/80" /> Review detected deposits
+                  <h3 id="deposit-review-title" className="flex items-center gap-2 text-ink-primary text-[1.1rem]">
+                    <AlertTriangle size={16} className="text-amber-200" /> Review detected deposits
                   </h3>
-                  <p id="deposit-review-description" className="mt-1 text-[0.72rem] text-white/35">Nothing changes a goal until you confirm it.</p>
+                  <p id="deposit-review-description" className="mt-1 text-[0.72rem] text-ink-muted">Nothing changes a goal until you confirm it.</p>
                 </div>
-                <button onClick={() => setSuggestionsOpen(false)} className="text-white/30 hover:text-white/60" aria-label="Close deposit review">
+                <button onClick={() => setSuggestionsOpen(false)} className="text-ink-muted hover:text-ink-secondary" aria-label="Close deposit review">
                   <X size={18} />
                 </button>
               </div>
               <div className="mt-5 space-y-3">
                 {suggestions.length === 0 ? (
-                  <p className="rounded-xl bg-white/[0.03] p-4 text-sm text-white/35">No FD or RD contributions need review.</p>
+                  <p className="rounded-xl bg-white/[0.03] p-4 text-sm text-ink-muted">No FD or RD contributions need review.</p>
                 ) : suggestions.map((suggestion) => (
                   <div key={suggestion.id} className="rounded-2xl border border-white/[0.09] bg-white/[0.04] p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <p className="text-sm text-white/75">{suggestion.merchant || `${suggestion.deposit_type.toUpperCase()} deposit`}</p>
-                        <p className="mt-1 text-[0.68rem] text-white/30">{suggestion.transaction_date} · {Math.round(suggestion.confidence * 100)}% confidence</p>
-                        <p className="mt-1 text-[0.68rem] text-white/35">{suggestion.evidence}</p>
+                        <p className="text-sm text-ink-secondary">{suggestion.merchant || `${suggestion.deposit_type.toUpperCase()} deposit`}</p>
+                        <p className="mt-1 text-[0.68rem] text-ink-muted">{suggestion.transaction_date} · {Math.round(suggestion.confidence * 100)}% confidence</p>
+                        <p className="mt-1 text-[0.68rem] text-ink-muted">{suggestion.evidence}</p>
                       </div>
-                      <p className="text-sm text-emerald-300/80">{formatINR(suggestion.amount)}</p>
+                      <p className="text-sm text-emerald-200">{formatINR(suggestion.amount)}</p>
                     </div>
-                    <p className="mt-3 text-[0.67rem] text-white/35">Assign this confirmed debit to:</p>
+                    <p className="mt-3 text-[0.67rem] text-ink-muted">Assign this confirmed debit to:</p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {goals.map((goal) => (
                         <button
@@ -732,8 +746,8 @@ export default function Budget() {
                           onClick={() => suggestionMutation.mutate({ suggestionId: suggestion.id, goalId: goal.id })}
                           className={`rounded-full border px-3 py-1 text-[0.68rem] ${
                             suggestion.goal_id === goal.id
-                              ? 'border-amber-300/30 bg-amber-300/10 text-amber-200/80'
-                              : 'border-white/[0.1] text-white/45 hover:bg-white/[0.05]'
+                              ? 'border-amber-300/30 bg-amber-300/10 text-amber-200'
+                              : 'border-white/[0.1] text-ink-muted hover:bg-white/[0.05]'
                           }`}
                         >
                           {goal.name}
@@ -743,7 +757,7 @@ export default function Budget() {
                         type="button"
                         disabled={suggestionMutation.isPending}
                         onClick={() => suggestionMutation.mutate({ suggestionId: suggestion.id, goalId: null })}
-                        className="rounded-full border border-white/[0.1] px-3 py-1 text-[0.68rem] text-white/45 hover:bg-white/[0.05]"
+                        className="rounded-full border border-white/[0.1] px-3 py-1 text-[0.68rem] text-ink-muted hover:bg-white/[0.05]"
                       >
                         None
                       </button>
@@ -770,8 +784,8 @@ export default function Budget() {
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-5">
-                <h3 id="new-goal-title" className="text-white/90 text-[1.1rem]" style={{ fontWeight: 400 }}>New Goal</h3>
-                <button onClick={() => setAddOpen(false)} className="text-white/30 hover:text-white/60" aria-label="Close new goal dialog"><X size={18} /></button>
+                <h3 id="new-goal-title" className="text-ink-primary text-[1.1rem]" style={{ fontWeight: 400 }}>New Goal</h3>
+                <button onClick={() => setAddOpen(false)} className="text-ink-muted hover:text-ink-secondary" aria-label="Close new goal dialog"><X size={18} /></button>
               </div>
               <form
                 className="space-y-4"

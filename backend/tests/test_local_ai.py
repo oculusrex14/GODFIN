@@ -747,6 +747,26 @@ def test_local_ai_download_requires_confirmation(auth_client):
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "model",
+    (
+        "--insecure",
+        " qwen3:4b",
+        "qwen3:4b ",
+        "../../private-model",
+        "qwen3:4b;open-calculator",
+        "qwen3:4b\nsecond-command",
+    ),
+)
+def test_local_ai_actions_reject_non_registry_model_syntax(auth_client, model):
+    response = auth_client.post(
+        "/api/v1/system/local-ai/download",
+        json={"model": model, "confirmed": True, "current_pin": "4826"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_local_ai_benchmark_allows_only_one_active_run():
     from app.core import local_ai
 

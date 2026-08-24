@@ -64,26 +64,26 @@ export default function ClassificationMemorySettings() {
     <div className="space-y-4">
       <div className="grid sm:grid-cols-3 gap-2.5">
         <div className="rounded-xl border border-white/[0.09] bg-white/[0.035] p-3">
-          <p className="text-white/25 text-[0.65rem] uppercase">Exact merchants</p>
-          <p className="mt-1 text-white/75 text-xl font-light">{data?.merchants?.length || 0}</p>
+          <p className="text-ink-muted text-[0.65rem] uppercase">Exact merchants</p>
+          <p className="mt-1 text-ink-secondary text-xl font-light">{data?.merchants?.length || 0}</p>
         </div>
         <div className="rounded-xl border border-white/[0.09] bg-white/[0.035] p-3">
-          <p className="text-white/25 text-[0.65rem] uppercase">Confirmed patterns</p>
-          <p className="mt-1 text-white/75 text-xl font-light">{data?.patterns?.length || 0}</p>
+          <p className="text-ink-muted text-[0.65rem] uppercase">Confirmed patterns</p>
+          <p className="mt-1 text-ink-secondary text-xl font-light">{data?.patterns?.length || 0}</p>
         </div>
         <div className="rounded-xl border border-white/[0.09] bg-white/[0.035] p-3">
-          <p className="text-white/25 text-[0.65rem] uppercase">Corrections</p>
-          <p className="mt-1 text-white/75 text-xl font-light">{eligibility?.confirmed_corrections || 0}</p>
+          <p className="text-ink-muted text-[0.65rem] uppercase">Corrections</p>
+          <p className="mt-1 text-ink-secondary text-xl font-light">{eligibility?.confirmed_corrections || 0}</p>
         </div>
       </div>
 
       <div className="rounded-xl border border-white/[0.09] bg-white/[0.035] p-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-white/65 text-sm flex items-center gap-2">
-            <BrainCircuit size={15} className="text-cyan-200/60" />
+          <p className="text-ink-secondary text-sm flex items-center gap-2">
+            <BrainCircuit size={15} className="text-cyan-200" />
             Optional personal classifier
           </p>
-          <p className="mt-1 text-white/30 text-xs">
+          <p className="mt-1 text-ink-muted text-xs">
             {!license?.features?.includes('personal_classifier')
               ? 'Available with GODFIN Max after the evidence threshold is met.'
               : eligibility?.eligible
@@ -95,7 +95,7 @@ export default function ClassificationMemorySettings() {
           type="button"
           disabled={!license?.features?.includes('personal_classifier') || !eligibility?.eligible || personalMutation.isPending}
           onClick={() => personalMutation.mutate(!eligibility?.enabled)}
-          className="min-h-11 px-4 rounded-xl border border-white/[0.1] bg-white/[0.05] text-white/55 disabled:opacity-35 text-sm"
+          className="min-h-11 px-4 rounded-xl border border-white/[0.1] bg-white/[0.05] text-ink-secondary disabled:opacity-35 text-sm"
         >
           {eligibility?.enabled
             ? 'Disable'
@@ -109,7 +109,7 @@ export default function ClassificationMemorySettings() {
         <button
           type="button"
           onClick={() => setExpanded(value => !value)}
-          className="min-h-11 px-4 rounded-xl border border-white/[0.1] text-white/50 text-sm flex items-center gap-2"
+          className="min-h-11 px-4 rounded-xl border border-white/[0.1] text-ink-muted text-sm flex items-center gap-2"
         >
           <Eye size={14} />
           {expanded ? 'Hide memory' : 'Inspect memory'}
@@ -117,7 +117,7 @@ export default function ClassificationMemorySettings() {
         <button
           type="button"
           onClick={downloadClassificationMemory}
-          className="min-h-11 px-4 rounded-xl border border-white/[0.1] text-white/50 text-sm flex items-center gap-2"
+          className="min-h-11 px-4 rounded-xl border border-white/[0.1] text-ink-muted text-sm flex items-center gap-2"
         >
           <Download size={14} />
           Export CSV
@@ -125,7 +125,7 @@ export default function ClassificationMemorySettings() {
         <button
           type="button"
           onClick={() => setResetOpen(true)}
-          className="min-h-11 px-4 rounded-xl border border-rose-300/[0.12] text-rose-100/55 text-sm flex items-center gap-2"
+          className="min-h-11 px-4 rounded-xl border border-rose-300/[0.12] text-rose-100 text-sm flex items-center gap-2"
         >
           <Trash2 size={14} />
           Reset learned memory
@@ -135,41 +135,41 @@ export default function ClassificationMemorySettings() {
       {expanded && (
         <div className="space-y-4">
           <div>
-            <p className="text-white/30 text-xs uppercase tracking-wide mb-2">Generalized patterns</p>
+            <p className="text-ink-muted text-xs uppercase tracking-wide mb-2">Generalized patterns</p>
             <div className="max-h-56 overflow-y-auto rounded-xl border border-white/[0.08] divide-y divide-white/[0.06]">
               {(data?.patterns || []).map(pattern => (
                 <div key={pattern.id} className="p-3 flex items-center justify-between gap-4 text-xs">
                   <div>
-                    <p className="text-white/60">{pattern.pattern}</p>
-                    <p className="mt-1 text-white/25">{pattern.instrument} · {pattern.confirmations} confirmations</p>
+                    <p className="text-ink-secondary">{pattern.pattern}</p>
+                    <p className="mt-1 text-ink-muted">{pattern.instrument} · {pattern.confirmations} confirmations</p>
                   </div>
-                  <p className="text-cyan-100/55 text-right">{pattern.category}{pattern.subcategory ? ` / ${pattern.subcategory}` : ''}</p>
+                  <p className="text-cyan-100 text-right">{pattern.category}{pattern.subcategory ? ` / ${pattern.subcategory}` : ''}</p>
                 </div>
               ))}
-              {!data?.patterns?.length && <p className="p-3 text-white/25 text-xs">No generalized patterns yet.</p>}
+              {!data?.patterns?.length && <p className="p-3 text-ink-muted text-xs">No generalized patterns yet.</p>}
             </div>
           </div>
           <div>
-            <p className="text-white/30 text-xs uppercase tracking-wide mb-2">Recent explicit corrections</p>
+            <p className="text-ink-muted text-xs uppercase tracking-wide mb-2">Recent explicit corrections</p>
             <div className="max-h-64 overflow-y-auto rounded-xl border border-white/[0.08] divide-y divide-white/[0.06]">
               {activeCorrections.map(correction => (
                 <div key={correction.id} className="p-3 flex items-center justify-between gap-4 text-xs">
                   <div>
-                    <p className="text-white/60">{correction.merchant}</p>
-                    <p className="mt-1 text-white/25">{correction.old_category || 'Unclassified'} → {correction.new_category}</p>
+                    <p className="text-ink-secondary">{correction.merchant}</p>
+                    <p className="mt-1 text-ink-muted">{correction.old_category || 'Unclassified'} → {correction.new_category}</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => undoMutation.mutate(correction.id)}
                     disabled={undoMutation.isPending}
-                    className="min-h-11 px-3 rounded-xl text-white/45 hover:bg-white/[0.06] flex items-center gap-2"
+                    className="min-h-11 px-3 rounded-xl text-ink-muted hover:bg-white/[0.06] flex items-center gap-2"
                   >
                     <RotateCcw size={13} />
                     Undo
                   </button>
                 </div>
               ))}
-              {!activeCorrections.length && <p className="p-3 text-white/25 text-xs">No active corrections yet.</p>}
+              {!activeCorrections.length && <p className="p-3 text-ink-muted text-xs">No active corrections yet.</p>}
             </div>
           </div>
         </div>
@@ -183,8 +183,8 @@ export default function ClassificationMemorySettings() {
             onClose={() => setResetOpen(false)}
             className="w-full max-w-md rounded-2xl border border-white/[0.14] bg-[#102342] p-5"
           >
-            <h3 id="reset-memory-title" className="text-white/85 text-lg">Reset classification memory?</h3>
-            <p id="reset-memory-description" className="mt-2 text-white/40 text-sm leading-relaxed">
+            <h3 id="reset-memory-title" className="text-ink-primary text-lg">Reset classification memory?</h3>
+            <p id="reset-memory-description" className="mt-2 text-ink-muted text-sm leading-relaxed">
               Exact merchant memory, generalized patterns, and correction history will be removed after a local backup. Existing transaction labels stay unchanged.
             </p>
             <div className="mt-4">
@@ -196,14 +196,14 @@ export default function ClassificationMemorySettings() {
                 label="Enter your PIN to reset learned memory"
               />
             </div>
-            {resetMutation.error && <p className="mt-2 text-rose-200/65 text-xs" role="alert">{resetMutation.error.message}</p>}
+            {resetMutation.error && <p className="mt-2 text-rose-200 text-xs" role="alert">{resetMutation.error.message}</p>}
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setResetOpen(false)} className="min-h-11 px-4 rounded-xl text-white/45 text-sm">Cancel</button>
+              <button type="button" onClick={() => setResetOpen(false)} className="min-h-11 px-4 rounded-xl text-ink-muted text-sm">Cancel</button>
               <button
                 type="button"
                 disabled={pin.length < 4 || resetMutation.isPending}
                 onClick={() => resetMutation.mutate(pin)}
-                className="min-h-11 px-4 rounded-xl border border-rose-300/[0.15] bg-rose-400/[0.08] text-rose-100/65 disabled:opacity-35 text-sm"
+                className="min-h-11 px-4 rounded-xl border border-rose-300/[0.15] bg-rose-400/[0.08] text-rose-100 disabled:opacity-35 text-sm"
               >
                 Reset memory
               </button>

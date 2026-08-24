@@ -10,9 +10,17 @@ declares:
 - a conservative text detector;
 - a parse function returning `StatementParseResult`.
 
-The registry sniffs PDFs, selects a matching plugin, and retains ordered
-fallback behavior so existing HDFC files continue to work. HDFC savings
-supports PDF, XLS, and XLSX; HDFC credit cards currently support PDF.
+The registry sniffs PDFs and requires exactly one matching plugin; it never
+falls through to a weaker parser. Certified PDF profiles currently cover HDFC
+savings, HDFC credit cards, Kotak savings, and SBI savings relationship
+statements. HDFC savings also supports XLS and XLSX.
+
+Savings profiles must preserve explicit debit and credit columns, reconstruct
+split table segments, verify row-by-row running balances, compare every
+available statement summary control, and establish account identity where the
+source provides it. A mismatch rejects the complete file before any ledger
+write. SBI relationship statements with multiple savings sections require the
+user to select the matching configured account.
 
 ## Adding another bank
 

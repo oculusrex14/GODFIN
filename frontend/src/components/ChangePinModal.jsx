@@ -81,20 +81,20 @@ export default function ChangePinModal({ open, onClose }) {
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
               <h2 id="change-pin-title" className="text-base font-semibold text-white">Change PIN</h2>
-              <button onClick={handleClose} className="text-slate-400 hover:text-white" aria-label="Close change PIN dialog">
+              <button onClick={handleClose} className="text-ink-muted hover:text-white" aria-label="Close change PIN dialog">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             {success ? (
               <div className="p-8 text-center">
-                <ShieldCheck className="h-10 w-10 text-emerald-400 mx-auto mb-3" />
+                <ShieldCheck className="h-10 w-10 text-emerald-200 mx-auto mb-3" />
                 <p className="text-white font-medium">PIN Changed</p>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="p-5 space-y-4">
                 <div>
-                  <label htmlFor="change-pin-current" className="block text-xs text-slate-400 mb-1">Current PIN</label>
+                  <label htmlFor="change-pin-current" className="block text-xs text-ink-muted mb-1">Current PIN</label>
                   <input
                     id="change-pin-current"
                     type="password"
@@ -107,7 +107,7 @@ export default function ChangePinModal({ open, onClose }) {
                   />
                 </div>
                 <div>
-                  <label htmlFor="change-pin-new" className="block text-xs text-slate-400 mb-1">New PIN</label>
+                  <label htmlFor="change-pin-new" className="block text-xs text-ink-muted mb-1">New PIN</label>
                   <input
                     id="change-pin-new"
                     type="password"
@@ -120,7 +120,7 @@ export default function ChangePinModal({ open, onClose }) {
                   />
                 </div>
                 <div>
-                  <label htmlFor="change-pin-confirm" className="block text-xs text-slate-400 mb-1">Confirm New PIN</label>
+                  <label htmlFor="change-pin-confirm" className="block text-xs text-ink-muted mb-1">Confirm New PIN</label>
                   <input
                     id="change-pin-confirm"
                     type="password"
@@ -133,7 +133,7 @@ export default function ChangePinModal({ open, onClose }) {
                   />
                 </div>
 
-                {error && <p className="text-rose-400 text-sm" role="alert">{error}</p>}
+                {error && <p className="text-rose-200 text-sm" role="alert">{error}</p>}
 
                 <button
                   type="submit"

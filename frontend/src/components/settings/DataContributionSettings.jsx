@@ -46,12 +46,12 @@ export default function DataContributionSettings() {
           : 'border-white/[0.08] bg-white/[0.025]'
       }`}>
         <div className="flex items-start gap-3">
-          <HandCoins size={19} className="mt-0.5 text-cyan-200/55 shrink-0" />
+          <HandCoins size={19} className="mt-0.5 text-cyan-200 shrink-0" />
           <div>
-            <div className="text-white/75 text-sm">
+            <div className="text-ink-secondary text-sm">
               ₹50,000 privacy-safe research pilot
             </div>
-            <p className="mt-1 text-white/35 text-xs leading-relaxed">
+            <p className="mt-1 text-ink-muted text-xs leading-relaxed">
               {status.enabled
                 ? 'Participation is separate, optional, and off by default.'
                 : 'The pilot is currently closed. No finance data can leave this device.'}
@@ -61,13 +61,13 @@ export default function DataContributionSettings() {
       </div>
 
       <div className="grid sm:grid-cols-2 gap-2 text-[0.7rem]">
-        <div className="rounded-[14px] bg-white/[0.03] p-3 text-white/35">
-          <ShieldCheck size={14} className="mb-2 text-emerald-300/55" />
+        <div className="rounded-[14px] bg-white/[0.03] p-3 text-ink-muted">
+          <ShieldCheck size={14} className="mb-2 text-emerald-200" />
           Never includes names, account/card numbers, UPI IDs, emails, phones,
           addresses, exact dates, amounts, balances, or descriptions.
         </div>
-        <div className="rounded-[14px] bg-white/[0.03] p-3 text-white/35">
-          <CheckCircle2 size={14} className="mb-2 text-emerald-300/55" />
+        <div className="rounded-[14px] bg-white/[0.03] p-3 text-ink-muted">
+          <CheckCircle2 size={14} className="mb-2 text-emerald-200" />
           ₹100 for the first accepted 90-day aggregate; capped template rewards
           may bring the participant maximum to ₹300.
         </div>
@@ -83,7 +83,7 @@ export default function DataContributionSettings() {
               disabled={consentMutation.isPending}
               onChange={event => consentMutation.mutate(event.target.checked)}
             />
-            <span className="text-white/45 text-xs leading-relaxed">
+            <span className="text-ink-muted text-xs leading-relaxed">
               I separately consent to build a coarse aggregate preview on this
               computer under consent version {status.consent_version}. Nothing is
               submitted until I review the preview and press Submit.
@@ -110,10 +110,10 @@ export default function DataContributionSettings() {
 
       {preview && (
         <div className="rounded-[14px] border border-emerald-400/15 bg-emerald-400/[0.04] p-4">
-          <div className="text-emerald-200/70 text-xs">
+          <div className="text-emerald-200 text-xs">
             Local redaction checks passed · {preview.payload.transaction_count_band} transactions
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-2 text-[0.68rem] text-white/35">
+          <div className="mt-2 grid grid-cols-2 gap-2 text-[0.68rem] text-ink-muted">
             <span>Window: {preview.payload.window_days} days</span>
             <span>Eligible: {preview.eligible ? 'yes' : 'not yet'}</span>
             <span>Dates/amounts: excluded</span>
@@ -121,12 +121,12 @@ export default function DataContributionSettings() {
           </div>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {Object.entries(preview.payload.category_share_bands_percent || {}).map(([category, share]) => (
-              <span key={category} className="rounded-full bg-white/[0.05] px-2 py-1 text-[0.62rem] text-white/35">
+              <span key={category} className="rounded-full bg-white/[0.05] px-2 py-1 text-[0.62rem] text-ink-muted">
                 {category}: ~{share}%
               </span>
             ))}
           </div>
-          <p className="mt-3 text-white/25 text-[0.65rem] break-all">
+          <p className="mt-3 text-ink-muted text-[0.65rem] break-all">
             Bundle digest: {preview.digest}
           </p>
         </div>

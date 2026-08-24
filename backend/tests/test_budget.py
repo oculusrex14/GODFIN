@@ -124,7 +124,59 @@ def test_financial_profile_with_data(db_session):
     assert profile.savings_rate > 0
     assert profile.fixed_expense_ratio > 0
     assert profile.impulse_index is None
-    assert profile.data_status == "calculated"
+    assert profile.data_status == "partial"
+    assert profile.metrics["savings_rate"]["available"] is True
+    assert profile.metrics["impulse_index"]["available"] is False
+    assert "At least 5 purchases" in profile.metrics["impulse_index"]["unavailable_reason"]
+
+
+def test_financial_profile_uses_latest_completed_month_with_data(db_session):
+    _add_txn(
+        db_session,
+        "JUNE SALARY",
+        50000,
+        date(2026, 6, 5),
+        category="INCOME",
+        txn_type="credit",
+    )
+    _add_txn(
+        db_session,
+        "JUNE RENT",
+        10000,
+        date(2026, 6, 6),
+        category="HOUSING",
+    )
+    db_session.flush()
+
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+
+    assert profile.period_start == "2026-06-01"
+    assert profile.period_end == "2026-06-30"
+    assert profile.savings_rate == 80.0
+    assert profile.verified_income_count == 1
+    assert profile.spending_transaction_count == 1
+    assert profile.complete_month_count == 1
+
+
+def test_financial_profile_distinguishes_zero_from_unavailable(db_session):
+    _add_txn(
+        db_session,
+        "GROCER",
+        900,
+        date(2026, 7, 5),
+        category="FOOD & DINING",
+    )
+    db_session.flush()
+
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+
+    assert profile.subscription_dependency == 0.0
+    assert profile.metrics["subscription_dependency"]["available"] is True
+    assert profile.savings_rate is None
+    assert profile.metrics["savings_rate"]["available"] is False
+    assert "No verified income" in profile.metrics["savings_rate"]["unavailable_reason"]
+    assert profile.verified_income_total == 0.0
+    assert profile.spending_total == 900.0
 
 
 def test_financial_profile_ignores_partial_current_month(db_session):
@@ -293,8 +345,11 @@ def test_financial_profile_api(auth_client):
     assert "savings_rate" in data
     assert "impulse_index" in data
     assert "fixed_expense_ratio" in data
-    assert data["calculation_version"] == "2.0"
+    assert data["calculation_version"] == "3.0"
     assert data["period_start"]
+    assert data["verified_income_count"] == 0
+    assert data["spending_transaction_count"] == 0
+    assert data["metrics"]["savings_rate"]["available"] is False
 
 
 def test_elasticity_api(auth_client):

@@ -18,10 +18,10 @@ import { GlassButton } from '../GlassButton';
 import DialogSurface from '../DialogSurface';
 
 // Static glassmorphism style constants - defined at module level to avoid recreating on every render
-const GLASS_INPUT = 'bg-white/[0.08] backdrop-blur-[16px] border border-white/[0.15] text-white/80 text-[0.8rem] rounded-[14px] px-4 py-2.5 focus:outline-none focus:border-cyan-400/30 transition-all';
+const GLASS_INPUT = 'bg-white/[0.08] backdrop-blur-[16px] border border-white/[0.15] text-ink-primary text-[0.8rem] rounded-[14px] px-4 py-2.5 focus:outline-none focus:border-cyan-400/30 transition-all';
 const GLASS_INPUT_HOVER = 'hover:bg-white/[0.12]';
-const GLASS_BUTTON_BASE = 'bg-white/[0.08] backdrop-blur-[12px] text-white/70 border border-white/[0.12] rounded-[14px] hover:bg-white/[0.12] hover:text-white transition-all text-[0.8rem]';
-const GLASS_BUTTON_PRIMARY = 'bg-cyan-500/20 text-cyan-300 border-cyan-400/30 shadow-[0_0_16px_rgba(34,211,238,0.1)] hover:bg-cyan-500/30';
+const GLASS_BUTTON_BASE = 'bg-white/[0.08] backdrop-blur-[12px] text-ink-secondary border border-white/[0.12] rounded-[14px] hover:bg-white/[0.12] hover:text-white transition-all text-[0.8rem]';
+const GLASS_BUTTON_PRIMARY = 'bg-cyan-500/20 text-cyan-200 border-cyan-400/30 shadow-[0_0_16px_rgba(34,211,238,0.1)] hover:bg-cyan-500/30';
 const GLASS_CARD = 'relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)]';
 const GLASS_GRADIENT_LINE = 'absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/40 to-transparent';
 const GLASS_CARD_ACTIVE = 'relative overflow-hidden rounded-[16px] bg-white/[0.08] backdrop-blur-[16px] border border-emerald-500/30 shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.1)]';
@@ -264,10 +264,10 @@ function LLMSettings() {
   // Get tier badge color
   const getTierColor = (tier) => {
     switch (tier) {
-      case 'top': return 'bg-amber-500/20 text-amber-400';
-      case 'mid': return 'bg-blue-500/20 text-blue-400';
-      case 'light': return 'bg-slate-500/20 text-slate-400';
-      default: return 'bg-slate-500/20 text-slate-400';
+      case 'top': return 'bg-amber-500/20 text-amber-200';
+      case 'mid': return 'bg-blue-500/20 text-blue-200';
+      case 'light': return 'bg-slate-500/20 text-ink-muted';
+      default: return 'bg-slate-500/20 text-ink-muted';
     }
   };
 
@@ -282,8 +282,8 @@ function LLMSettings() {
             exit={{ opacity: 0, y: -10 }}
             className={`px-4 py-2.5 rounded-[12px] text-[0.8rem] border backdrop-blur-[16px] ${
               toast.type === 'error'
-                ? 'bg-rose-500/10 border-rose-400/30 text-rose-300'
-                : 'bg-emerald-500/10 border-emerald-400/30 text-emerald-300'
+                ? 'bg-rose-500/10 border-rose-400/30 text-rose-200'
+                : 'bg-emerald-500/10 border-emerald-400/30 text-emerald-200'
             }`}
           >
             {toast.msg}
@@ -298,20 +298,20 @@ function LLMSettings() {
           <div className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-[12px] bg-emerald-500/20 backdrop-blur-[8px]">
-                <Cpu className="h-5 w-5 text-emerald-400" />
+                <Cpu className="h-5 w-5 text-emerald-200" />
               </div>
               <div>
-                <div className="text-white/90 text-[0.9rem] flex items-center gap-2" style={{ fontWeight: 500 }}>
+                <div className="text-ink-primary text-[0.9rem] flex items-center gap-2" style={{ fontWeight: 500 }}>
                   {PROVIDER_NAMES[currentConfig.provider] || currentConfig.provider}
-                  <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[0.7rem] rounded-full border border-emerald-400/20">
+                  <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-200 text-[0.7rem] rounded-full border border-emerald-400/20">
                     {!currentConfig.is_local && !currentConfig.hosted_data_consent ? 'Paused' : 'Active'}
                   </span>
                 </div>
-                <div className="text-white/40 text-[0.75rem]">
+                <div className="text-ink-muted text-[0.75rem]">
                   Model: {currentConfig.model} • Auth: {AUTH_METHODS[currentConfig.auth_method]}
                 </div>
                 {!currentConfig.is_local && !currentConfig.hosted_data_consent && (
-                  <div className="mt-1 text-amber-300/70 text-[0.72rem]">
+                  <div className="mt-1 text-amber-200 text-[0.72rem]">
                     Paused until the hosted-data disclosure is accepted
                   </div>
                 )}
@@ -321,7 +321,7 @@ function LLMSettings() {
             <div className="flex items-center gap-1">
               <button
                 onClick={() => handleEdit(currentConfig)}
-                className="p-2 text-white/40 hover:text-white/80 transition-colors rounded-[10px] hover:bg-white/[0.08]"
+                className="p-2 text-ink-muted hover:text-ink-primary transition-colors rounded-[10px] hover:bg-white/[0.08]"
                 title="Edit configuration"
                 aria-label="Edit AI configuration"
               >
@@ -330,7 +330,7 @@ function LLMSettings() {
               <button
                 onClick={() => deleteMutation.mutate(currentConfig.id)}
                 disabled={deleteMutation.isPending}
-                className="p-2 text-white/40 hover:text-rose-400 transition-colors rounded-[10px] hover:bg-rose-500/10"
+                className="p-2 text-ink-muted hover:text-rose-200 transition-colors rounded-[10px] hover:bg-rose-500/10"
                 title="Delete configuration"
                 aria-label="Delete AI configuration"
               >
@@ -345,11 +345,11 @@ function LLMSettings() {
           <div className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-[12px] bg-white/[0.08]">
-                <Cpu className="h-5 w-5 text-white/50" />
+                <Cpu className="h-5 w-5 text-ink-muted" />
               </div>
               <div>
-                <div className="text-white/80 text-[0.9rem]" style={{ fontWeight: 500 }}>No LLM Configured</div>
-                <div className="text-white/30 text-[0.75rem]">
+                <div className="text-ink-primary text-[0.9rem]" style={{ fontWeight: 500 }}>No LLM Configured</div>
+                <div className="text-ink-muted text-[0.75rem]">
                   Configure an LLM provider for AI-powered classification
                 </div>
               </div>
@@ -357,7 +357,7 @@ function LLMSettings() {
 
             <button
               onClick={handleAddNew}
-              className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 text-cyan-300 rounded-[14px] hover:bg-cyan-500/30 transition-all text-[0.8rem] border border-cyan-400/30 backdrop-blur-[12px] shadow-[0_0_16px_rgba(34,211,238,0.1)]"
+              className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 text-cyan-200 rounded-[14px] hover:bg-cyan-500/30 transition-all text-[0.8rem] border border-cyan-400/30 backdrop-blur-[12px] shadow-[0_0_16px_rgba(34,211,238,0.1)]"
             >
               <Plus className="h-4 w-4" />
               Configure LLM
@@ -392,19 +392,19 @@ function LLMSettings() {
           >
             <div className={GLASS_GRADIENT_LINE} />
             <div className="p-6">
-              <h3 id="llm-configuration-title" className="text-[1.1rem] text-white/90 mb-1" style={{ fontWeight: 500 }}>
+              <h3 id="llm-configuration-title" className="text-[1.1rem] text-ink-primary mb-1" style={{ fontWeight: 500 }}>
                 {editingConfig ? 'Edit LLM Configuration' : 'Configure LLM Provider'}
               </h3>
-              <p id="llm-configuration-description" className="text-white/40 text-[0.8rem] mb-6">
+              <p id="llm-configuration-description" className="text-ink-muted text-[0.8rem] mb-6">
                 Select an AI provider for transaction classification
               </p>
 
               <div className="space-y-5">
                 {/* Provider Selection */}
                 <div>
-                  <label htmlFor="llm-provider" className="text-white/50 text-[0.8rem] block mb-2">
+                  <label htmlFor="llm-provider" className="text-ink-muted text-[0.8rem] block mb-2">
                     Provider
-                    {providersLoading && <span className="ml-2 text-white/30">(Loading...)</span>}
+                    {providersLoading && <span className="ml-2 text-ink-muted">(Loading...)</span>}
                   </label>
                   <div className="relative">
                     <select
@@ -423,15 +423,15 @@ function LLMSettings() {
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30 pointer-events-none" />
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-muted pointer-events-none" />
                   </div>
                   {providersError && (
-                    <p className="text-rose-400/80 text-[0.75rem] mt-1">
+                    <p className="text-rose-200 text-[0.75rem] mt-1">
                       Error loading providers. Please check console.
                     </p>
                   )}
                   {selectedProvider && providersData?.[selectedProvider]?.description && (
-                    <p className="text-white/30 text-[0.75rem] mt-1">
+                    <p className="text-ink-muted text-[0.75rem] mt-1">
                       {providersData[selectedProvider].description}
                     </p>
                   )}
@@ -440,7 +440,7 @@ function LLMSettings() {
                 {/* Authentication Method */}
                 {selectedProvider && (
                   <div>
-                    <label className="text-white/50 text-[0.8rem] block mb-2">
+                    <label className="text-ink-muted text-[0.8rem] block mb-2">
                       Authentication Method
                     </label>
                     <div className="flex gap-2">
@@ -453,8 +453,8 @@ function LLMSettings() {
                           disabled={selectedProvider === 'ollama_local'}
                           className={`flex-1 px-3 py-2 rounded-[14px] text-[0.8rem] transition-all backdrop-blur-[12px] border ${
                             selectedAuth === method
-                              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/30 shadow-[0_0_16px_rgba(34,211,238,0.1)]'
-                              : 'bg-white/[0.08] text-white/60 border-white/[0.12] hover:bg-white/[0.12] hover:text-white/80'
+                              ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/30 shadow-[0_0_16px_rgba(34,211,238,0.1)]'
+                              : 'bg-white/[0.08] text-ink-secondary border-white/[0.12] hover:bg-white/[0.12] hover:text-ink-primary'
                           } ${selectedProvider === 'ollama_local' ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           {AUTH_METHODS[method]}
@@ -462,7 +462,7 @@ function LLMSettings() {
                       ))}
                     </div>
                     {selectedProvider === 'ollama_local' && (
-                      <p className="text-white/30 text-[0.75rem] mt-1">
+                      <p className="text-ink-muted text-[0.75rem] mt-1">
                         Ollama Local does not require authentication
                       </p>
                     )}
@@ -472,7 +472,7 @@ function LLMSettings() {
                 {/* Model Selection */}
                 {selectedProvider && availableModels && (
                   <div>
-                    <p id="llm-model-label" className="text-white/50 text-[0.8rem] block mb-2">
+                    <p id="llm-model-label" className="text-ink-muted text-[0.8rem] block mb-2">
                       Model
                     </p>
 
@@ -495,14 +495,14 @@ function LLMSettings() {
                               type="button"
                               onClick={() => setSelectedModel(suggestion)}
                               aria-pressed={selectedModel === suggestion}
-                              className="text-[0.75rem] px-2.5 py-1 bg-white/[0.08] text-white/50 rounded-[10px] hover:bg-white/[0.12] hover:text-white/70 transition-all border border-white/[0.08]"
+                              className="text-[0.75rem] px-2.5 py-1 bg-white/[0.08] text-ink-muted rounded-[10px] hover:bg-white/[0.12] hover:text-ink-secondary transition-all border border-white/[0.08]"
                               title="Click to use this model"
                             >
                               {suggestion}
                             </button>
                           ))}
                         </div>
-                        <p className="text-white/30 text-[0.75rem]">
+                        <p className="text-ink-muted text-[0.75rem]">
                           Enter model name or click a suggestion. Format: name:tag
                         </p>
                       </div>
@@ -517,8 +517,8 @@ function LLMSettings() {
                             aria-pressed={selectedModel === model.value}
                             className={`w-full flex items-center justify-between px-3 py-2 rounded-[14px] text-[0.8rem] transition-all backdrop-blur-[12px] border ${
                               selectedModel === model.value
-                                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/30 shadow-[0_0_16px_rgba(34,211,238,0.1)]'
-                                : 'bg-white/[0.08] text-white/70 border-white/[0.12] hover:bg-white/[0.12] hover:text-white'
+                                ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/30 shadow-[0_0_16px_rgba(34,211,238,0.1)]'
+                                : 'bg-white/[0.08] text-ink-secondary border-white/[0.12] hover:bg-white/[0.12] hover:text-white'
                             }`}
                           >
                             <span>{model.label}</span>
@@ -537,7 +537,7 @@ function LLMSettings() {
                 {/* Base URL (for Ollama) */}
                 {selectedProvider?.includes('ollama') && (
                   <div>
-                    <label htmlFor="llm-base-url" className="text-white/50 text-[0.8rem] block mb-2 flex items-center gap-1">
+                    <label htmlFor="llm-base-url" className="text-ink-muted text-[0.8rem] block mb-2 flex items-center gap-1">
                       <Server className="h-3 w-3" />
                       Base URL
                     </label>
@@ -555,11 +555,11 @@ function LLMSettings() {
                 {/* API Key */}
                 {selectedProvider && selectedAuth === 'openapi' && providersData?.[selectedProvider]?.requires_auth && (
                   <div>
-                    <label htmlFor="llm-api-key" className="text-white/50 text-[0.8rem] block mb-2 flex items-center gap-1">
+                    <label htmlFor="llm-api-key" className="text-ink-muted text-[0.8rem] block mb-2 flex items-center gap-1">
                       <Key className="h-3 w-3" />
                       API Key
                       {editingConfig?.has_api_key && (
-                        <span className="text-white/30">(leave blank to keep existing)</span>
+                        <span className="text-ink-muted">(leave blank to keep existing)</span>
                       )}
                     </label>
                     <input
@@ -570,14 +570,14 @@ function LLMSettings() {
                       placeholder="Enter your API key"
                       className={`w-full ${GLASS_INPUT} ${GLASS_INPUT_HOVER}`}
                     />
-                    <p className="text-white/30 text-[0.7rem] mt-1">
+                    <p className="text-ink-muted text-[0.7rem] mt-1">
                       Your API key is stored securely and never displayed
                     </p>
                   </div>
                 )}
 
                 {selectedProvider && providersData?.[selectedProvider]?.is_local === false && (
-                  <label className="flex items-start gap-3 rounded-[14px] border border-amber-300/20 bg-amber-400/[0.06] p-3 text-white/55 text-[0.78rem] leading-relaxed">
+                  <label className="flex items-start gap-3 rounded-[14px] border border-amber-300/20 bg-amber-400/[0.06] p-3 text-ink-secondary text-[0.78rem] leading-relaxed">
                     <input
                       type="checkbox"
                       checked={hostedConsent}
@@ -609,8 +609,8 @@ function LLMSettings() {
                     {testResult && (
                       <div className={`mt-3 p-3 rounded-[12px] text-[0.8rem] border backdrop-blur-[12px] ${
                         testResult.success
-                          ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30'
-                          : 'bg-rose-500/10 text-rose-300 border-rose-400/30'
+                          ? 'bg-emerald-500/10 text-emerald-200 border-emerald-400/30'
+                          : 'bg-rose-500/10 text-rose-200 border-rose-400/30'
                       }`}>
                         <div className="flex items-start gap-2">
                           {testResult.success ? (

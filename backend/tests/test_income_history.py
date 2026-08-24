@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from app.models.audit_log import AuditLog
+from app.models.audit_session import AuditSession
 from app.models.income_source import IncomeMatchSuggestion, IncomeSource
 from app.models.transaction import Transaction
+from app.core.ingestion import run_ingestion
 from app.seed import CC_ACCOUNT_ID, SAVINGS_ACCOUNT_ID
 
 
@@ -218,3 +220,186 @@ def test_income_source_model_defaults_to_a_bounded_match_window(db_session):
     assert source.effective_from is not None
     assert source.effective_to is None
     assert source.amount_tolerance == 0.20
+
+
+def _actual_period_payload(**overrides):
+    payload = {
+        "source_name": "Synthetic salary",
+        "amount": 34000.0,
+        "account_id": SAVINGS_ACCOUNT_ID,
+        "subcategory": "Salary",
+        "start_month": "2026-01",
+        "end_month": "2026-07",
+        "payment_day": 28,
+        "note": "Owner-confirmed historical salary",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_historical_actual_income_preview_confirmation_and_new_rate(auth_client):
+    preview = auth_client.post(
+        "/api/v1/income/actual/period/preview",
+        json=_actual_period_payload(),
+    )
+    assert preview.status_code == 200, preview.text
+    reviewed = preview.json()
+    assert len(reviewed["entries"]) == 7
+    assert reviewed["entries"][0] == {"date": "2026-01-28", "amount": 34000.0}
+    assert reviewed["entries"][-1] == {"date": "2026-07-28", "amount": 34000.0}
+    assert reviewed["total_amount"] == 238000.0
+
+    confirmed = auth_client.post(
+        "/api/v1/income/actual/period/confirm",
+        json={
+            **_actual_period_payload(),
+            "preview_fingerprint": reviewed["preview_fingerprint"],
+            "confirm": True,
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["created"] == 7
+    assert confirmed.json()["skipped_existing"] == 0
+
+    for month in range(1, 8):
+        dashboard = auth_client.get(
+            "/api/v1/dashboard/stats",
+            params={"month": f"2026-{month:02d}"},
+        ).json()
+        assert dashboard["month_income"] == 34000.0
+
+    august = auth_client.post(
+        "/api/v1/income/actual",
+        json={
+            "source_name": "Synthetic salary",
+            "amount": 42000.0,
+            "date": "2026-08-01",
+            "account_id": SAVINGS_ACCOUNT_ID,
+            "subcategory": "Salary",
+        },
+    )
+    assert august.status_code == 201, august.text
+    assert august.json()["created"] == 1
+    assert auth_client.get(
+        "/api/v1/dashboard/stats",
+        params={"month": "2026-08"},
+    ).json()["month_income"] == 42000.0
+    assert auth_client.get(
+        "/api/v1/dashboard/stats",
+        params={"month": "2026-01"},
+    ).json()["month_income"] == 34000.0
+
+    repeated = auth_client.post(
+        "/api/v1/income/actual/period/confirm",
+        json={
+            **_actual_period_payload(),
+            "preview_fingerprint": reviewed["preview_fingerprint"],
+            "confirm": True,
+        },
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["created"] == 0
+    assert repeated.json()["skipped_existing"] == 7
+
+
+def test_expected_income_change_does_not_rewrite_actual_history(auth_client):
+    source = _source(
+        auth_client,
+        expected_amount=34000.0,
+        account_id=SAVINGS_ACCOUNT_ID,
+    )
+    recorded = auth_client.post(
+        "/api/v1/income/actual",
+        json={
+            "source_name": source["source_name"],
+            "income_source_id": source["id"],
+            "amount": 34000.55,
+            "date": "2026-01-28",
+            "account_id": SAVINGS_ACCOUNT_ID,
+            "subcategory": "Salary",
+            "reference": "SYNTHETIC-REF",
+        },
+    )
+    assert recorded.status_code == 201, recorded.text
+
+    changed = auth_client.put(
+        f"/api/v1/income/{source['id']}",
+        json={"expected_amount": 50000.0},
+    )
+    assert changed.status_code == 200
+    dashboard = auth_client.get(
+        "/api/v1/dashboard/stats",
+        params={"month": "2026-01"},
+    ).json()
+    assert dashboard["month_income"] == 34000.55
+
+
+def test_historical_actual_income_batch_is_atomic_across_finalized_months(
+    auth_client,
+    db_session,
+):
+    db_session.add(
+        AuditSession(period_year=2026, period_month=3, status="finalized")
+    )
+    db_session.commit()
+    preview = auth_client.post(
+        "/api/v1/income/actual/period/preview",
+        json=_actual_period_payload(end_month="2026-03"),
+    ).json()
+
+    response = auth_client.post(
+        "/api/v1/income/actual/period/confirm",
+        json={
+            **_actual_period_payload(end_month="2026-03"),
+            "preview_fingerprint": preview["preview_fingerprint"],
+            "confirm": True,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "FINALIZED_PERIOD_READ_ONLY"
+    assert db_session.query(Transaction).filter_by(source="manual_income").count() == 0
+
+
+def test_matching_gmail_salary_links_manual_actual_instead_of_double_counting(
+    auth_client,
+    db_session,
+):
+    recorded = auth_client.post(
+        "/api/v1/income/actual",
+        json={
+            "source_name": "Synthetic salary",
+            "amount": 34000.0,
+            "date": "2026-02-10",
+            "account_id": SAVINGS_ACCOUNT_ID,
+            "subcategory": "Salary",
+        },
+    )
+    assert recorded.status_code == 201
+    transaction_id = recorded.json()["transaction_ids"][0]
+
+    result = run_ingestion(
+        db_session,
+        mock_messages=[
+            {
+                "id": "manual-income-match-1",
+                "sender": "alerts@hdfcbank.bank.in",
+                "subject": "Transaction Alert",
+                "body": (
+                    "Dear Customer, Rs. 34,000.00 is successfully credited to "
+                    "your account **0000 by VPA salary@ybl ACME SALARY on "
+                    "10-02-26. Your UPI transaction reference number is "
+                    "504123456780."
+                ),
+            }
+        ],
+    )
+
+    db_session.expire_all()
+    linked = db_session.query(Transaction).filter_by(id=transaction_id).one()
+    assert result.created == 0
+    assert result.skipped_duplicate == 1
+    assert db_session.query(Transaction).count() == 1
+    assert linked.reconciled is True
+    assert linked.email_message_id == "manual-income-match-1"
+    assert "reconciled_gmail" in linked.extraction_evidence

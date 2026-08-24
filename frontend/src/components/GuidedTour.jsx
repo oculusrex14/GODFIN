@@ -155,21 +155,21 @@ export default function GuidedTour() {
           <p className="text-[#54E1D0]/65 text-[0.62rem] uppercase tracking-[0.16em]">
             App tour · {stepNumber} of {TOUR_STEPS.length}
           </p>
-          <h2 className="mt-1.5 text-white/90 text-lg font-medium">{step.title}</h2>
+          <h2 className="mt-1.5 text-ink-primary text-lg font-medium">{step.title}</h2>
         </div>
         <button
           type="button"
           onClick={deactivateGuidedTour}
           aria-label="Close and resume the tour later"
-          className="rounded-full p-1.5 text-white/35 hover:bg-white/[0.06] hover:text-white/70"
+          className="rounded-full p-1.5 text-ink-muted hover:bg-white/[0.06] hover:text-ink-secondary"
         >
           <X size={17} />
         </button>
       </div>
-      <p className="mt-3 text-sm leading-relaxed text-white/55">{step.body}</p>
+      <p className="mt-3 text-sm leading-relaxed text-ink-secondary">{step.body}</p>
       <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.04] p-3">
-        <p className="text-[0.68rem] uppercase tracking-wide text-white/28">Try this</p>
-        <p className="mt-1 text-xs leading-relaxed text-white/48">{step.lookFor}</p>
+        <p className="text-[0.68rem] uppercase tracking-wide text-ink-muted">Try this</p>
+        <p className="mt-1 text-xs leading-relaxed text-ink-muted">{step.lookFor}</p>
       </div>
       <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
         <div
@@ -182,7 +182,7 @@ export default function GuidedTour() {
           type="button"
           onClick={back}
           disabled={stepNumber === 1 || mutation.isPending}
-          className="min-h-11 rounded-xl border border-white/[0.1] px-3 text-xs text-white/50 disabled:opacity-30"
+          className="min-h-11 rounded-xl border border-white/[0.1] px-3 text-xs text-ink-muted disabled:opacity-30"
         >
           <ChevronLeft size={15} className="inline" /> Back
         </button>
@@ -190,7 +190,7 @@ export default function GuidedTour() {
           type="button"
           onClick={skip}
           disabled={mutation.isPending}
-          className="min-h-11 px-2 text-xs text-white/35 hover:text-white/60"
+          className="min-h-11 px-2 text-xs text-ink-muted hover:text-ink-secondary"
         >
           Skip tour
         </button>
@@ -203,7 +203,7 @@ export default function GuidedTour() {
           {stepNumber === TOUR_STEPS.length ? 'Finish' : 'Next'} <ChevronRight size={15} className="inline" />
         </button>
       </div>
-      <p className="mt-2 text-[0.62rem] text-white/24">Close keeps your place. Skip marks the tour complete.</p>
+      <p className="mt-2 text-[0.62rem] text-ink-muted">Close keeps your place. Skip marks the tour complete.</p>
     </aside>
   );
 }

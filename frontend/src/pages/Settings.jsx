@@ -83,10 +83,10 @@ function HealthItem({ label, health }) {
   const healthy = ['ok', 'connected', 'ready'].includes(status);
   const warning = ['never', 'not_configured', 'unknown'].includes(status);
   const tone = healthy
-    ? 'text-emerald-300/80 bg-emerald-400/[0.08] border-emerald-400/[0.14]'
+    ? 'text-emerald-200 bg-emerald-400/[0.08] border-emerald-400/[0.14]'
     : warning
-      ? 'text-amber-300/80 bg-amber-400/[0.08] border-amber-400/[0.14]'
-      : 'text-rose-300/80 bg-rose-400/[0.08] border-rose-400/[0.14]';
+      ? 'text-amber-200 bg-amber-400/[0.08] border-amber-400/[0.14]'
+      : 'text-rose-200 bg-rose-400/[0.08] border-rose-400/[0.14]';
   return (
     <div className={`rounded-[14px] border p-3 ${tone}`}>
       <div className="flex items-center gap-2">
@@ -94,7 +94,7 @@ function HealthItem({ label, health }) {
         <span className="text-[0.72rem] uppercase tracking-wide">{label}</span>
         <span className="ml-auto text-[0.62rem] uppercase opacity-60">{status.replaceAll('_', ' ')}</span>
       </div>
-      <p className="mt-2 text-white/35 text-[0.68rem] leading-relaxed">
+      <p className="mt-2 text-ink-muted text-[0.68rem] leading-relaxed">
         {health?.message || 'Status unavailable.'}
       </p>
     </div>
@@ -378,8 +378,8 @@ export default function Settings() {
     <div className="space-y-5">
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <div className="flex items-center gap-3">
-          <SettingsIcon className="h-5 w-5 text-white/30" />
-          <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Settings</h1>
+          <SettingsIcon className="h-5 w-5 text-ink-muted" />
+          <h1 className="text-ink-primary text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Settings</h1>
         </div>
       </motion.div>
 
@@ -390,11 +390,11 @@ export default function Settings() {
           className="rounded-[18px] border border-rose-400/25 bg-rose-400/[0.09] px-4 py-3 text-rose-100"
         >
           <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-200" />
             <div>
               <p className="text-sm font-medium">Automatic backup protection needs attention</p>
-              <p className="mt-1 text-xs leading-relaxed text-white/55">{health.backup.message}</p>
-              <p className="mt-2 text-[0.68rem] text-white/35">
+              <p className="mt-1 text-xs leading-relaxed text-ink-secondary">{health.backup.message}</p>
+              <p className="mt-2 text-[0.68rem] text-ink-muted">
                 Last successful backup: {formatBackupDate(health.backup.last_success_at)}
                 {health.backup.next_retry_at
                   ? ` · Next automatic retry: ${formatBackupDate(health.backup.next_retry_at)}`
@@ -415,7 +415,7 @@ export default function Settings() {
             <HealthItem label="Backups" health={health?.backup} />
             <HealthItem label="License" health={health?.license} />
           </div>
-          <div className="mt-3 text-white/25 text-[0.68rem]">
+          <div className="mt-3 text-ink-muted text-[0.68rem]">
             Last ingest: {health?.ingestion?.last_run || 'Never'}
           </div>
         </GlassSection>
@@ -424,7 +424,7 @@ export default function Settings() {
       {/* Lifetime license */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
         <GlassSection title="Setup & Learning" icon={BookOpen} collapsible defaultExpanded={false} storageKey="godfin:settings:learning-expanded">
-          <p className="text-white/35 text-sm leading-relaxed">
+          <p className="text-ink-muted text-sm leading-relaxed">
             Setup connects the parts you choose. Learn GODFIN explains money ideas. The separate app tour guides you through the real screens and can be closed or resumed at any time.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -464,7 +464,7 @@ export default function Settings() {
               Restart app tour
             </GlassButton>
           </div>
-          <p className="mt-3 text-white/25 text-xs">
+          <p className="mt-3 text-ink-muted text-xs">
             App tour v{onboarding?.tutorial_version || 1} · {onboarding?.tutorial_completed ? 'Completed' : `Step ${onboarding?.tutorial_step || 1} saved`}
           </p>
         </GlassSection>
@@ -501,8 +501,8 @@ export default function Settings() {
           <div className="mt-4 pt-4 border-t border-white/[0.06]">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-white/70 text-[0.85rem]">Web Search</div>
-                <div className="text-white/25 text-[0.7rem]">Allow LLM to use web search for unfamiliar vendors</div>
+                <div className="text-ink-secondary text-[0.85rem]">Web Search</div>
+                <div className="text-ink-muted text-[0.7rem]">Allow LLM to use web search for unfamiliar vendors</div>
               </div>
               <ToggleSwitch
                 ariaLabel="Allow web search"
@@ -515,8 +515,8 @@ export default function Settings() {
           <div className="mt-4 pt-4 border-t border-white/[0.06]">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <div className="text-white/70 text-[0.85rem]">Match similar transaction descriptions</div>
-                <div className="text-white/25 text-[0.7rem]">
+                <div className="text-ink-secondary text-[0.85rem]">Match similar transaction descriptions</div>
+                <div className="text-ink-muted text-[0.7rem]">
                   Helps GODFIN recognize differently written versions of the same kind of purchase. It is optional, works on this computer, and needs an initial download of about 100 MB.
                 </div>
               </div>
@@ -547,7 +547,7 @@ export default function Settings() {
             </div>
             {embeddingStatus?.enabled && (
               <div className="mt-3">
-                <div className="flex justify-between text-[0.67rem] text-white/30 mb-1.5">
+                <div className="flex justify-between text-[0.67rem] text-ink-muted mb-1.5">
                   <span>{embeddingStatus.message}</span>
                   <span>{embeddingStatus.progress || 0}%</span>
                 </div>
@@ -569,8 +569,8 @@ export default function Settings() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-white/70 text-[0.85rem]">Database Backup</div>
-                <div className="text-white/25 text-[0.7rem]">Create a snapshot of your database</div>
+                <div className="text-ink-secondary text-[0.85rem]">Database Backup</div>
+                <div className="text-ink-muted text-[0.7rem]">Create a snapshot of your database</div>
               </div>
               <GlassButton icon={<Database size={14} />} onClick={() => backupMutation.mutate()} disabled={backupMutation.isPending}>
                 {backupMutation.isPending ? 'Creating...' : 'Create Backup'}
@@ -578,8 +578,8 @@ export default function Settings() {
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-white/70 text-[0.85rem]">Export CSV</div>
-                <div className="text-white/25 text-[0.7rem]">Download transactions as CSV</div>
+                <div className="text-ink-secondary text-[0.85rem]">Export CSV</div>
+                <div className="text-ink-muted text-[0.7rem]">Download transactions as CSV</div>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -587,44 +587,44 @@ export default function Settings() {
                   aria-label="Month to export as CSV"
                   value={csvMonth}
                   onChange={(e) => setCsvMonth(e.target.value)}
-                  className="bg-white/[0.06] border border-white/[0.12] rounded-[10px] px-3 py-1.5 text-white/60 text-[0.8rem] focus:outline-none focus:border-cyan-400/30"
+                  className="bg-white/[0.06] border border-white/[0.12] rounded-[10px] px-3 py-1.5 text-ink-secondary text-[0.8rem] focus:outline-none focus:border-cyan-400/30"
                 />
                 <GlassButton icon={<Download size={14} />} variant="secondary" onClick={() => downloadCSV(csvMonth)}>Download</GlassButton>
               </div>
             </div>
             <div className="pt-4 border-t border-white/[0.06] grid gap-2 sm:grid-cols-2 text-[0.72rem]">
               <div>
-                <div className="text-white/25">App version</div>
-                <div className="text-white/55 tabular-nums">{systemStatus?.build?.version || systemStatus?.version || 'Unknown'}</div>
+                <div className="text-ink-muted">App version</div>
+                <div className="text-ink-secondary tabular-nums">{systemStatus?.build?.version || systemStatus?.version || 'Unknown'}</div>
               </div>
               <div>
-                <div className="text-white/25">Build</div>
-                <div className="text-white/55 font-mono">{systemStatus?.build?.short_sha || 'Unknown'} · {systemStatus?.build?.channel || 'Unknown'}</div>
+                <div className="text-ink-muted">Build</div>
+                <div className="text-ink-secondary font-mono">{systemStatus?.build?.short_sha || 'Unknown'} · {systemStatus?.build?.channel || 'Unknown'}</div>
               </div>
               <div>
-                <div className="text-white/25">Local data format</div>
-                <div className="text-white/55 tabular-nums">Revision {systemStatus?.build?.schema_revision ?? 'Unknown'}</div>
+                <div className="text-ink-muted">Local data format</div>
+                <div className="text-ink-secondary tabular-nums">Revision {systemStatus?.build?.schema_revision ?? 'Unknown'}</div>
               </div>
               <div>
-                <div className="text-white/25">System</div>
-                <div className="text-white/55">{systemStatus?.build?.os || 'Unknown'} · {systemStatus?.build?.architecture || 'Unknown'}</div>
+                <div className="text-ink-muted">System</div>
+                <div className="text-ink-secondary">{systemStatus?.build?.os || 'Unknown'} · {systemStatus?.build?.architecture || 'Unknown'}</div>
               </div>
             </div>
             {backups?.length > 0 && (
               <div className="pt-4 border-t border-white/[0.06]">
-                <div className="text-white/30 text-[0.7rem] mb-2" style={{ fontWeight: 500 }}>Recent Backups</div>
+                <div className="text-ink-muted text-[0.7rem] mb-2" style={{ fontWeight: 500 }}>Recent Backups</div>
                 <div className="space-y-1.5">
                   {backups.slice(0, 5).map((b) => (
                     <div key={b.filename} className="flex flex-wrap items-center justify-between gap-2 text-[0.75rem] py-1">
-                      <span className="text-white/40">{formatBackupDate(b.created_at)}</span>
-                      <span className="flex flex-wrap items-center justify-end gap-2 text-white/20">
+                      <span className="text-ink-muted">{formatBackupDate(b.created_at)}</span>
+                      <span className="flex flex-wrap items-center justify-end gap-2 text-ink-muted">
                         <span>{formatBytes(b.size_bytes)} · <span className="font-mono">{b.filename}</span></span>
                         {typeof window.godfinDesktop?.restoreBackup === 'function' && (
                           <button
                             type="button"
                             onClick={() => handleRestoreClick(b)}
                             disabled={!b.restore_ready || restoreMutation.isPending}
-                            className="min-h-9 rounded-lg border border-amber-300/15 bg-amber-400/[0.06] px-2.5 text-[0.68rem] text-amber-100/65 transition-colors hover:bg-amber-400/[0.12] disabled:cursor-not-allowed disabled:opacity-35"
+                            className="min-h-9 rounded-lg border border-amber-300/15 bg-amber-400/[0.06] px-2.5 text-[0.68rem] text-amber-100 transition-colors hover:bg-amber-400/[0.12] disabled:cursor-not-allowed disabled:opacity-35"
                             title={b.restore_ready ? 'Restore this verified backup' : 'This older backup has no verification record'}
                           >
                             Restore
@@ -642,7 +642,7 @@ export default function Settings() {
 
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
         <GlassSection title="Classification Learning" icon={BrainCircuit} collapsible defaultExpanded={false} storageKey="godfin:settings:classification-expanded">
-          <p className="mb-4 text-white/35 text-sm leading-relaxed">
+          <p className="mb-4 text-ink-muted text-sm leading-relaxed">
             GODFIN uses supervised learning from your explicit corrections—not reinforcement learning. Exact merchant memory is always the strongest learned match.
           </p>
           <ClassificationMemorySettings />
@@ -660,8 +660,8 @@ export default function Settings() {
         <GlassSection title={devEnabled ? 'Classification Diagnostics' : 'Developer Mode'} icon={Code} collapsible defaultExpanded={false} storageKey="godfin:settings:developer-expanded">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-white/70 text-[0.85rem]">Enable Developer Mode</div>
-              <div className="text-white/25 text-[0.7rem]">Access classification health metrics and rules</div>
+              <div className="text-ink-secondary text-[0.85rem]">Enable Developer Mode</div>
+              <div className="text-ink-muted text-[0.7rem]">Access classification health metrics and rules</div>
             </div>
             <ToggleSwitch ariaLabel="Developer mode" enabled={devEnabled} onChange={handleDevToggle} />
           </div>
@@ -669,36 +669,36 @@ export default function Settings() {
           {/* Classification Health Metrics */}
           {devEnabled && devMode?.classification_health && (
             <div className="mt-4 pt-4 border-t border-white/[0.06]">
-              <div className="text-white/30 text-[0.7rem] mb-3" style={{ fontWeight: 500 }}>Classification Health</div>
+              <div className="text-ink-muted text-[0.7rem] mb-3" style={{ fontWeight: 500 }}>Classification Health</div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
                 {Object.entries(devMode.classification_health.source_counts || {}).map(([source, count]) => (
                   <div key={source} className="p-2.5 bg-white/[0.03] rounded-[10px]">
-                    <div className="text-white/60 text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>{count}</div>
-                    <div className="text-white/25 text-[0.65rem] uppercase">{source}</div>
+                    <div className="text-ink-secondary text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>{count}</div>
+                    <div className="text-ink-muted text-[0.65rem] uppercase">{source}</div>
                     {devMode.classification_health.avg_confidence?.[source] != null && (
-                      <div className="text-cyan-400/50 text-[0.6rem] mt-0.5">
+                      <div className="text-cyan-200 text-[0.6rem] mt-0.5">
                         {(devMode.classification_health.avg_confidence[source] * 100).toFixed(0)}% avg conf
                       </div>
                     )}
                   </div>
                 ))}
                 <div className="p-2.5 bg-amber-400/[0.04] rounded-[10px] border border-amber-400/[0.08]">
-                  <div className="text-amber-400/70 text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>
+                  <div className="text-amber-200 text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>
                     {devMode.classification_health.unclassified_count}
                   </div>
-                  <div className="text-amber-400/40 text-[0.65rem] uppercase">Unclassified</div>
+                  <div className="text-amber-200 text-[0.65rem] uppercase">Unclassified</div>
                 </div>
                 <div className="p-2.5 bg-white/[0.03] rounded-[10px]">
-                  <div className="text-white/60 text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>
+                  <div className="text-ink-secondary text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>
                     {devMode.classification_health.merchant_memory_count}
                   </div>
-                  <div className="text-white/25 text-[0.65rem] uppercase">Merchant Memory</div>
+                  <div className="text-ink-muted text-[0.65rem] uppercase">Merchant Memory</div>
                 </div>
                 <div className="p-2.5 bg-white/[0.03] rounded-[10px]">
-                  <div className="text-white/60 text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>
+                  <div className="text-ink-secondary text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>
                     {devMode.classification_health.active_rules_count}
                   </div>
-                  <div className="text-white/25 text-[0.65rem] uppercase">Active Rules</div>
+                  <div className="text-ink-muted text-[0.65rem] uppercase">Active Rules</div>
                 </div>
               </div>
             </div>
@@ -707,8 +707,8 @@ export default function Settings() {
           {devEnabled && (
             <div className="mt-4 pt-4 border-t border-white/[0.06]">
               <div className="flex items-center justify-between mb-3">
-                <div className="text-white/30 text-[0.7rem]" style={{ fontWeight: 500 }}>Classification Rules ({devMode?.rules?.length || 0})</div>
-                <button onClick={() => setShowAddRule(!showAddRule)} className="text-cyan-400/60 text-[0.7rem] hover:text-cyan-300/80 flex items-center gap-1">
+                <div className="text-ink-muted text-[0.7rem]" style={{ fontWeight: 500 }}>Classification Rules ({devMode?.rules?.length || 0})</div>
+                <button onClick={() => setShowAddRule(!showAddRule)} className="text-cyan-200 text-[0.7rem] hover:text-cyan-200 flex items-center gap-1">
                   <Plus size={12} /> Add Rule
                 </button>
               </div>
@@ -732,7 +732,7 @@ export default function Settings() {
                       aria-label="Classification rule match type"
                       value={ruleForm.rule_type}
                       onChange={(e) => setRuleForm(p => ({ ...p, rule_type: e.target.value }))}
-                      className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-white/70 outline-none"
+                      className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-ink-secondary outline-none"
                     >
                       <option value="contains">Contains</option>
                       <option value="exact">Exact</option>
@@ -744,7 +744,7 @@ export default function Settings() {
                       onChange={(e) => setRuleForm(p => ({ ...p, pattern: e.target.value }))}
                       placeholder="Pattern"
                       required
-                      className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-white/70 placeholder:text-white/20 outline-none"
+                      className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-ink-secondary placeholder:text-ink-muted outline-none"
                     />
                     <input
                       aria-label="Classification rule category"
@@ -752,14 +752,14 @@ export default function Settings() {
                       onChange={(e) => setRuleForm(p => ({ ...p, category: e.target.value }))}
                       placeholder="Category"
                       required
-                      className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-white/70 placeholder:text-white/20 outline-none"
+                      className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-ink-secondary placeholder:text-ink-muted outline-none"
                     />
                     <input
                       aria-label="Classification rule subcategory"
                       value={ruleForm.subcategory}
                       onChange={(e) => setRuleForm(p => ({ ...p, subcategory: e.target.value }))}
                       placeholder="Subcategory (optional)"
-                      className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-white/70 placeholder:text-white/20 outline-none"
+                      className="bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-ink-secondary placeholder:text-ink-muted outline-none"
                     />
                   </div>
                   <div className="flex items-center gap-2">
@@ -769,12 +769,12 @@ export default function Settings() {
                       value={ruleForm.priority}
                       onChange={(e) => setRuleForm(p => ({ ...p, priority: e.target.value }))}
                       placeholder="Priority"
-                      className="w-20 bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-white/70 placeholder:text-white/20 outline-none"
+                      className="w-20 bg-white/[0.06] border border-white/[0.1] rounded-lg px-2 py-1.5 text-[0.75rem] text-ink-secondary placeholder:text-ink-muted outline-none"
                     />
-                    <span className="text-white/20 text-[0.65rem]">Priority (lower = higher)</span>
+                    <span className="text-ink-muted text-[0.65rem]">Priority (lower = higher)</span>
                     <div className="flex-1" />
-                    <button type="button" onClick={() => setShowAddRule(false)} className="text-white/30 text-[0.7rem] hover:text-white/50 px-2 py-1">Cancel</button>
-                    <button type="submit" disabled={createRuleMutation.isPending} className="bg-cyan-500/20 text-cyan-400/80 text-[0.7rem] px-3 py-1 rounded-lg hover:bg-cyan-500/30">
+                    <button type="button" onClick={() => setShowAddRule(false)} className="text-ink-muted text-[0.7rem] hover:text-ink-muted px-2 py-1">Cancel</button>
+                    <button type="submit" disabled={createRuleMutation.isPending} className="bg-cyan-500/20 text-cyan-200 text-[0.7rem] px-3 py-1 rounded-lg hover:bg-cyan-500/30">
                       {createRuleMutation.isPending ? 'Creating...' : 'Create'}
                     </button>
                   </div>
@@ -784,15 +784,15 @@ export default function Settings() {
               <div className="max-h-48 overflow-y-auto space-y-1">
                 {(devMode?.rules || []).map((rule) => (
                   <div key={rule.id} className="flex items-center gap-3 text-[0.7rem] bg-white/[0.03] rounded-[10px] px-3 py-2 group">
-                    <span className="text-white/20 uppercase w-12 shrink-0">{rule.rule_type}</span>
-                    <span className="text-amber-400/60 font-mono flex-1 truncate">{rule.pattern}</span>
-                    <span className="text-emerald-400/60 shrink-0">{rule.category}</span>
-                    {rule.subcategory && <span className="text-white/20 shrink-0">{rule.subcategory}</span>}
-                    <span className="text-white/15 shrink-0">P{rule.priority}</span>
+                    <span className="text-ink-muted uppercase w-12 shrink-0">{rule.rule_type}</span>
+                    <span className="text-amber-200 font-mono flex-1 truncate">{rule.pattern}</span>
+                    <span className="text-emerald-200 shrink-0">{rule.category}</span>
+                    {rule.subcategory && <span className="text-ink-muted shrink-0">{rule.subcategory}</span>}
+                    <span className="text-ink-muted shrink-0">P{rule.priority}</span>
                     {!rule.is_system && (
                       <button
                         onClick={() => deleteRuleMutation.mutate(rule.id)}
-                        className="text-white/0 group-hover:text-rose-400/50 hover:!text-rose-400/80 transition-colors shrink-0"
+                        className="text-transparent group-hover:text-rose-200 hover:!text-rose-200 transition-colors shrink-0"
                         aria-label={`Delete classification rule ${rule.pattern}`}
                       >
                         <Trash2 size={12} />
@@ -820,8 +820,8 @@ export default function Settings() {
               .filter(([key]) => !['pin_hash', 'developer_mode', 'backup_directory'].includes(key))
               .map(([key, value]) => (
                 <div key={key} className="flex items-center justify-between text-[0.8rem]">
-                  <span className="text-white/30 font-mono text-[0.7rem]">{key}</span>
-                  <span className="text-white/50 text-[0.7rem] truncate max-w-[200px]">{value || '--'}</span>
+                  <span className="text-ink-muted font-mono text-[0.7rem]">{key}</span>
+                  <span className="text-ink-muted text-[0.7rem] truncate max-w-[200px]">{value || '--'}</span>
                 </div>
               ))}
           </div>
@@ -834,18 +834,18 @@ export default function Settings() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-white/70 text-[0.85rem]">Backend Status</div>
-                <div className="text-white/25 text-[0.7rem]">{systemStatus?.status === 'ok' ? 'Running normally' : 'Status unknown'}</div>
+                <div className="text-ink-secondary text-[0.85rem]">Backend Status</div>
+                <div className="text-ink-muted text-[0.7rem]">{systemStatus?.status === 'ok' ? 'Running normally' : 'Status unknown'}</div>
               </div>
               <div className="flex items-center gap-2">
                 <div className={`h-2 w-2 rounded-full ${systemStatus?.status === 'ok' ? 'bg-emerald-400/80' : 'bg-amber-400/80'}`} />
-                <span className="text-white/40 text-[0.7rem]">{systemStatus?.status === 'ok' ? 'Online' : 'Unknown'}</span>
+                <span className="text-ink-muted text-[0.7rem]">{systemStatus?.status === 'ok' ? 'Online' : 'Unknown'}</span>
               </div>
             </div>
             <div className="pt-4 border-t border-white/[0.06] flex items-center justify-between">
               <div>
-                <div className="text-white/70 text-[0.85rem]">Allow network access</div>
-                <div className="text-white/25 text-[0.7rem]">
+                <div className="text-ink-secondary text-[0.85rem]">Allow network access</div>
+                <div className="text-ink-muted text-[0.7rem]">
                   Off keeps GODFIN on this Mac. When enabled, other devices on your
                   trusted local network can reach GODFIN while it is running.
                 </div>
@@ -859,8 +859,8 @@ export default function Settings() {
             </div>
             <div className="pt-4 border-t border-white/[0.06] flex items-center justify-between gap-4">
               <div>
-                <div className="text-white/70 text-[0.85rem]">Support report</div>
-                <div className="text-white/25 text-[0.7rem]">
+                <div className="text-ink-secondary text-[0.85rem]">Support report</div>
+                <div className="text-ink-muted text-[0.7rem]">
                   Download service health without transactions, credentials, account details, or local file paths.
                 </div>
               </div>
@@ -873,7 +873,7 @@ export default function Settings() {
                 {diagnosticsMutation.isPending ? 'Preparing…' : 'Download'}
               </GlassButton>
             </div>
-            <div className="pt-4 border-t border-white/[0.06] rounded-xl text-white/30 text-[0.72rem] leading-relaxed">
+            <div className="pt-4 border-t border-white/[0.06] rounded-xl text-ink-muted text-[0.72rem] leading-relaxed">
               GODFIN does not run restart scripts from the settings screen. If a setting says a restart is required, quit and reopen the desktop app normally.
             </div>
           </div>
@@ -886,12 +886,12 @@ export default function Settings() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-white/70 text-[0.85rem]">Reset All Data</div>
-                <div className="text-white/25 text-[0.7rem]">Delete dynamic finance data, including net-worth items and prepared pilot bundles. Accounts &amp; settings preserved.</div>
+                <div className="text-ink-secondary text-[0.85rem]">Reset All Data</div>
+                <div className="text-ink-muted text-[0.7rem]">Delete dynamic finance data, including net-worth items and prepared pilot bundles. Accounts &amp; settings preserved.</div>
               </div>
               <GlassButton
                 variant="secondary"
-                icon={<Trash2 size={14} className="text-rose-400" />}
+                icon={<Trash2 size={14} className="text-rose-200" />}
                 onClick={handleResetClick}
                 disabled={resetDataMutation.isPending}
               >
@@ -920,7 +920,7 @@ export default function Settings() {
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-4">
-                <h3 id="sensitive-setting-title" className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>
+                <h3 id="sensitive-setting-title" className="text-ink-primary text-[1rem]" style={{ fontWeight: 400 }}>
                   {pendingSensitiveSetting.key === 'developer_mode'
                     ? 'Enter PIN to enable Developer Mode'
                     : pendingSensitiveSetting.key === 'allow_network_access'
@@ -933,7 +933,7 @@ export default function Settings() {
                   type="button"
                   aria-label="Close security confirmation"
                   onClick={() => { setPendingSensitiveSetting(null); setSensitivePin(''); }}
-                  className="text-white/30 hover:text-white/60"
+                  className="text-ink-muted hover:text-ink-secondary"
                 >
                   <X size={18} />
                 </button>
@@ -951,17 +951,17 @@ export default function Settings() {
                 />
               </div>
               {pendingSensitiveSetting.key === 'allow_network_access' && (
-                <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-400/[0.06] p-3 text-center text-[0.7rem] leading-relaxed text-amber-100/60">
+                <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-400/[0.06] p-3 text-center text-[0.7rem] leading-relaxed text-amber-100">
                   Only enable this on a trusted private network. Other devices on that
                   network may be able to reach your local GODFIN service after restart.
                 </p>
               )}
-              {pinError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3" role="alert">{pinError}</p>}
+              {pinError && <p className="text-rose-200 text-[0.75rem] text-center mt-3" role="alert">{pinError}</p>}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => { setPendingSensitiveSetting(null); setSensitivePin(''); }}
-                  className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] text-sm"
+                  className="min-h-11 px-4 rounded-xl text-ink-muted hover:bg-white/[0.06] text-sm"
                 >
                   Cancel
                 </button>
@@ -969,7 +969,7 @@ export default function Settings() {
                   type="button"
                   onClick={handlePinVerified}
                   disabled={sensitivePin.length < 4 || updateMutation.isPending || enableEmbeddingsMutation.isPending}
-                  className="min-h-11 px-4 rounded-xl bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 disabled:opacity-40 text-sm"
+                  className="min-h-11 px-4 rounded-xl bg-cyan-400/15 border border-cyan-300/20 text-cyan-100 disabled:opacity-40 text-sm"
                 >
                   {updateMutation.isPending || enableEmbeddingsMutation.isPending ? 'Checking…' : 'Continue'}
                 </button>
@@ -995,10 +995,10 @@ export default function Settings() {
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-start justify-between gap-4 mb-4">
                 <div>
-                  <h3 id="restore-backup-pin-title" className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>Enter PIN to Restore Backup</h3>
-                  <p className="mt-1 text-[0.7rem] leading-relaxed text-white/35">GODFIN will close its local service, verify and restore this backup, then reopen it automatically.</p>
+                  <h3 id="restore-backup-pin-title" className="text-ink-primary text-[1rem]" style={{ fontWeight: 400 }}>Enter PIN to Restore Backup</h3>
+                  <p className="mt-1 text-[0.7rem] leading-relaxed text-ink-muted">GODFIN will close its local service, verify and restore this backup, then reopen it automatically.</p>
                 </div>
-                <button type="button" disabled={restoreMutation.isPending} onClick={() => { setRestoreTarget(null); setRestorePin(''); }} className="text-white/30 hover:text-white/60 disabled:opacity-40" aria-label="Close restore backup dialog"><X size={18} /></button>
+                <button type="button" disabled={restoreMutation.isPending} onClick={() => { setRestoreTarget(null); setRestorePin(''); }} className="text-ink-muted hover:text-ink-secondary disabled:opacity-40" aria-label="Close restore backup dialog"><X size={18} /></button>
               </div>
               <div className="flex justify-center">
                 <PinInput
@@ -1012,10 +1012,10 @@ export default function Settings() {
                   label="Current PIN"
                 />
               </div>
-              {restoreError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3" role="alert">{restoreError}</p>}
+              {restoreError && <p className="text-rose-200 text-[0.75rem] text-center mt-3" role="alert">{restoreError}</p>}
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" disabled={restoreMutation.isPending} onClick={() => { setRestoreTarget(null); setRestorePin(''); }} className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] disabled:opacity-40 text-sm">Cancel</button>
-                <button type="button" onClick={handleRestorePinVerified} disabled={restorePin.length < 4 || restoreMutation.isPending} className="min-h-11 px-4 rounded-xl bg-amber-400/15 border border-amber-300/20 text-amber-100/80 disabled:opacity-40 text-sm">
+                <button type="button" disabled={restoreMutation.isPending} onClick={() => { setRestoreTarget(null); setRestorePin(''); }} className="min-h-11 px-4 rounded-xl text-ink-muted hover:bg-white/[0.06] disabled:opacity-40 text-sm">Cancel</button>
+                <button type="button" onClick={handleRestorePinVerified} disabled={restorePin.length < 4 || restoreMutation.isPending} className="min-h-11 px-4 rounded-xl bg-amber-400/15 border border-amber-300/20 text-amber-100 disabled:opacity-40 text-sm">
                   {restoreMutation.isPending ? 'Restoring…' : 'Restore backup'}
                 </button>
               </div>
@@ -1039,8 +1039,8 @@ export default function Settings() {
             >
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-4">
-                <h3 id="reset-data-pin-title" className="text-white/90 text-[1rem]" style={{ fontWeight: 400 }}>Enter PIN to Reset Data</h3>
-                <button onClick={() => { setShowResetPin(false); setResetPin(''); }} className="text-white/30 hover:text-white/60" aria-label="Close reset data dialog"><X size={18} /></button>
+                <h3 id="reset-data-pin-title" className="text-ink-primary text-[1rem]" style={{ fontWeight: 400 }}>Enter PIN to Reset Data</h3>
+                <button onClick={() => { setShowResetPin(false); setResetPin(''); }} className="text-ink-muted hover:text-ink-secondary" aria-label="Close reset data dialog"><X size={18} /></button>
               </div>
               <div className="flex justify-center">
                 <PinInput
@@ -1054,12 +1054,12 @@ export default function Settings() {
                   label="Current PIN"
                 />
               </div>
-              {resetPinError && <p className="text-rose-400/80 text-[0.75rem] text-center mt-3" role="alert">{resetPinError}</p>}
+              {resetPinError && <p className="text-rose-200 text-[0.75rem] text-center mt-3" role="alert">{resetPinError}</p>}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => { setShowResetPin(false); setResetPin(''); }}
-                  className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] text-sm"
+                  className="min-h-11 px-4 rounded-xl text-ink-muted hover:bg-white/[0.06] text-sm"
                 >
                   Cancel
                 </button>
@@ -1067,7 +1067,7 @@ export default function Settings() {
                   type="button"
                   onClick={handleResetPinVerified}
                   disabled={resetPin.length < 4 || resetDataMutation.isPending}
-                  className="min-h-11 px-4 rounded-xl bg-rose-400/15 border border-rose-300/20 text-rose-100/80 disabled:opacity-40 text-sm"
+                  className="min-h-11 px-4 rounded-xl bg-rose-400/15 border border-rose-300/20 text-rose-100 disabled:opacity-40 text-sm"
                 >
                   {resetDataMutation.isPending ? 'Checking…' : 'Reset data'}
                 </button>

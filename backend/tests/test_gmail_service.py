@@ -615,16 +615,31 @@ def test_expired_credential_status_distinguishes_reauth_from_retry(
     assert health.connected is False
     assert health.retryable is retryable
     assert health.action_required == action
-    stored = json.loads(gmail_module.TOKEN_FILE.read_text(encoding="utf-8"))
-    assert stored["last_refresh_failure_at"].endswith("Z")
-    assert stored["safe_reason_code"] in {
-        "refresh_token_rejected",
-        "google_temporarily_unreachable",
-    }
+    if isinstance(refresh_error, RefreshError):
+        assert not gmail_module.TOKEN_FILE.exists()
+        assert health.credentials_present is False
+        restarted_health = GmailService().connection_health()
+        assert restarted_health.status == "ready"
+        assert restarted_health.action_required == "connect"
+    else:
+        stored = json.loads(gmail_module.TOKEN_FILE.read_text(encoding="utf-8"))
+        assert stored["last_refresh_failure_at"].endswith("Z")
+        assert stored["safe_reason_code"] == "google_temporarily_unreachable"
+        restarted_health = GmailService().connection_health()
+        assert restarted_health.status == expected_status
+        assert restarted_health.retryable is retryable
 
-    restarted_health = GmailService().connection_health()
-    assert restarted_health.status == expected_status
-    assert restarted_health.retryable is retryable
+
+def test_gmail_token_symlink_is_never_followed(fake_oauth, tmp_path):
+    target = tmp_path / "outside.json"
+    target.write_text('{"sensitive":"preserved"}', encoding="utf-8")
+    gmail_module.TOKEN_FILE.symlink_to(target)
+
+    service = GmailService()
+
+    assert service.load_credentials() is False
+    assert service.connection_health().safe_reason_code == "credential_unreadable"
+    assert target.read_text(encoding="utf-8") == '{"sensitive":"preserved"}'
 
 
 def test_message_limit_is_partial_and_never_advances_cursor():

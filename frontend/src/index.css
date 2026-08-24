@@ -6,6 +6,11 @@
   --font-sans: 'Inter', system-ui, sans-serif;
   --color-background: #0c1929;
   --color-foreground: #ffffff;
+  /* Required text tokens remain WCAG AA on the lightest supported glass. */
+  --color-ink-primary: #f8fafc;
+  --color-ink-secondary: #e2ebf3;
+  --color-ink-muted: #c7d6e5;
+  --color-ink-disabled: #94a8bb;
 
   /* Glass card variables */
   --glass-bg: rgba(255, 255, 255, 0.08);
@@ -16,8 +21,8 @@
   /* Color palette */
   --color-card: rgba(255, 255, 255, 0.08);
   --color-card-border: rgba(255, 255, 255, 0.18);
-  --color-muted: rgba(255, 255, 255, 0.4);
-  --color-muted-foreground: rgba(255, 255, 255, 0.3);
+  --color-muted: #c7d6e5;
+  --color-muted-foreground: #c7d6e5;
   --color-primary: #030213;
   --color-primary-foreground: #ffffff;
   --color-accent: rgba(255, 255, 255, 0.1);

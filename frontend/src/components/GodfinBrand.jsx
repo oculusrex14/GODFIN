@@ -16,11 +16,11 @@ export default function GodfinBrand({
           className={`${compact ? 'text-[1.08rem]' : 'text-[1.5rem]'} tracking-[0.02em] leading-none font-semibold`}
           aria-label="GODFIN"
         >
-          <span className="text-white/95">GOD</span>
+          <span className="text-ink-primary">GOD</span>
           <span className="text-[#A6E22E]">FIN</span>
         </div>
         {showTagline && (
-          <p className={`mt-1 uppercase text-white/28 ${compact ? 'text-[0.48rem] tracking-[0.12em]' : 'text-[0.55rem] tracking-[0.15em]'}`}>
+          <p className={`mt-1 uppercase text-ink-muted ${compact ? 'text-[0.48rem] tracking-[0.12em]' : 'text-[0.55rem] tracking-[0.15em]'}`}>
             Local-first. Private. In control.
           </p>
         )}

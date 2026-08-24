@@ -9,6 +9,7 @@
     "0006_cashfree_commerce.sql": "b6524fba75e0e428a1174f9a4336a8c8035a0798f08ea61d3b8271dd2eba028e",
     "0007_cashfree_license_upgrades.sql": "ca633f4740d37e2bb6554108388b416ab794b08873cb7482fde509cc19c4faf4",
     "20260824032944_fix_public_rate_limit_bigint.sql": "acc3bc38a4a6695b0018b2c1e7ec032ce4b39bd615122bd9df8137b7e8953e5a",
-    "20260824033128_fix_public_rate_limit_greatest_expression.sql": "5c56b1bb7c55087007d4f7edc2efc55f33992568bd5d25800ce76f97e6c993b6"
+    "20260824033128_fix_public_rate_limit_greatest_expression.sql": "5c56b1bb7c55087007d4f7edc2efc55f33992568bd5d25800ce76f97e6c993b6",
+    "20260824211115_cashfree_email_delivery_claim.sql": "c26ac03af33c8cdf31e8733dad8c652decac0e26362b9dec8e1969168b1dc802"
   }
 }

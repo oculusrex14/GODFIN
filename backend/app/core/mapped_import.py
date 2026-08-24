@@ -6,7 +6,6 @@ import csv
 import hashlib
 import io
 import re
-import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -15,6 +14,7 @@ from typing import Any
 from openpyxl import load_workbook
 
 from app.core.money import MAX_MONEY, money_decimal
+from app.core.statement_file_safety import UnsafeStatementFile, validate_xlsx_archive
 from app.core.statement_parser import StatementParseResult, StatementTransaction
 from app.schemas.statement import MappedImportMapping
 
@@ -23,9 +23,6 @@ MAX_MAPPED_ROWS = 10_000
 MAX_MAPPED_COLUMNS = 50
 MAX_MAPPED_CELL_LENGTH = 2_000
 MAX_MAPPING_ERRORS = 100
-MAX_XLSX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
-MAX_XLSX_ENTRIES = 1_000
-MAX_XLSX_COMPRESSION_RATIO = 200
 GENERIC_MAPPING_VERSION = "1.0"
 
 
@@ -148,34 +145,9 @@ def _read_csv(contents: bytes) -> list[list[Any]]:
 
 def _read_xlsx(contents: bytes) -> list[list[Any]]:
     try:
-        with zipfile.ZipFile(io.BytesIO(contents)) as archive:
-            entries = archive.infolist()
-            if len(entries) > MAX_XLSX_ENTRIES:
-                raise MappedImportError("The XLSX workbook contains too many files.")
-            total_uncompressed = 0
-            for entry in entries:
-                if entry.flag_bits & 0x1:
-                    raise MappedImportError("Encrypted XLSX workbooks are not supported.")
-                path = entry.filename.replace("\\", "/")
-                if path.startswith("/") or ".." in path.split("/"):
-                    raise MappedImportError("The XLSX workbook contains an unsafe path.")
-                total_uncompressed += entry.file_size
-                if total_uncompressed > MAX_XLSX_UNCOMPRESSED_BYTES:
-                    raise MappedImportError(
-                        "The XLSX workbook expands beyond the safe 100 MB limit."
-                    )
-                if (
-                    entry.compress_size > 0
-                    and entry.file_size / entry.compress_size
-                    > MAX_XLSX_COMPRESSION_RATIO
-                ):
-                    raise MappedImportError(
-                        "The XLSX workbook has an unsafe compression ratio."
-                    )
-    except MappedImportError:
-        raise
-    except (zipfile.BadZipFile, OSError) as exc:
-        raise MappedImportError("The XLSX workbook is not a valid XLSX file.") from exc
+        validate_xlsx_archive(contents)
+    except UnsafeStatementFile as exc:
+        raise MappedImportError(str(exc)) from exc
     try:
         workbook = load_workbook(
             io.BytesIO(contents),

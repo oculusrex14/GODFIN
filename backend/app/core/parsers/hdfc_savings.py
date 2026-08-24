@@ -6,15 +6,15 @@ import re
 from datetime import date, datetime
 from typing import Optional
 
-import pdfplumber
 from openpyxl import load_workbook
 
 from app.core.parsers.base import StatementParserPlugin
+from app.core.parsers.certified_savings_pdf import parse_hdfc_savings_pdf
+from app.core.pdf_extraction import PDFPLUMBER_ENGINE, PdfExtractionError
 from app.core.statement_parser import (
     StatementParseResult,
     _append_strict_savings_txn,
     _parse_amount,
-    _parse_hdfc_savings_statement,
     _parse_statement_date,
     _validate_savings_controls,
     parse_statement_xls,
@@ -24,9 +24,17 @@ logger = logging.getLogger(__name__)
 
 
 def _detect(text: str) -> bool:
-    normalized = text.lower()
-    return "hdfc" in normalized and (
-        "savings account" in normalized or "statement of account" in normalized
+    normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
+    return all(
+        marker in normalized
+        for marker in (
+            "hdfcbank",
+            "statementofaccount",
+            "narration",
+            "withdrawalamt",
+            "depositamt",
+            "closingbalance",
+        )
     )
 
 
@@ -34,6 +42,7 @@ def _parse_pdf(
     contents: bytes,
     _file_format: str,
     password: Optional[str],
+    account_last4: Optional[str] = None,
 ) -> StatementParseResult:
     result = StatementParseResult(
         statement_type="hdfc_savings",
@@ -41,21 +50,16 @@ def _parse_pdf(
         recognized=True,
     )
     try:
-        pdf = pdfplumber.open(io.BytesIO(contents), password=password)
-    except Exception:
+        with PDFPLUMBER_ENGINE.open_document(contents, password) as document:
+            parse_hdfc_savings_pdf(document, result, account_last4)
+    except PdfExtractionError:
         result.errors.append(
             "The PDF could not be opened. Check the file and its password, then try again."
         )
-        return result
-
-    try:
-        _parse_hdfc_savings_statement(pdf, result)
     except Exception:
         result.errors.append(
-            "The PDF layout could not be read as an HDFC savings statement."
+            "The PDF layout could not be read as a certified HDFC savings statement."
         )
-    finally:
-        pdf.close()
     return result
 
 
@@ -105,6 +109,16 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
         if "HDFC" not in metadata_text:
             result.errors.append("HDFC bank fingerprint was not found in XLSX metadata")
             return result
+
+        account_match = re.search(
+            r"ACCOUNT\s+NO\.?\s*[:\-]?\s*([X*\d ]{4,})",
+            metadata_text,
+        )
+        if account_match:
+            digits = re.sub(r"\D", "", account_match.group(1))
+            if len(digits) >= 4:
+                result.account_last4 = digits[-4:]
+                result.available_account_last4s = [result.account_last4]
 
         for index, row in enumerate(rows[:30]):
             values = [str(value or "").strip() for value in row]
@@ -205,9 +219,10 @@ def _parse(
     contents: bytes,
     file_format: str,
     password: Optional[str],
+    account_last4: Optional[str] = None,
 ) -> StatementParseResult:
     if file_format == "pdf":
-        return _parse_pdf(contents, file_format, password)
+        return _parse_pdf(contents, file_format, password, account_last4)
     if file_format == "xls":
         return parse_statement_xls(contents)
     if file_format == "xlsx":

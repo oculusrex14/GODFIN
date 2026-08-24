@@ -135,15 +135,15 @@ export default function AccountSettings() {
             }`}
           >
             <div className="min-w-0 flex-1">
-              <div className="text-white/70 text-sm truncate">{accountLabel(account)}</div>
-              <div className="text-white/25 text-xs mt-0.5">
+              <div className="text-ink-secondary text-sm truncate">{accountLabel(account)}</div>
+              <div className="text-ink-muted text-xs mt-0.5">
                 {account.bank} · {account.account_type.replace('_', ' ')} · ••••{account.last_4_digits}
                 {!account.is_active && ' · inactive'}
               </div>
             </div>
             <button
               onClick={() => startEdit(account)}
-              className="min-w-11 min-h-11 grid place-items-center rounded-xl text-white/35 hover:text-white/70 hover:bg-white/[0.06]"
+              className="min-w-11 min-h-11 grid place-items-center rounded-xl text-ink-muted hover:text-ink-secondary hover:bg-white/[0.06]"
               aria-label={`Edit ${accountLabel(account)}`}
             >
               <Pencil size={15} />
@@ -151,7 +151,7 @@ export default function AccountSettings() {
             {account.is_active && (
               <button
                 onClick={() => requestDeactivate(account)}
-                className="min-w-11 min-h-11 grid place-items-center rounded-xl text-white/35 hover:text-rose-300 hover:bg-rose-400/[0.06]"
+                className="min-w-11 min-h-11 grid place-items-center rounded-xl text-ink-muted hover:text-rose-200 hover:bg-rose-400/[0.06]"
                 aria-label={`Deactivate ${accountLabel(account)}`}
               >
                 <Trash2 size={15} />
@@ -164,10 +164,10 @@ export default function AccountSettings() {
       <div className="rounded-[16px] border border-white/[0.1] bg-white/[0.035] p-4">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div>
-            <div className="text-white/70 text-sm">
+            <div className="text-ink-secondary text-sm">
               {editingId ? 'Edit account' : 'Add account'}
             </div>
-            <div className="text-white/25 text-xs">
+            <div className="text-ink-muted text-xs">
               Non-HDFC accounts require Pro or Max. Sender matching stays in local SQLite.
             </div>
           </div>
@@ -177,7 +177,7 @@ export default function AccountSettings() {
                 setEditingId(null);
                 setForm(EMPTY_FORM);
               }}
-              className="min-w-11 min-h-11 grid place-items-center rounded-xl text-white/35 hover:text-white/70"
+              className="min-w-11 min-h-11 grid place-items-center rounded-xl text-ink-muted hover:text-ink-secondary"
               aria-label="Cancel account edit"
             >
               <X size={16} />
@@ -186,7 +186,7 @@ export default function AccountSettings() {
         </div>
 
         <div className="grid sm:grid-cols-2 gap-3">
-          <label className="text-white/35 text-xs">
+          <label className="text-ink-muted text-xs">
             Bank
             <select
               value={form.bank}
@@ -198,7 +198,7 @@ export default function AccountSettings() {
               ))}
             </select>
           </label>
-          <label className="text-white/35 text-xs">
+          <label className="text-ink-muted text-xs">
             Account type
             <select
               value={form.account_type}
@@ -216,7 +216,7 @@ export default function AccountSettings() {
               <option value="credit_card">Credit card</option>
             </select>
           </label>
-          <label className="text-white/35 text-xs">
+          <label className="text-ink-muted text-xs">
             Last 4 digits
             <input
               value={form.last_4_digits}
@@ -227,7 +227,7 @@ export default function AccountSettings() {
               placeholder="1234"
             />
           </label>
-          <label className="text-white/35 text-xs">
+          <label className="text-ink-muted text-xs">
             Nickname
             <input
               value={form.nickname}
@@ -236,7 +236,7 @@ export default function AccountSettings() {
               placeholder="Salary account"
             />
           </label>
-          <label className="text-white/35 text-xs sm:col-span-2">
+          <label className="text-ink-muted text-xs sm:col-span-2">
             Gmail sender pattern (optional)
             <input
               value={form.sender_pattern}
@@ -246,7 +246,7 @@ export default function AccountSettings() {
             />
           </label>
           {form.sender_pattern && (
-            <label className="text-white/35 text-xs sm:col-span-2">
+            <label className="text-ink-muted text-xs sm:col-span-2">
               Email parser profile
               <select
                 value={form.parser_profile}
@@ -266,7 +266,7 @@ export default function AccountSettings() {
         <button
           onClick={() => saveMutation.mutate()}
           disabled={form.last_4_digits.length !== 4 || saveMutation.isPending}
-          className="mt-4 min-h-11 px-4 rounded-xl bg-cyan-400/[0.14] border border-cyan-300/[0.18] text-cyan-100/80 text-sm disabled:opacity-40 inline-flex items-center gap-2"
+          className="mt-4 min-h-11 px-4 rounded-xl bg-cyan-400/[0.14] border border-cyan-300/[0.18] text-cyan-100 text-sm disabled:opacity-40 inline-flex items-center gap-2"
         >
           {editingId ? <Check size={15} /> : <Plus size={15} />}
           {saveMutation.isPending ? 'Saving…' : editingId ? 'Save account' : 'Add account'}

@@ -35,24 +35,24 @@ export default function CashFlow() {
         className="flex flex-wrap items-center justify-between gap-4 mb-6"
       >
         <div>
-          <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>
+          <h1 className="text-ink-primary text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>
             Cash-flow Calendar
           </h1>
-          <p className="text-white/30 text-[0.8rem]">Income and spending by day. Transfers are excluded.</p>
+          <p className="text-ink-muted text-[0.8rem]">Income and spending by day. Transfers are excluded.</p>
         </div>
         <div className="flex items-center gap-2 min-h-11">
           <button
             onClick={() => setMonth(format(subMonths(selected, 1), 'yyyy-MM'))}
-            className="min-w-11 min-h-11 grid place-items-center rounded-xl text-white/40 hover:text-white/70 hover:bg-white/[0.06]"
+            className="min-w-11 min-h-11 grid place-items-center rounded-xl text-ink-muted hover:text-ink-secondary hover:bg-white/[0.06]"
             aria-label="Previous month"
           >
             <ChevronLeft size={18} />
           </button>
-          <span className="min-w-32 text-center text-sm text-white/70">{format(selected, 'MMMM yyyy')}</span>
+          <span className="min-w-32 text-center text-sm text-ink-secondary">{format(selected, 'MMMM yyyy')}</span>
           <button
             onClick={() => setMonth(format(addMonths(selected, 1), 'yyyy-MM'))}
             disabled={month >= currentMonth}
-            className="min-w-11 min-h-11 grid place-items-center rounded-xl text-white/40 hover:text-white/70 hover:bg-white/[0.06] disabled:opacity-25"
+            className="min-w-11 min-h-11 grid place-items-center rounded-xl text-ink-muted hover:text-ink-secondary hover:bg-white/[0.06] disabled:opacity-25"
             aria-label="Next month"
           >
             <ChevronRight size={18} />
@@ -62,12 +62,12 @@ export default function CashFlow() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
         {[
-          { label: 'Income', value: data?.total_income, color: 'text-emerald-300', icon: ArrowUp },
-          { label: 'Spending', value: data?.total_spend, color: 'text-rose-300', icon: ArrowDown },
-          { label: 'Net cash flow', value: data?.net, color: data?.net >= 0 ? 'text-cyan-300' : 'text-amber-300', icon: CalendarDays },
+          { label: 'Income', value: data?.total_income, color: 'text-emerald-200', icon: ArrowUp },
+          { label: 'Spending', value: data?.total_spend, color: 'text-rose-200', icon: ArrowDown },
+          { label: 'Net cash flow', value: data?.net, color: data?.net >= 0 ? 'text-cyan-200' : 'text-amber-200', icon: CalendarDays },
         ].map(({ label, value, color, icon: Icon }) => (
           <div key={label} className="rounded-[18px] bg-white/[0.07] border border-white/[0.14] p-4">
-            <div className="flex items-center gap-2 text-white/30 text-xs"><Icon size={14} /> {label}</div>
+            <div className="flex items-center gap-2 text-ink-muted text-xs"><Icon size={14} /> {label}</div>
             <div className={`mt-2 text-xl tabular-nums ${color}`}>{isLoading ? '—' : money(value)}</div>
           </div>
         ))}
@@ -76,7 +76,7 @@ export default function CashFlow() {
       <div className="rounded-[20px] bg-white/[0.07] border border-white/[0.14] p-3 sm:p-5 overflow-x-auto">
         <div className="grid grid-cols-7 gap-1 sm:gap-2 min-w-[560px]">
           {WEEKDAYS.map(day => (
-            <div key={day} className="text-center text-[0.65rem] uppercase tracking-wide text-white/25 py-2">
+            <div key={day} className="text-center text-[0.65rem] uppercase tracking-wide text-ink-muted py-2">
               {day}
             </div>
           ))}
@@ -100,11 +100,11 @@ export default function CashFlow() {
                 style={{ background }}
                 aria-label={`${day.date}: income ${money(day.income)}, spending ${money(day.spend)}`}
               >
-                <div className="text-white/50 text-xs">{Number(day.date.slice(-2))}</div>
+                <div className="text-ink-muted text-xs">{Number(day.date.slice(-2))}</div>
                 {day.transaction_count > 0 && (
                   <div className="mt-2 space-y-1 text-[0.62rem] tabular-nums">
-                    {day.income > 0 && <div className="text-emerald-200/80">+{money(day.income)}</div>}
-                    {day.spend > 0 && <div className="text-rose-200/80">−{money(day.spend)}</div>}
+                    {day.income > 0 && <div className="text-emerald-200">+{money(day.income)}</div>}
+                    {day.spend > 0 && <div className="text-rose-200">−{money(day.spend)}</div>}
                   </div>
                 )}
               </Link>
@@ -112,7 +112,7 @@ export default function CashFlow() {
           })}
         </div>
       </div>
-      <p className="mt-3 text-white/25 text-xs">Tap a day to open its transactions.</p>
+      <p className="mt-3 text-ink-muted text-xs">Tap a day to open its transactions.</p>
     </div>
   );
 }

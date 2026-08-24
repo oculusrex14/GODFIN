@@ -22,6 +22,7 @@ import {
   MoreHorizontal,
   Scale,
   Sparkles,
+  Lock,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
@@ -30,7 +31,13 @@ import { GlassBackground } from './GlassBackground';
 import GodfinBrand from './GodfinBrand';
 import GuidedTour from './GuidedTour';
 import DialogSurface from './DialogSurface';
-import { fetchReviewStats, fetchSyncStatus } from '../api/client';
+import {
+  fetchLicenseNavigation,
+  fetchReviewStats,
+  fetchSyncStatus,
+  fetchSystemStatus,
+} from '../api/client';
+import { navigationGroupsForLicense } from '../lib/tierNavigation';
 
 const NAV_GROUPS = [
   {
@@ -114,6 +121,21 @@ function SyncBanner() {
 function SidebarContent({ onItemClick }) {
   const { logout } = useAuth();
   const [changePinOpen, setChangePinOpen] = useState(false);
+  const { data: systemStatus } = useQuery({
+    queryKey: ['systemStatus'],
+    queryFn: fetchSystemStatus,
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: licenseNavigation } = useQuery({
+    queryKey: ['licenseNavigation'],
+    queryFn: fetchLicenseNavigation,
+    staleTime: 60 * 1000,
+  });
+  const build = systemStatus?.build;
+  const buildLabel = build?.version
+    ? `v${build.version} · ${build.channel || 'unknown'}`
+    : 'Build details unavailable';
+  const navigationGroups = navigationGroupsForLicense(NAV_GROUPS, licenseNavigation);
 
   return (
     <>
@@ -124,9 +146,9 @@ function SidebarContent({ onItemClick }) {
 
       {/* Nav */}
       <nav className="flex-1 px-3 space-y-3 overflow-y-auto pb-3">
-        {NAV_GROUPS.map((group) => (
+        {navigationGroups.map((group) => (
           <div key={group.label}>
-            <div className="px-3.5 mb-1 text-white/20 text-[0.58rem] uppercase tracking-[0.16em]">
+            <div className="px-3.5 mb-1 text-ink-muted text-[0.58rem] uppercase tracking-[0.16em]">
               {group.label}
             </div>
             <div className="space-y-0.5">
@@ -136,11 +158,14 @@ function SidebarContent({ onItemClick }) {
                   to={item.to}
                   end={item.to === '/'}
                   onClick={onItemClick}
+                  aria-label={item.lock
+                    ? `${item.label}, requires GODFIN ${item.lock.required_tier}`
+                    : item.label}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3.5 py-2 rounded-[14px] transition-all duration-200 text-[0.8rem] group relative ${
                       isActive
                         ? 'bg-white/[0.12] text-white shadow-[0_2px_12px_rgba(100,180,255,0.1),inset_0_1px_0_rgba(255,255,255,0.15)] border border-white/[0.12]'
-                        : 'text-white/40 hover:bg-white/[0.06] hover:text-white/70 border border-transparent'
+                        : 'text-ink-muted hover:bg-white/[0.06] hover:text-ink-secondary border border-transparent'
                     }`
                   }
                   style={{ fontWeight: 400 }}
@@ -149,7 +174,16 @@ function SidebarContent({ onItemClick }) {
                     <item.icon size={16} className="shrink-0 opacity-70 group-hover:opacity-100 transition-opacity" />
                     {item.to === '/review' && <ReviewBadge />}
                   </div>
-                  {item.label}
+                  <span className="min-w-0 flex-1">{item.label}</span>
+                  {item.lock && (
+                    <span
+                      className="flex shrink-0 items-center gap-1 rounded-md border border-white/[0.12] bg-white/[0.05] px-1.5 py-0.5 text-[0.56rem] uppercase tracking-wide text-ink-muted"
+                      title={`Requires GODFIN ${item.lock.required_tier}`}
+                    >
+                      <Lock size={10} aria-hidden="true" />
+                      {item.lock.required_tier}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </div>
@@ -162,14 +196,14 @@ function SidebarContent({ onItemClick }) {
         <div className="flex items-center gap-2 mb-3">
           <button
             onClick={() => setChangePinOpen(true)}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-all text-[0.75rem]"
+            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-ink-muted hover:text-ink-secondary hover:bg-white/[0.06] transition-all text-[0.75rem]"
           >
             <KeyRound size={14} />
             Change PIN
           </button>
           <button
             onClick={logout}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-white/40 hover:text-rose-400/70 hover:bg-rose-500/[0.06] transition-all text-[0.75rem]"
+            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-ink-muted hover:text-rose-200 hover:bg-rose-500/[0.06] transition-all text-[0.75rem]"
           >
             <LogOut size={14} />
             Lock
@@ -177,11 +211,13 @@ function SidebarContent({ onItemClick }) {
         </div>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400/30 to-violet-400/30 border border-white/[0.15] flex items-center justify-center">
-            <span className="text-white/70 text-[0.7rem]" style={{ fontWeight: 500 }}>GF</span>
+            <span className="text-ink-secondary text-[0.7rem]" style={{ fontWeight: 500 }}>GF</span>
           </div>
           <div>
-            <p className="text-white/60 text-[0.75rem]" style={{ fontWeight: 400 }}>User</p>
-            <p className="text-white/25 text-[0.65rem]">v2.0</p>
+            <p className="text-ink-secondary text-[0.75rem]" style={{ fontWeight: 400 }}>User</p>
+            <p className="text-ink-muted text-[0.65rem]" title={build?.short_sha || undefined}>
+              {buildLabel}
+            </p>
           </div>
         </div>
       </div>
@@ -242,7 +278,7 @@ export default function AppLayout({ children }) {
           <button
             onClick={() => setMobileOpen(true)}
             aria-label="Open navigation menu"
-            className="p-2 rounded-[12px] bg-white/[0.08] border border-white/[0.12] text-white/60"
+            className="p-2 rounded-[12px] bg-white/[0.08] border border-white/[0.12] text-ink-secondary"
           >
             <Menu size={18} />
           </button>
@@ -274,7 +310,7 @@ export default function AppLayout({ children }) {
                 <button
                   onClick={() => setMobileOpen(false)}
                   aria-label="Close navigation menu"
-                  className="absolute top-4 right-4 p-1.5 rounded-full text-white/40 hover:text-white/70"
+                  className="absolute top-4 right-4 p-1.5 rounded-full text-ink-muted hover:text-ink-secondary"
                 >
                   <X size={18} />
                 </button>
@@ -307,7 +343,7 @@ export default function AppLayout({ children }) {
             to={item.to}
             end={item.to === '/'}
             className={({ isActive }) => `relative min-h-[56px] flex flex-col items-center justify-center gap-1 text-[0.6rem] ${
-              isActive ? 'text-cyan-200/80' : 'text-white/35'
+              isActive ? 'text-cyan-200' : 'text-ink-muted'
             }`}
           >
             <div className="relative">
@@ -319,7 +355,7 @@ export default function AppLayout({ children }) {
         ))}
         <button
           onClick={() => setMobileOpen(true)}
-          className="min-h-[56px] flex flex-col items-center justify-center gap-1 text-[0.6rem] text-white/35"
+          className="min-h-[56px] flex flex-col items-center justify-center gap-1 text-[0.6rem] text-ink-muted"
         >
           <MoreHorizontal size={18} />
           More

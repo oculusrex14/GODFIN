@@ -113,7 +113,7 @@ export default function PinScreen() {
                   transition={{ duration: 0.3 }}
                   className="p-3 rounded-[18px] bg-emerald-400/[0.1] border border-emerald-400/[0.12]"
                 >
-                  <ShieldCheck className="h-8 w-8 text-emerald-400/70" />
+                  <ShieldCheck className="h-8 w-8 text-emerald-200" />
                 </motion.div>
               ) : (
                 <motion.div
@@ -124,19 +124,19 @@ export default function PinScreen() {
                   transition={{ duration: 0.3 }}
                   className="p-3 rounded-[18px] bg-rose-400/[0.1] border border-rose-400/[0.12]"
                 >
-                  <ShieldAlert className="h-8 w-8 text-rose-400/70" />
+                  <ShieldAlert className="h-8 w-8 text-rose-200" />
                 </motion.div>
               )}
             </AnimatePresence>
-            <span className={`text-[0.6rem] tracking-[0.1em] uppercase transition-colors duration-300 ${backendOnline ? 'text-emerald-400/50' : 'text-rose-400/50'}`}>
+            <span className={`text-[0.6rem] tracking-[0.1em] uppercase transition-colors duration-300 ${backendOnline ? 'text-emerald-200' : 'text-rose-200'}`}>
               {backendOnline ? 'Backend Online' : 'Backend Offline'}
             </span>
           </div>
 
-          <h2 className="text-white/80 text-[1.1rem] text-center mb-2" style={{ fontWeight: 400 }}>
+          <h2 className="text-ink-primary text-[1.1rem] text-center mb-2" style={{ fontWeight: 400 }}>
             {isFirstRun ? 'Set Your PIN' : 'Enter Your PIN'}
           </h2>
-          <p id="pin-length-hint" className="text-white/30 text-[0.8rem] text-center mb-8">
+          <p id="pin-length-hint" className="text-ink-muted text-[0.8rem] text-center mb-8">
             {isFirstRun
               ? 'Choose 4–6 digits to secure your local data'
               : 'Enter your PIN to continue'}
@@ -162,20 +162,20 @@ export default function PinScreen() {
                 pin.length < 4 ||
                 (!isFirstRun && pinLength && pin.length !== pinLength)
               }
-              className="w-full h-12 min-h-12 touch-manipulation rounded-[14px] bg-cyan-400/15 border border-cyan-300/20 text-cyan-100/80 text-[0.82rem] font-medium transition-colors hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full h-12 min-h-12 touch-manipulation rounded-[14px] bg-cyan-400/15 border border-cyan-300/20 text-cyan-100 text-[0.82rem] font-medium transition-colors hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {loading ? (isFirstRun ? 'Securing...' : 'Unlocking...') : (isFirstRun ? 'Set PIN' : 'Unlock')}
             </button>
           </form>
 
           {error && (
-            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-rose-400/80 text-[0.8rem] text-center mt-4">
+            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-rose-200 text-[0.8rem] text-center mt-4">
               {error}
             </motion.p>
           )}
 
           {retryAfter > 0 && (
-            <p className="text-amber-300/70 text-[0.75rem] text-center mt-3" role="status">
+            <p className="text-amber-200 text-[0.75rem] text-center mt-3" role="status">
               Try again in {Math.floor(retryAfter / 60)}:{String(retryAfter % 60).padStart(2, '0')}
             </p>
           )}

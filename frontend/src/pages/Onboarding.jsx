@@ -133,15 +133,15 @@ export default function Onboarding() {
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-cyan-300/60 text-xs uppercase tracking-[0.18em]">First-run setup</p>
-            <h1 className="mt-2 text-white/90 text-2xl sm:text-3xl" style={{ fontWeight: 300 }}>Make GODFIN yours</h1>
-            <p className="mt-2 text-white/35 text-sm">Your everyday money records stay on this device.</p>
+            <p className="text-cyan-200 text-xs uppercase tracking-[0.18em]">First-run setup</p>
+            <h1 className="mt-2 text-ink-primary text-2xl sm:text-3xl" style={{ fontWeight: 300 }}>Make GODFIN yours</h1>
+            <p className="mt-2 text-ink-muted text-sm">Your everyday money records stay on this device.</p>
           </div>
           <button
             type="button"
             onClick={deferSetup}
             disabled={updateMutation.isPending}
-            className="min-h-11 px-3 rounded-xl text-white/40 hover:text-white/70 hover:bg-white/[0.05] text-xs"
+            className="min-h-11 px-3 rounded-xl text-ink-muted hover:text-ink-secondary hover:bg-white/[0.05] text-xs"
           >
             Finish setup later
           </button>
@@ -159,8 +159,8 @@ export default function Onboarding() {
                   aria-current={active ? 'step' : undefined}
                   className={`flex items-center gap-3 min-h-11 px-3 rounded-xl ${active ? 'bg-white/[0.08]' : ''}`}
                 >
-                  {complete ? <Check size={17} className="text-emerald-300" /> : <Circle size={17} className={active ? 'text-cyan-300' : 'text-white/15'} />}
-                  <span className={active ? 'text-white/75 text-sm' : 'text-white/30 text-sm'}>{item.title}</span>
+                  {complete ? <Check size={17} className="text-emerald-200" /> : <Circle size={17} className={active ? 'text-cyan-200' : 'text-ink-muted'} />}
+                  <span className={active ? 'text-ink-secondary text-sm' : 'text-ink-muted text-sm'}>{item.title}</span>
                 </li>
               );
             })}
@@ -171,10 +171,10 @@ export default function Onboarding() {
             aria-live="polite"
           >
             <div className="w-12 h-12 rounded-2xl bg-cyan-400/10 border border-cyan-400/15 grid place-items-center">
-              <CurrentIcon className="text-cyan-200/70" size={22} />
+              <CurrentIcon className="text-cyan-200" size={22} />
             </div>
-            <h2 className="mt-4 text-white/80 text-xl">{STEPS[step - 1]?.title}</h2>
-            <p className="mt-2 text-white/40 text-sm leading-relaxed">{STEPS[step - 1]?.description}</p>
+            <h2 className="mt-4 text-ink-primary text-xl">{STEPS[step - 1]?.title}</h2>
+            <p className="mt-2 text-ink-muted text-sm leading-relaxed">{STEPS[step - 1]?.description}</p>
 
             {step === 2 && (
               <div className="mt-5">
@@ -182,14 +182,14 @@ export default function Onboarding() {
               </div>
             )}
             {step === 4 && (
-              <p className="mt-3 text-xs text-white/30">
+              <p className="mt-3 text-xs text-ink-muted">
                 {status?.transaction_count
                   ? `${status.transaction_count} transactions are already available.`
                   : 'No transactions have been imported yet.'}
               </p>
             )}
             {step === 5 && (
-              <p className="mt-3 text-xs text-white/30">
+              <p className="mt-3 text-xs text-ink-muted">
                 {status?.reviewed_count || 0} of {status?.target_review_count || 10} available transactions reviewed.
               </p>
             )}
@@ -199,23 +199,23 @@ export default function Onboarding() {
                 type="button"
                 onClick={goBack}
                 disabled={step <= 1 || updateMutation.isPending}
-                className="min-h-11 px-4 rounded-xl text-white/45 border border-white/[0.08] disabled:opacity-30 text-sm flex items-center gap-2"
+                className="min-h-11 px-4 rounded-xl text-ink-muted border border-white/[0.08] disabled:opacity-30 text-sm flex items-center gap-2"
               >
                 <ChevronLeft size={15} />
                 Back
               </button>
               {step === 3 && (
-                <button type="button" onClick={() => openTask('/settings', 3)} className="min-h-11 px-4 rounded-xl bg-cyan-400/10 text-cyan-200/80 border border-cyan-400/20 text-sm">
+                <button type="button" onClick={() => openTask('/settings', 3)} className="min-h-11 px-4 rounded-xl bg-cyan-400/10 text-cyan-200 border border-cyan-400/20 text-sm">
                   Open Gmail settings
                 </button>
               )}
               {step === 4 && (
-                <button type="button" onClick={() => openTask('/upload', 4)} className="min-h-11 px-4 rounded-xl bg-cyan-400/10 text-cyan-200/80 border border-cyan-400/20 text-sm">
+                <button type="button" onClick={() => openTask('/upload', 4)} className="min-h-11 px-4 rounded-xl bg-cyan-400/10 text-cyan-200 border border-cyan-400/20 text-sm">
                   Open statement upload
                 </button>
               )}
               {step === 5 && (
-                <button type="button" onClick={() => openTask('/review', 5)} className="min-h-11 px-4 rounded-xl bg-cyan-400/10 text-cyan-200/80 border border-cyan-400/20 text-sm">
+                <button type="button" onClick={() => openTask('/review', 5)} className="min-h-11 px-4 rounded-xl bg-cyan-400/10 text-cyan-200 border border-cyan-400/20 text-sm">
                   Open review queue
                 </button>
               )}
@@ -223,13 +223,13 @@ export default function Onboarding() {
                 type="button"
                 onClick={advance}
                 disabled={updateMutation.isPending || (step === 2 && !status)}
-                className="min-h-11 px-4 rounded-xl bg-white/[0.08] text-white/65 border border-white/[0.12] text-sm flex items-center gap-2"
+                className="min-h-11 px-4 rounded-xl bg-white/[0.08] text-ink-secondary border border-white/[0.12] text-sm flex items-center gap-2"
               >
                 {step === STEPS.length ? 'Finish setup' : 'Continue'}
                 <ChevronRight size={15} />
               </button>
             </div>
-            <p className="mt-4 text-white/20 text-[0.65rem]">
+            <p className="mt-4 text-ink-muted text-[0.65rem]">
               Keyboard: use Left and Right Arrow outside form fields. You can resume setup from Settings.
             </p>
           </section>

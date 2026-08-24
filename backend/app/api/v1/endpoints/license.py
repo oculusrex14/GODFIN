@@ -14,6 +14,7 @@ from app.core.license import (
     license_status,
     reverify_license,
 )
+from app.core.entitlements import entitlement_manifest
 
 router = APIRouter()
 
@@ -39,12 +40,40 @@ class LicenseStatusResponse(BaseModel):
     website_url: str
 
 
+class NavigationEntitlement(BaseModel):
+    feature: str
+    required_tier: str
+    label: str
+    explanation: str
+
+
+class LicenseNavigationResponse(BaseModel):
+    tier: str
+    features: list[str]
+    routes: dict[str, NavigationEntitlement]
+
+
 @router.get("", response_model=LicenseStatusResponse)
 def get_license_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     return license_status(db)
+
+
+@router.get("/navigation", response_model=LicenseNavigationResponse)
+def get_license_navigation(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Return presentation metadata without changing authoritative gates."""
+    status = license_status(db)
+    routes = entitlement_manifest().get("navigation", {})
+    return {
+        "tier": status["tier"],
+        "features": status["features"],
+        "routes": routes,
+    }
 
 
 @router.post("/activate", response_model=LicenseStatusResponse)

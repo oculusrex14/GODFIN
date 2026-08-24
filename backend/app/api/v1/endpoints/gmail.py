@@ -34,7 +34,7 @@ from app.core.gmail_service import (
     client_config_available,
 )
 from app.core.ingestion import (
-    get_ingestion_history, run_ingestion, run_ingestion_with_dates,
+    get_ingestion_history, gmail_coverage_summary, run_ingestion, run_ingestion_with_dates,
     run_initial_sync,
 )
 from app.core.pin_security import client_ip_from_request, require_current_pin
@@ -69,6 +69,7 @@ class GmailStatusResponse(BaseModel):
 
 class IngestionResultResponse(BaseModel):
     processed: int
+    eligible_financial_messages: int = 0
     created: int
     skipped_blacklist: int
     skipped_no_match: int
@@ -79,6 +80,29 @@ class IngestionResultResponse(BaseModel):
     source_status: str
     retryable: bool
     full_resync: bool
+    parse_review_count: int = 0
+    skip_reasons: dict[str, int] = Field(default_factory=dict)
+    requested_start: str | None = None
+    requested_end: str | None = None
+    coverage_advanced: bool = False
+    last_successful_coverage_end: str | None = None
+    cursor_advanced: bool = False
+
+
+class GmailCoverageRangeResponse(BaseModel):
+    start: str
+    end: str
+
+
+class GmailCoverageResponse(BaseModel):
+    coverage_ranges: list[GmailCoverageRangeResponse]
+    missing_ranges: list[GmailCoverageRangeResponse]
+    coverage_window_start: str
+    coverage_window_end: str
+    last_successful_coverage_start: str | None
+    last_successful_coverage_end: str | None
+    next_sync_start: str
+    next_sync_end: str
 
 
 class IngestionHistoryResponse(BaseModel):
@@ -87,6 +111,15 @@ class IngestionHistoryResponse(BaseModel):
     last_manual_ingestion_range: str | None
     initial_sync_date_range: str | None
     initial_sync_completed: str | None
+    coverage_ranges: list[GmailCoverageRangeResponse] = Field(default_factory=list)
+    missing_ranges: list[GmailCoverageRangeResponse] = Field(default_factory=list)
+    coverage_window_start: str | None = None
+    coverage_window_end: str | None = None
+    last_successful_coverage_start: str | None = None
+    last_successful_coverage_end: str | None = None
+    next_sync_start: str | None = None
+    next_sync_end: str | None = None
+    last_result: IngestionResultResponse | None = None
 
 
 class IngestionStatusResponse(BaseModel):
@@ -120,6 +153,8 @@ class BackgroundIngestionStartResponse(BaseModel):
     started: bool | None = None
     already_running: bool | None = None
     already_completed: bool | None = None
+    requested_start: str | None = None
+    requested_end: str | None = None
 
 
 class IngestionProgressResponse(BaseModel):
@@ -132,6 +167,10 @@ class IngestionProgressResponse(BaseModel):
     job_id: str | None = None
     attempt: int | None = None
     retry_at: str | None = None
+    requested_start: str | None = None
+    requested_end: str | None = None
+    last_successful_coverage_end: str | None = None
+    public_message: str | None = None
 
 
 class RangeIngestionProgressResponse(IngestionProgressResponse):
@@ -395,6 +434,124 @@ def trigger_ingestion(
     finally:
         # Clear manual ingestion flag
         _set_manual_ingestion_running(db, False)
+
+
+@router.get(
+    "/ingest/gmail/coverage",
+    response_model=GmailCoverageResponse,
+)
+def get_gmail_coverage(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Return support-safe, durable Gmail date coverage and missing ranges."""
+    return gmail_coverage_summary(db)
+
+
+@router.post(
+    "/ingest/gmail/sync-now/start",
+    response_model=BackgroundIngestionStartResponse,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
+def start_incremental_sync_background(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Start a durable cursor/gap-aware Gmail sync and disclose its date bounds."""
+    if not is_connected():
+        raise HTTPException(status_code=400, detail="Gmail not connected")
+    coverage = gmail_coverage_summary(db)
+    try:
+        queued = enqueue_job(
+            "gmail_scheduled",
+            active_key="gmail-ingestion",
+            max_attempts=3,
+            public_message="Checking Gmail from the last safe sync point…",
+        )
+    except JobQueueFull as exc:
+        raise StateConflictError(
+            code="BACKGROUND_QUEUE_FULL",
+            message="GODFIN is already handling too much background work.",
+            hint="Wait for the current work to finish, then try again.",
+        ) from exc
+    return {
+        "success": True,
+        "message": (
+            "Gmail sync started"
+            if queued.created
+            else "A Gmail import is already in progress"
+        ),
+        "job_id": queued.job_id,
+        "started": queued.created,
+        "already_running": not queued.created,
+        "requested_start": coverage["next_sync_start"],
+        "requested_end": coverage["next_sync_end"],
+    }
+
+
+@router.get(
+    "/ingest/gmail/sync-now/status",
+    response_model=IngestionProgressResponse,
+    response_model_exclude_unset=True,
+)
+def get_incremental_sync_status(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Return durable progress/result for the most recent explicit Sync now job."""
+    coverage = gmail_coverage_summary(db)
+    try:
+        job = latest_job(kind="gmail_scheduled", active_key="gmail-ingestion")
+    except Exception:
+        job = None
+    if not job:
+        return {
+            "status": "idle",
+            "processed": 0,
+            "total": 0,
+            "percent": 0,
+            "result": None,
+            "error": None,
+            "requested_start": coverage["next_sync_start"],
+            "requested_end": coverage["next_sync_end"],
+            "last_successful_coverage_end": coverage[
+                "last_successful_coverage_end"
+            ],
+        }
+
+    status_map = {
+        "queued": "running",
+        "running": "running",
+        "retry_wait": "running",
+        "cancel_requested": "running",
+        "completed": "completed",
+        "failed": "error",
+        "poisoned": "error",
+        "cancelled": "cancelled",
+    }
+    result = job.get("result") if job["status"] == "completed" else None
+    return {
+        "status": status_map.get(job["status"], "idle"),
+        "processed": int((result or {}).get("processed") or 0),
+        "total": int(job.get("total") or 0),
+        "percent": 100 if job["status"] == "completed" else job["progress"],
+        "result": result,
+        "error": job.get("message") if job["status"] in {"failed", "poisoned"} else None,
+        "job_id": job["id"],
+        "attempt": job["attempt"],
+        "retry_at": job["retry_at"],
+        "requested_start": (result or {}).get(
+            "requested_start", coverage["next_sync_start"]
+        ),
+        "requested_end": (result or {}).get(
+            "requested_end", coverage["next_sync_end"]
+        ),
+        "last_successful_coverage_end": coverage[
+            "last_successful_coverage_end"
+        ],
+        "public_message": job.get("message"),
+    }
 
 
 @router.get("/ingest/status", response_model=IngestionStatusResponse)

@@ -9,7 +9,8 @@ import { format } from 'date-fns';
 import {
   fetchIncomeSources, createIncomeSource, updateIncomeSource, deleteIncomeSource, fetchIncomeStats,
   fetchIncomeCoverage, fetchAccounts, scanIncomeMatches, fetchIncomeMatches,
-  confirmIncomeMatches, dismissIncomeMatches,
+  confirmIncomeMatches, dismissIncomeMatches, recordActualIncome,
+  previewActualIncomePeriod, confirmActualIncomePeriod,
 } from '../api/client';
 import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
@@ -28,10 +29,10 @@ function formatINR(amount) {
 }
 
 const frequencyColors = {
-  monthly: 'bg-emerald-400/[0.1] text-emerald-400/70 border border-emerald-400/[0.12]',
-  quarterly: 'bg-blue-400/[0.1] text-blue-400/70 border border-blue-400/[0.12]',
-  annual: 'bg-violet-400/[0.1] text-violet-400/70 border border-violet-400/[0.12]',
-  one_time: 'bg-white/[0.06] text-white/40 border border-white/[0.08]',
+  monthly: 'bg-emerald-400/[0.1] text-emerald-200 border border-emerald-400/[0.12]',
+  quarterly: 'bg-blue-400/[0.1] text-blue-200 border border-blue-400/[0.12]',
+  annual: 'bg-violet-400/[0.1] text-violet-200 border border-violet-400/[0.12]',
+  one_time: 'bg-white/[0.06] text-ink-muted border border-white/[0.08]',
 };
 
 function AddIncomeModal({ open, onClose, editSource = null, coverage, accounts, onFindPast }) {
@@ -152,13 +153,13 @@ function AddIncomeModal({ open, onClose, editSource = null, coverage, accounts, 
       >
         <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
         <div className="flex items-center justify-between mb-5">
-          <h3 id="income-modal-title" className="text-white/90 text-[1.1rem]" style={{ fontWeight: 400 }}>
-            {editSource ? 'Edit Income Source' : 'Add Income Source'}
+          <h3 id="income-modal-title" className="text-ink-primary text-[1.1rem]" style={{ fontWeight: 400 }}>
+            {editSource ? 'Edit Expected Income' : 'Add Expected Income'}
           </h3>
-          <button onClick={onClose} className="text-white/30 hover:text-white/60" aria-label="Close modal"><X size={18} /></button>
+          <button onClick={onClose} className="text-ink-muted hover:text-ink-secondary" aria-label="Close modal"><X size={18} /></button>
         </div>
         {error && (
-          <div className="mb-4 p-3 bg-rose-400/[0.08] border border-rose-400/[0.15] rounded-[12px] flex items-center gap-2 text-rose-400/80 text-[0.8rem]" role="alert">
+          <div className="mb-4 p-3 bg-rose-400/[0.08] border border-rose-400/[0.15] rounded-[12px] flex items-center gap-2 text-rose-200 text-[0.8rem]" role="alert">
             <AlertCircle size={16} />
             {error}
           </div>
@@ -172,7 +173,7 @@ function AddIncomeModal({ open, onClose, editSource = null, coverage, accounts, 
             required
           />
           <GlassInput
-            label="Expected Amount (₹)"
+            label="Amount you usually expect (₹)"
             type="number"
             value={expectedAmount}
             onChange={(e) => setExpectedAmount(e.target.value)}
@@ -181,12 +182,12 @@ function AddIncomeModal({ open, onClose, editSource = null, coverage, accounts, 
             step="0.01"
           />
           <div>
-            <label htmlFor="income-frequency" className="block text-white/40 text-[0.75rem] mb-1.5" style={{ fontWeight: 400 }}>Frequency</label>
+            <label htmlFor="income-frequency" className="block text-ink-muted text-[0.75rem] mb-1.5" style={{ fontWeight: 400 }}>Frequency</label>
             <select
               id="income-frequency"
               value={frequency}
               onChange={(e) => handleFrequencyChange(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-white/[0.06] backdrop-blur-[12px] border border-white/[0.12] rounded-[14px] text-white/80 text-[0.85rem] focus:outline-none focus:border-cyan-400/30"
+              className="w-full px-3.5 py-2.5 bg-white/[0.06] backdrop-blur-[12px] border border-white/[0.12] rounded-[14px] text-ink-primary text-[0.85rem] focus:outline-none focus:border-cyan-400/30"
             >
               <option value="monthly" className="bg-[#1a2a4a]">Monthly</option>
               <option value="quarterly" className="bg-[#1a2a4a]">Quarterly</option>
@@ -219,8 +220,8 @@ function AddIncomeModal({ open, onClose, editSource = null, coverage, accounts, 
               onChange={(e) => setEffectiveTo(e.target.value)}
             />
           </div>
-          <p className="text-white/30 text-[0.7rem] -mt-2">
-            GODFIN only expects this income inside these dates. It never creates missing income automatically.
+          <p className="text-ink-muted text-[0.7rem] -mt-2">
+            This is a reminder and matching guide only. It does not add money to your Dashboard. Use “Record income” for money you actually received.
           </p>
           <GlassInput
             label="Usual amount variation (%)"
@@ -239,12 +240,12 @@ function AddIncomeModal({ open, onClose, editSource = null, coverage, accounts, 
           />
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="income-account" className="block text-white/40 text-[0.75rem] mb-1.5">Account (optional)</label>
+              <label htmlFor="income-account" className="block text-ink-muted text-[0.75rem] mb-1.5">Account (optional)</label>
               <select
                 id="income-account"
                 value={accountId}
                 onChange={(e) => setAccountId(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[14px] text-white/80 text-[0.85rem]"
+                className="w-full px-3.5 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[14px] text-ink-primary text-[0.85rem]"
               >
                 <option value="" className="bg-[#1a2a4a]">Any account</option>
                 {(accounts || []).map((account) => (
@@ -255,12 +256,12 @@ function AddIncomeModal({ open, onClose, editSource = null, coverage, accounts, 
               </select>
             </div>
             <div>
-              <label htmlFor="income-payment-rail" className="block text-white/40 text-[0.75rem] mb-1.5">Paid through (optional)</label>
+              <label htmlFor="income-payment-rail" className="block text-ink-muted text-[0.75rem] mb-1.5">Paid through (optional)</label>
               <select
                 id="income-payment-rail"
                 value={paymentRail}
                 onChange={(e) => setPaymentRail(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[14px] text-white/80 text-[0.85rem]"
+                className="w-full px-3.5 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[14px] text-ink-primary text-[0.85rem]"
               >
                 <option value="" className="bg-[#1a2a4a]">Any method</option>
                 <option value="bank" className="bg-[#1a2a4a]">Bank transfer</option>
@@ -278,19 +279,316 @@ function AddIncomeModal({ open, onClose, editSource = null, coverage, accounts, 
                 id="findPastIncome"
                 checked={findPast}
                 onChange={(e) => setFindPast(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-white/[0.2] bg-white/[0.05] text-cyan-400"
+                className="mt-0.5 h-4 w-4 rounded border-white/[0.2] bg-white/[0.05] text-cyan-200"
               />
               <div>
-                <label htmlFor="findPastIncome" className="text-white/70 text-[0.85rem] cursor-pointer">Find past matching income after saving</label>
-                <p className="text-white/30 text-[0.7rem] mt-0.5">You review every suggested credit before GODFIN changes anything.</p>
+                <label htmlFor="findPastIncome" className="text-ink-secondary text-[0.85rem] cursor-pointer">Find past matching income after saving</label>
+                <p className="text-ink-muted text-[0.7rem] mt-0.5">You review every suggested credit before GODFIN changes anything.</p>
               </div>
             </div>
           )}
           <div className="flex gap-3 pt-2">
-            <GlassButton variant="secondary" onClick={onClose} className="flex-1 justify-center">Cancel</GlassButton>
+            <GlassButton type="button" variant="secondary" onClick={onClose} className="flex-1 justify-center">Cancel</GlassButton>
             <GlassButton type="submit" disabled={isLoading} className="flex-1 justify-center">
-              {isLoading ? 'Saving...' : editSource ? 'Update' : 'Add Source'}
+              {isLoading ? 'Saving...' : editSource ? 'Update reminder' : 'Add expected source'}
             </GlassButton>
+          </div>
+        </form>
+      </DialogSurface>
+    </div>
+  );
+}
+
+
+function RecordIncomeModal({ onClose, sources, accounts }) {
+  const today = new Date().toISOString().split('T')[0];
+  const currentMonth = today.slice(0, 7);
+  const [mode, setMode] = useState('single');
+  const [incomeSourceId, setIncomeSourceId] = useState('');
+  const [sourceName, setSourceName] = useState('');
+  const [amount, setAmount] = useState('');
+  const [accountId, setAccountId] = useState(
+    accounts.find((account) => account.is_active !== false)?.id || '',
+  );
+  const [subcategory, setSubcategory] = useState('Salary');
+  const [incomeDate, setIncomeDate] = useState(today);
+  const [startMonth, setStartMonth] = useState(`${today.slice(0, 4)}-01`);
+  const [endMonth, setEndMonth] = useState(currentMonth);
+  const [paymentDay, setPaymentDay] = useState('1');
+  const [note, setNote] = useState('');
+  const [reference, setReference] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState('');
+  const queryClient = useQueryClient();
+
+  const effectiveAccountId = accountId
+    || accounts.find((account) => account.is_active !== false)?.id
+    || '';
+
+  const refreshFinancialViews = () => {
+    [
+      'transactions', 'dashboardStats', 'dashboardMonths', 'cashFlow', 'report',
+      'financialProfile', 'incomeStats', 'incomeSources', 'behaviorInsights',
+      'budget', 'patterns',
+    ].forEach((queryKey) => queryClient.invalidateQueries({ queryKey: [queryKey] }));
+  };
+
+  const finish = () => {
+    refreshFinancialViews();
+    onClose();
+  };
+  const singleMutation = useMutation({
+    mutationFn: recordActualIncome,
+    onSuccess: finish,
+    onError: (err) => setError(err.message || 'GODFIN could not record this income.'),
+  });
+  const previewMutation = useMutation({
+    mutationFn: previewActualIncomePeriod,
+    onSuccess: (data) => setPreview(data),
+    onError: (err) => setError(err.message || 'GODFIN could not prepare this history.'),
+  });
+  const confirmMutation = useMutation({
+    mutationFn: confirmActualIncomePeriod,
+    onSuccess: finish,
+    onError: (err) => setError(err.message || 'GODFIN could not save these entries.'),
+  });
+
+  const basePayload = () => ({
+    source_name: sourceName.trim(),
+    income_source_id: incomeSourceId || null,
+    amount: Number(amount),
+    account_id: effectiveAccountId,
+    subcategory,
+    note: note.trim() || null,
+    reference: reference.trim() || null,
+  });
+  const periodPayload = () => ({
+    ...basePayload(),
+    start_month: startMonth,
+    end_month: endMonth,
+    payment_day: Number(paymentDay),
+  });
+  const validate = () => {
+    if (!sourceName.trim()) return 'Enter where this income came from.';
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) return 'Enter an amount greater than zero.';
+    if (!effectiveAccountId) return 'Choose the account that received this income.';
+    if (mode === 'single' && !incomeDate) return 'Choose the date you received the income.';
+    if (mode === 'history' && (!startMonth || !endMonth)) return 'Choose the first and last month.';
+    if (mode === 'history' && startMonth > endMonth) return 'The last month cannot be before the first month.';
+    return '';
+  };
+  const submit = (event) => {
+    event.preventDefault();
+    setError('');
+    const validation = validate();
+    if (validation) {
+      setError(validation);
+      return;
+    }
+    if (mode === 'single') {
+      singleMutation.mutate({ ...basePayload(), date: incomeDate });
+      return;
+    }
+    setPreview(null);
+    previewMutation.mutate(periodPayload());
+  };
+  const chooseSource = (id) => {
+    setIncomeSourceId(id);
+    const selected = sources.find((source) => source.id === id);
+    if (selected) setSourceName(selected.source_name);
+    setPreview(null);
+  };
+  const busy = singleMutation.isPending || previewMutation.isPending || confirmMutation.isPending;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" role="presentation">
+      <DialogSurface
+        labelledBy="record-income-title"
+        onClose={onClose}
+        className="relative w-full max-w-2xl max-h-[92vh] overflow-y-auto mx-4 rounded-[24px] bg-[#0d2040]/95 border border-white/[0.15] p-6 shadow-[0_16px_64px_rgba(0,0,0,0.35)]"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="record-income-title" className="text-ink-primary text-lg">Record money you received</h2>
+            <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+              This changes your real income totals. An expected source is only a reminder and never adds money by itself.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 text-ink-muted hover:text-ink-secondary" aria-label="Close income form">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-2 rounded-[14px] bg-white/[0.04] p-1" role="tablist" aria-label="Income entry type">
+          {[
+            ['single', 'One payment'],
+            ['history', 'Monthly history'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={mode === value}
+              onClick={() => { setMode(value); setPreview(null); setError(''); }}
+              className={`rounded-[11px] px-3 py-2 text-sm transition-colors ${mode === value ? 'bg-cyan-400/15 text-cyan-200' : 'text-ink-muted hover:text-ink-secondary'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={submit} className="mt-5 space-y-4">
+          {sources.length > 0 && (
+            <div>
+              <label htmlFor="actual-income-source" className="block text-ink-muted text-xs mb-1.5">Use an expected source (optional)</label>
+              <select
+                id="actual-income-source"
+                value={incomeSourceId}
+                onChange={(event) => chooseSource(event.target.value)}
+                className="w-full px-3.5 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[14px] text-ink-primary text-sm"
+              >
+                <option value="" className="bg-[#1a2a4a]">Enter a name yourself</option>
+                {sources.map((source) => (
+                  <option key={source.id} value={source.id} className="bg-[#1a2a4a]">{source.source_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="actual-income-name" className="block text-ink-muted text-xs mb-1.5">Where did it come from?</label>
+              <GlassInput
+                id="actual-income-name"
+                value={sourceName}
+                onChange={(event) => { setSourceName(event.target.value); setPreview(null); }}
+                placeholder="For example, salary or freelance work"
+                maxLength={100}
+              />
+            </div>
+            <div>
+              <label htmlFor="actual-income-amount" className="block text-ink-muted text-xs mb-1.5">Amount received each time</label>
+              <GlassInput
+                id="actual-income-amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={amount}
+                onChange={(event) => { setAmount(event.target.value); setPreview(null); }}
+                placeholder="₹0"
+              />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="actual-income-account" className="block text-ink-muted text-xs mb-1.5">Account that received it</label>
+              <select
+                id="actual-income-account"
+                value={effectiveAccountId}
+                onChange={(event) => { setAccountId(event.target.value); setPreview(null); }}
+                className="w-full px-3.5 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[14px] text-ink-primary text-sm"
+              >
+                <option value="" className="bg-[#1a2a4a]">Choose an account</option>
+                {accounts.filter((account) => account.is_active !== false).map((account) => (
+                  <option key={account.id} value={account.id} className="bg-[#1a2a4a]">
+                    {account.nickname || account.bank} · {account.last_4_digits}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="actual-income-kind" className="block text-ink-muted text-xs mb-1.5">Kind of income</label>
+              <select
+                id="actual-income-kind"
+                value={subcategory}
+                onChange={(event) => { setSubcategory(event.target.value); setPreview(null); }}
+                className="w-full px-3.5 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[14px] text-ink-primary text-sm"
+              >
+                {['Salary', 'Freelance', 'Interest', 'Other Income'].map((value) => (
+                  <option key={value} value={value} className="bg-[#1a2a4a]">{value}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {mode === 'single' ? (
+            <div>
+              <label htmlFor="actual-income-date" className="block text-ink-muted text-xs mb-1.5">Date received</label>
+              <GlassInput id="actual-income-date" type="date" max={today} value={incomeDate} onChange={(event) => setIncomeDate(event.target.value)} />
+            </div>
+          ) : (
+            <div className="rounded-[16px] border border-cyan-400/[0.1] bg-cyan-400/[0.04] p-4">
+              <p className="text-sm text-ink-secondary">Add the same amount for several months</p>
+              <p className="mt-1 text-xs leading-relaxed text-ink-muted">You will see every date and amount before anything is saved. A later rate starts as a separate entry, so earlier months never change.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label htmlFor="actual-income-start" className="block text-ink-muted text-xs mb-1.5">First month</label>
+                  <GlassInput id="actual-income-start" type="month" value={startMonth} onChange={(event) => { setStartMonth(event.target.value); setPreview(null); }} />
+                </div>
+                <div>
+                  <label htmlFor="actual-income-end" className="block text-ink-muted text-xs mb-1.5">Last month</label>
+                  <GlassInput id="actual-income-end" type="month" max={currentMonth} value={endMonth} onChange={(event) => { setEndMonth(event.target.value); setPreview(null); }} />
+                </div>
+                <div>
+                  <label htmlFor="actual-income-day" className="block text-ink-muted text-xs mb-1.5">Day received</label>
+                  <GlassInput id="actual-income-day" type="number" min="1" max="31" value={paymentDay} onChange={(event) => { setPaymentDay(event.target.value); setPreview(null); }} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="actual-income-reference" className="block text-ink-muted text-xs mb-1.5">Reference (optional)</label>
+              <GlassInput id="actual-income-reference" value={reference} maxLength={64} onChange={(event) => { setReference(event.target.value); setPreview(null); }} placeholder="Payslip or payment reference" />
+            </div>
+            <div>
+              <label htmlFor="actual-income-note" className="block text-ink-muted text-xs mb-1.5">Note (optional)</label>
+              <GlassInput id="actual-income-note" value={note} maxLength={2000} onChange={(event) => { setNote(event.target.value); setPreview(null); }} placeholder="Anything you want to remember" />
+            </div>
+          </div>
+
+          {error && <div className="rounded-[12px] border border-rose-400/20 bg-rose-400/[0.08] p-3 text-sm text-rose-200" role="alert">{error}</div>}
+
+          {preview && (
+            <div className="rounded-[16px] border border-emerald-400/[0.15] bg-emerald-400/[0.05] p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm text-ink-secondary">Check these {preview.entries.length} entries</p>
+                  <p className="text-xs text-ink-muted">Total: {formatINR(preview.total_amount)}</p>
+                </div>
+                <Check size={20} className="text-emerald-200" aria-hidden="true" />
+              </div>
+              <div className="mt-3 max-h-48 overflow-y-auto rounded-[10px] border border-white/[0.06] divide-y divide-white/[0.05]">
+                {preview.entries.map((entry) => (
+                  <div key={entry.date} className="flex items-center justify-between px-3 py-2 text-xs">
+                    <span className="text-ink-muted">{format(new Date(`${entry.date}T00:00:00`), 'dd MMM yyyy')}</span>
+                    <span className="text-ink-secondary tabular-nums">{formatINR(entry.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <GlassButton type="button" variant="secondary" onClick={onClose} className="flex-1 justify-center">Cancel</GlassButton>
+            {mode === 'history' && preview ? (
+              <GlassButton
+                type="button"
+                disabled={busy}
+                onClick={() => confirmMutation.mutate({
+                  ...periodPayload(),
+                  preview_fingerprint: preview.preview_fingerprint,
+                  confirm: true,
+                })}
+                className="flex-1 justify-center"
+              >
+                {confirmMutation.isPending ? 'Saving…' : `Confirm ${preview.entries.length} entries`}
+              </GlassButton>
+            ) : (
+              <GlassButton type="submit" disabled={busy} className="flex-1 justify-center">
+                {busy ? 'Checking…' : mode === 'single' ? 'Record income' : 'Preview entries'}
+              </GlassButton>
+            )}
           </div>
         </form>
       </DialogSurface>
@@ -361,36 +659,36 @@ function IncomeMatchReview({ source, onClose }) {
       >
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
-            <h3 id="income-match-title" className="text-white/90 text-lg">Review past income</h3>
-            <p className="text-white/35 text-xs mt-1">
+            <h3 id="income-match-title" className="text-ink-primary text-lg">Review past income</h3>
+            <p className="text-ink-muted text-xs mt-1">
               {source.source_name} · {source.effective_from} onward. Nothing changes until you confirm it.
             </p>
           </div>
-          <button onClick={onClose} className="p-2 text-white/40 hover:text-white/70" aria-label="Close past income review">
+          <button onClick={onClose} className="p-2 text-ink-muted hover:text-ink-secondary" aria-label="Close past income review">
             <X size={18} />
           </button>
         </div>
 
         {scanMutation.data && (
-          <div className="mb-4 rounded-[14px] border border-cyan-400/[0.12] bg-cyan-400/[0.05] p-3 text-xs text-white/50">
+          <div className="mb-4 rounded-[14px] border border-cyan-400/[0.12] bg-cyan-400/[0.05] p-3 text-xs text-ink-muted">
             Checked {scanMutation.data.scanned} credits from {scanMutation.data.coverage_start} to {scanMutation.data.coverage_end}. Found {scanMutation.data.strong} strong and {scanMutation.data.uncertain} uncertain match{scanMutation.data.uncertain === 1 ? '' : 'es'}. Safely excluded {scanMutation.data.excluded_unsafe} refund, transfer, reversal, or locked credit{scanMutation.data.excluded_unsafe === 1 ? '' : 's'}.
           </div>
         )}
         {error && (
-          <div className="mb-4 rounded-[12px] border border-rose-400/20 bg-rose-400/[0.08] p-3 text-sm text-rose-300" role="alert">
+          <div className="mb-4 rounded-[12px] border border-rose-400/20 bg-rose-400/[0.08] p-3 text-sm text-rose-200" role="alert">
             {error.message || 'GODFIN could not finish the income review.'}
           </div>
         )}
 
         {matchesLoading || scanMutation.isPending ? (
-          <div className="py-12 flex items-center justify-center gap-2 text-white/40 text-sm">
+          <div className="py-12 flex items-center justify-center gap-2 text-ink-muted text-sm">
             <Loader2 size={18} className="animate-spin" /> Checking your local transactions…
           </div>
         ) : items.length === 0 ? (
           <div className="py-10 text-center">
-            <Check className="mx-auto text-emerald-400/60 mb-2" size={26} />
-            <p className="text-white/60">No unreviewed matches</p>
-            <p className="text-white/30 text-xs mt-1">GODFIN did not guess from amount alone.</p>
+            <Check className="mx-auto text-emerald-200 mb-2" size={26} />
+            <p className="text-ink-secondary">No unreviewed matches</p>
+            <p className="text-ink-muted text-xs mt-1">GODFIN did not guess from amount alone.</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -404,21 +702,21 @@ function IncomeMatchReview({ source, onClose }) {
                       ? [...(current ?? selectedIds), item.id]
                       : (current ?? selectedIds).filter((id) => id !== item.id)
                   ))}
-                  className="mt-1 h-4 w-4 rounded border-white/20 bg-white/5 text-cyan-400"
+                  className="mt-1 h-4 w-4 rounded border-white/20 bg-white/5 text-cyan-200"
                   aria-label={`Select ${item.merchant} credit from ${item.date}`}
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="truncate text-white/75 text-sm">{item.merchant}</span>
-                    <span className="text-white/80 tabular-nums text-sm">{formatINR(item.amount)}</span>
+                    <span className="truncate text-ink-secondary text-sm">{item.merchant}</span>
+                    <span className="text-ink-primary tabular-nums text-sm">{formatINR(item.amount)}</span>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[0.68rem] text-white/35">
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[0.68rem] text-ink-muted">
                     <span>{item.date}</span><span>·</span><span>{item.instrument}</span>
-                    <span className={item.strength === 'strong' ? 'text-emerald-300/70' : 'text-amber-300/70'}>
+                    <span className={item.strength === 'strong' ? 'text-emerald-200' : 'text-amber-200'}>
                       {item.strength === 'strong' ? 'Strong match' : 'Needs a closer look'}
                     </span>
                   </div>
-                  <ul className="mt-1 text-[0.68rem] text-white/30 list-disc list-inside">
+                  <ul className="mt-1 text-[0.68rem] text-ink-muted list-disc list-inside">
                     {item.evidence.map((line) => <li key={line}>{line}</li>)}
                   </ul>
                 </div>
@@ -430,12 +728,12 @@ function IncomeMatchReview({ source, onClose }) {
         {items.length > 0 && (
           <div className="mt-5 border-t border-white/[0.08] pt-4 flex flex-col sm:flex-row gap-3 sm:items-end">
             <div className="flex-1">
-              <label htmlFor="income-match-kind" className="block text-white/40 text-xs mb-1.5">What kind of income is this?</label>
+              <label htmlFor="income-match-kind" className="block text-ink-muted text-xs mb-1.5">What kind of income is this?</label>
               <select
                 id="income-match-kind"
                 value={subcategory}
                 onChange={(event) => setSubcategory(event.target.value)}
-                className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[12px] text-white/80 text-sm"
+                className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.12] rounded-[12px] text-ink-primary text-sm"
               >
                 {['Salary', 'Freelance', 'Interest', 'Other Income'].map((value) => (
                   <option key={value} value={value} className="bg-[#1a2a4a]">{value}</option>
@@ -464,6 +762,7 @@ function IncomeMatchReview({ source, onClose }) {
 
 export default function Income() {
   const [addOpen, setAddOpen] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
   const [editSource, setEditSource] = useState(null);
   const [reviewSource, setReviewSource] = useState(null);
   const queryClient = useQueryClient();
@@ -525,20 +824,23 @@ export default function Income() {
   return (
     <div>
       <DeleteConfirmDialog />
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between mb-6">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
-          <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Income Sources</h1>
-          <p className="text-white/30 text-[0.8rem]">Track your income streams</p>
+          <h1 className="text-ink-primary text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Income</h1>
+          <p className="text-ink-muted text-[0.8rem]">Record money you received, and keep expected payments as reminders.</p>
         </div>
-        <GlassButton icon={<Plus size={15} />} onClick={() => setAddOpen(true)}>Add Source</GlassButton>
+        <div className="flex flex-wrap gap-2">
+          <GlassButton variant="secondary" icon={<Calendar size={15} />} onClick={() => setAddOpen(true)}>Add expected source</GlassButton>
+          <GlassButton icon={<Plus size={15} />} onClick={() => setRecordOpen(true)}>Record income</GlassButton>
+        </div>
       </motion.div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatCard title="Expected Monthly" value={formatINR(stats?.total_expected_monthly)} icon={TrendingUp} color="text-emerald-400" delay={0.1} />
-        <StatCard title="This Month" value={formatINR(stats?.total_detected_this_month)} icon={DollarSign} color="text-blue-400" delay={0.15} />
-        <StatCard title="Total Sources" value={stats?.sources_count || 0} icon={Calendar} color="text-violet-400" delay={0.2} />
-        <StatCard title="Active" value={stats?.active_sources_count || 0} icon={Check} color="text-amber-400" delay={0.25} />
+        <StatCard title="Expected this month" value={formatINR(stats?.total_expected_monthly)} icon={TrendingUp} color="text-emerald-200" delay={0.1} />
+        <StatCard title="Actually received" value={formatINR(stats?.total_detected_this_month)} icon={DollarSign} color="text-blue-200" delay={0.15} />
+        <StatCard title="Expected sources" value={stats?.sources_count || 0} icon={Calendar} color="text-violet-200" delay={0.2} />
+        <StatCard title="Active reminders" value={stats?.active_sources_count || 0} icon={Check} color="text-amber-200" delay={0.25} />
       </div>
 
       {/* Income Cards */}
@@ -548,9 +850,9 @@ export default function Income() {
         </div>
       ) : sources.length === 0 ? (
         <div className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-8 text-center">
-          <DollarSign className="h-8 w-8 text-white/20 mx-auto mb-2" aria-hidden="true" />
-          <p className="text-white/40 text-[0.9rem]">No income sources yet</p>
-          <p className="text-white/25 text-[0.75rem] mt-1">Add your income sources to track earnings</p>
+          <DollarSign className="h-8 w-8 text-ink-muted mx-auto mb-2" aria-hidden="true" />
+          <p className="text-ink-muted text-[0.9rem]">No expected income reminders yet</p>
+          <p className="text-ink-muted text-[0.75rem] mt-1">You can still record money you already received.</p>
         </div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -570,16 +872,16 @@ export default function Income() {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-[14px] bg-emerald-400/[0.1] border border-emerald-400/[0.12] flex items-center justify-center">
-                      <DollarSign className="h-5 w-5 text-emerald-400/70" aria-hidden="true" />
+                      <DollarSign className="h-5 w-5 text-emerald-200" aria-hidden="true" />
                     </div>
                     <div>
-                      <h3 className="text-white/80 text-[0.9rem]" style={{ fontWeight: 400 }}>{source.source_name}</h3>
+                      <h3 className="text-ink-primary text-[0.9rem]" style={{ fontWeight: 400 }}>{source.source_name}</h3>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className={`text-[0.65rem] px-2 py-0.5 rounded-full ${frequencyColors[source.frequency] || frequencyColors.monthly}`}>
                           {source.frequency}
                         </span>
                         {source.enforce_current_month && (
-                          <span className="text-[0.65rem] px-2 py-0.5 rounded-full bg-amber-400/[0.1] text-amber-400/70 border border-amber-400/[0.12]">
+                          <span className="text-[0.65rem] px-2 py-0.5 rounded-full bg-amber-400/[0.1] text-amber-200 border border-amber-400/[0.12]">
                             This month
                           </span>
                         )}
@@ -587,26 +889,26 @@ export default function Income() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => handleEdit(source)} className="p-1.5 text-white/20 hover:text-white/50 hover:bg-white/[0.06] rounded-[8px] transition-colors" aria-label={`Edit ${source.source_name}`}>
+                    <button onClick={() => handleEdit(source)} className="p-1.5 text-ink-muted hover:text-ink-muted hover:bg-white/[0.06] rounded-[8px] transition-colors" aria-label={`Edit ${source.source_name}`}>
                       <Edit2 size={13} />
                     </button>
-                    <button onClick={() => handleDelete(source)} className="p-1.5 text-white/20 hover:text-rose-400/60 hover:bg-white/[0.06] rounded-[8px] transition-colors" aria-label={`Delete ${source.source_name}`}>
+                    <button onClick={() => handleDelete(source)} className="p-1.5 text-ink-muted hover:text-rose-200 hover:bg-white/[0.06] rounded-[8px] transition-colors" aria-label={`Delete ${source.source_name}`}>
                       <Trash2 size={13} />
                     </button>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-white/25 text-[0.65rem]">Expected</p>
-                    <p className="text-white/80 text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>{formatINR(source.expected_amount)}</p>
+                    <p className="text-ink-muted text-[0.65rem]">Expected</p>
+                    <p className="text-ink-primary text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>{formatINR(source.expected_amount)}</p>
                   </div>
                   <div>
-                    <p className="text-white/25 text-[0.65rem]">Last Detected</p>
-                    <p className="text-white/80 text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>
+                    <p className="text-ink-muted text-[0.65rem]">Last Detected</p>
+                    <p className="text-ink-primary text-[1.1rem] tabular-nums" style={{ fontWeight: 300 }}>
                       {source.last_detected_amount ? formatINR(source.last_detected_amount) : '--'}
                     </p>
                     {source.last_detected_date && (
-                      <p className="text-white/20 text-[0.65rem]">
+                      <p className="text-ink-muted text-[0.65rem]">
                         {format(new Date(source.last_detected_date), 'dd MMM yyyy')}
                       </p>
                     )}
@@ -614,14 +916,14 @@ export default function Income() {
                 </div>
                 {source.next_expected_date && (
                   <div className="mt-3 pt-3 border-t border-white/[0.06]">
-                    <div className="flex items-center gap-2 text-white/30 text-[0.7rem]">
+                    <div className="flex items-center gap-2 text-ink-muted text-[0.7rem]">
                       <Calendar size={12} aria-hidden="true" />
                       <span>Next expected: {format(new Date(source.next_expected_date), 'dd MMM yyyy')}</span>
                     </div>
                   </div>
                 )}
                 <div className="mt-3 pt-3 border-t border-white/[0.06] space-y-2">
-                  <div className="text-white/25 text-[0.68rem]">
+                  <div className="text-ink-muted text-[0.68rem]">
                     Applies from {format(new Date(`${source.effective_from}T00:00:00`), 'dd MMM yyyy')}
                     {source.effective_to
                       ? ` to ${format(new Date(`${source.effective_to}T00:00:00`), 'dd MMM yyyy')}`
@@ -630,7 +932,7 @@ export default function Income() {
                   <button
                     type="button"
                     onClick={() => setReviewSource(source)}
-                    className="inline-flex items-center gap-1.5 text-cyan-300/65 hover:text-cyan-200 text-[0.72rem] transition-colors"
+                    className="inline-flex items-center gap-1.5 text-cyan-200 hover:text-cyan-200 text-[0.72rem] transition-colors"
                     aria-label={`Find past income for ${source.source_name}`}
                   >
                     <Search size={13} aria-hidden="true" />
@@ -644,6 +946,13 @@ export default function Income() {
       )}
 
       <AnimatePresence>
+        {recordOpen && (
+          <RecordIncomeModal
+            onClose={() => setRecordOpen(false)}
+            sources={sources}
+            accounts={accounts}
+          />
+        )}
         {addOpen && (
           <AddIncomeModal
             open={addOpen}

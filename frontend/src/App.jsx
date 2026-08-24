@@ -7,9 +7,11 @@ import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuditProvider } from './context/AuditContext';
 import AppLayout from './components/AppLayout';
+import LockedFeaturePage from './components/LockedFeaturePage';
 import GlobalErrorToasts from './components/GlobalErrorToasts';
 import PinScreen from './pages/PinScreen';
-import { fetchOnboardingStatus } from './api/client';
+import { fetchLicenseNavigation, fetchOnboardingStatus } from './api/client';
+import { lockedRouteMetadata } from './lib/tierNavigation';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Transactions = lazy(() => import('./pages/Transactions'));
@@ -89,11 +91,23 @@ function AppRoutes() {
     queryFn: fetchOnboardingStatus,
     enabled: isAuthenticated,
   });
+  const {
+    data: licenseNavigation,
+    isLoading: licenseNavigationLoading,
+    isError: licenseNavigationError,
+    isFetching: licenseNavigationFetching,
+    refetch: refetchLicenseNavigation,
+  } = useQuery({
+    queryKey: ['licenseNavigation'],
+    queryFn: fetchLicenseNavigation,
+    enabled: isAuthenticated,
+    staleTime: 60 * 1000,
+  });
   if (pathname === '/pin') return <PinRoute />;
   if (pathname === '/onboarding') {
     return (
       <ProtectedRoute>
-        <Suspense fallback={<p className="p-8 text-sm text-white/40">Loading…</p>}>
+        <Suspense fallback={<p className="p-8 text-sm text-ink-muted">Loading…</p>}>
           <Onboarding />
         </Suspense>
       </ProtectedRoute>
@@ -111,12 +125,52 @@ function AppRoutes() {
   }
   const Page = ROUTES[pathname];
   if (!Page) return <Navigate to="/" replace />;
+  if (isAuthenticated && licenseNavigationLoading) {
+    return (
+      <ProtectedRoute>
+        <AppLayout>
+          <p className="p-8 text-sm text-ink-muted" role="status">
+            Checking feature access…
+          </p>
+        </AppLayout>
+      </ProtectedRoute>
+    );
+  }
+  if (isAuthenticated && licenseNavigationError) {
+    return (
+      <ProtectedRoute>
+        <AppLayout>
+          <div className="mx-auto max-w-xl p-8 text-center" role="alert">
+            <h1 className="text-xl font-semibold text-ink-primary">
+              GODFIN could not check feature access
+            </h1>
+            <p className="mt-2 text-sm text-ink-muted">
+              Your data is safe. Make sure the local backend is online, then try again.
+            </p>
+            <button
+              type="button"
+              className="mt-5 rounded-xl border border-cyan-300/40 bg-cyan-300/10 px-4 py-2 text-sm font-medium text-cyan-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200 disabled:cursor-wait disabled:opacity-60"
+              onClick={() => refetchLicenseNavigation()}
+              disabled={licenseNavigationFetching}
+            >
+              {licenseNavigationFetching ? 'Checking…' : 'Try again'}
+            </button>
+          </div>
+        </AppLayout>
+      </ProtectedRoute>
+    );
+  }
+  const lockedRule = lockedRouteMetadata(pathname, licenseNavigation);
   return (
     <ProtectedRoute>
       <AppLayout>
-        <Suspense fallback={<p className="p-8 text-sm text-white/40">Loading…</p>}>
-          <Page />
-        </Suspense>
+        {lockedRule ? (
+          <LockedFeaturePage rule={lockedRule} />
+        ) : (
+          <Suspense fallback={<p className="p-8 text-sm text-ink-muted">Loading…</p>}>
+            <Page />
+          </Suspense>
+        )}
       </AppLayout>
     </ProtectedRoute>
   );

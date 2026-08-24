@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import calendar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
@@ -328,7 +328,14 @@ class FinancialProfile:
     comparison_end: Optional[str] = None
     transaction_count: int = 0
     comparison_transaction_count: int = 0
-    calculation_version: str = "2.0"
+    verified_income_count: int = 0
+    verified_income_total: float = 0
+    spending_transaction_count: int = 0
+    spending_total: float = 0
+    complete_month_count: int = 0
+    recurring_sample_count: int = 0
+    metrics: dict[str, dict[str, object]] = field(default_factory=dict)
+    calculation_version: str = "3.0"
     caveat: str = (
         "These are descriptive money patterns from categorized transactions, "
         "not a diagnosis or a judgment about you."
@@ -340,44 +347,75 @@ def compute_financial_profile(
     *,
     as_of: date | None = None,
 ) -> FinancialProfile:
-    """Calculate plain-language ratios from the latest complete month."""
+    """Calculate explainable ratios from the latest complete months with data."""
     today = as_of or date.today()
     current_month_start = date(today.year, today.month, 1)
-    period_start = _month_start_offset(current_month_start, -1)
-    comparison_start = _month_start_offset(current_month_start, -2)
+    fallback_period = _month_start_offset(current_month_start, -1)
     profile = FinancialProfile(
-        period_start=period_start.isoformat(),
+        period_start=fallback_period.isoformat(),
         period_end=(current_month_start - timedelta(days=1)).isoformat(),
-        comparison_start=comparison_start.isoformat(),
-        comparison_end=(period_start - timedelta(days=1)).isoformat(),
     )
 
-    primary = (
+    transactions = (
         db.query(Transaction)
         .filter(
-            Transaction.date >= period_start,
             Transaction.date < current_month_start,
             active_clause(Transaction),
         )
+        .order_by(Transaction.date.desc(), Transaction.id.desc())
         .all()
     )
-    comparison = (
-        db.query(Transaction)
-        .filter(
-            Transaction.date >= comparison_start,
-            Transaction.date < period_start,
-            active_clause(Transaction),
-        )
-        .all()
+    by_month: dict[date, list[Transaction]] = {}
+    for transaction in transactions:
+        month_start = date(transaction.date.year, transaction.date.month, 1)
+        by_month.setdefault(month_start, []).append(transaction)
+    complete_months = sorted(by_month, reverse=True)
+    profile.complete_month_count = len(complete_months)
+    if not complete_months:
+        unavailable = "No completed month contains recorded transactions yet."
+        profile.metrics = {
+            name: {
+                "available": False,
+                "unavailable_reason": unavailable,
+                "period_start": None,
+                "period_end": None,
+                "sample_count": 0,
+            }
+            for name in (
+                "savings_rate",
+                "impulse_index",
+                "fixed_expense_ratio",
+                "recurring_burden",
+                "subscription_dependency",
+                "lifestyle_inflation",
+            )
+        }
+        return profile
+
+    period_start = complete_months[0]
+    period_end = _month_start_offset(period_start, 1) - timedelta(days=1)
+    primary = by_month[period_start]
+    comparison_start = complete_months[1] if len(complete_months) > 1 else None
+    comparison = by_month.get(comparison_start, []) if comparison_start else []
+    profile.period_start = period_start.isoformat()
+    profile.period_end = period_end.isoformat()
+    profile.comparison_start = comparison_start.isoformat() if comparison_start else None
+    profile.comparison_end = (
+        (_month_start_offset(comparison_start, 1) - timedelta(days=1)).isoformat()
+        if comparison_start
+        else None
     )
     profile.transaction_count = len(primary)
     profile.comparison_transaction_count = len(comparison)
-    if not primary:
-        return profile
 
-    income = sum(float(item.amount) for item in primary if is_verified_income(item))
+    income_rows = [item for item in primary if is_verified_income(item)]
+    income = sum(float(item.amount) for item in income_rows)
     spending = [item for item in primary if is_spending(item)]
     total_spend = sum(float(item.amount) for item in spending)
+    profile.verified_income_count = len(income_rows)
+    profile.verified_income_total = round(income, 2)
+    profile.spending_transaction_count = len(spending)
+    profile.spending_total = round(total_spend, 2)
     fixed_categories = {
         category for category, elasticity in ELASTICITY.items()
         if elasticity == "fixed"
@@ -398,6 +436,23 @@ def compute_financial_profile(
         if (item.subcategory or "").strip().lower() == "subscriptions"
     )
 
+    def metric(
+        name: str,
+        *,
+        available: bool,
+        unavailable_reason: str | None,
+        sample_count: int,
+        metric_start: date | None = period_start,
+        metric_end: date | None = period_end,
+    ) -> None:
+        profile.metrics[name] = {
+            "available": available,
+            "unavailable_reason": unavailable_reason,
+            "period_start": metric_start.isoformat() if metric_start else None,
+            "period_end": metric_end.isoformat() if metric_end else None,
+            "sample_count": sample_count,
+        }
+
     if len(spending) >= 5:
         small_flexible_count = sum(
             1 for item in flexible_spending if float(item.amount) < 500
@@ -406,42 +461,166 @@ def compute_financial_profile(
             small_flexible_count / len(spending) * 100,
             1,
         )
+        metric(
+            "impulse_index",
+            available=True,
+            unavailable_reason=None,
+            sample_count=len(spending),
+        )
+    else:
+        metric(
+            "impulse_index",
+            available=False,
+            unavailable_reason=(
+                f"At least 5 purchases are needed; this month has {len(spending)}."
+            ),
+            sample_count=len(spending),
+        )
     if total_spend > 0:
         profile.subscription_dependency = round(
             subscription_spend / total_spend * 100,
             1,
         )
+        metric(
+            "subscription_dependency",
+            available=True,
+            unavailable_reason=None,
+            sample_count=len(spending),
+        )
+    else:
+        metric(
+            "subscription_dependency",
+            available=False,
+            unavailable_reason="No included purchases were recorded in this month.",
+            sample_count=0,
+        )
 
-    comparison_spending = [item for item in comparison if is_spending(item)]
-    comparison_flexible = [
-        item for item in comparison_spending
-        if item.category in flexible_categories
-    ]
-    if len(flexible_spending) >= 3 and len(comparison_flexible) >= 3:
-        current_flexible = sum(float(item.amount) for item in flexible_spending)
-        previous_flexible = sum(float(item.amount) for item in comparison_flexible)
-        if previous_flexible > 0:
-            profile.lifestyle_inflation = round(
-                (current_flexible - previous_flexible)
-                / previous_flexible
-                * 100,
-                1,
-            )
+    lifestyle_pair: tuple[date, list[Transaction], date, list[Transaction]] | None = None
+    for position, candidate_start in enumerate(complete_months):
+        candidate = [
+            item
+            for item in by_month[candidate_start]
+            if is_spending(item) and item.category in flexible_categories
+        ]
+        if len(candidate) < 3:
+            continue
+        for older_start in complete_months[position + 1 :]:
+            older = [
+                item
+                for item in by_month[older_start]
+                if is_spending(item) and item.category in flexible_categories
+            ]
+            if len(older) >= 3:
+                lifestyle_pair = (candidate_start, candidate, older_start, older)
+                break
+        if lifestyle_pair:
+            break
+    if lifestyle_pair:
+        current_start, current_flexible_rows, older_start, older_flexible_rows = lifestyle_pair
+        current_flexible = sum(float(item.amount) for item in current_flexible_rows)
+        previous_flexible = sum(float(item.amount) for item in older_flexible_rows)
+        profile.lifestyle_inflation = round(
+            (current_flexible - previous_flexible) / previous_flexible * 100,
+            1,
+        )
+        metric(
+            "lifestyle_inflation",
+            available=True,
+            unavailable_reason=None,
+            sample_count=len(current_flexible_rows) + len(older_flexible_rows),
+            metric_start=older_start,
+            metric_end=_month_start_offset(current_start, 1) - timedelta(days=1),
+        )
+    else:
+        flexible_samples = sum(
+            1
+            for rows in by_month.values()
+            for item in rows
+            if is_spending(item) and item.category in flexible_categories
+        )
+        metric(
+            "lifestyle_inflation",
+            available=False,
+            unavailable_reason=(
+                "Two completed months with at least 3 optional purchases each are needed."
+            ),
+            sample_count=flexible_samples,
+        )
 
-    if income <= 0:
-        profile.data_status = "income_unavailable"
-        return profile
+    if income > 0:
+        profile.savings_rate = round((income - total_spend) / income * 100, 1)
+        profile.fixed_expense_ratio = round(fixed_spend / income * 100, 1)
+        metric(
+            "savings_rate",
+            available=True,
+            unavailable_reason=None,
+            sample_count=len(income_rows) + len(spending),
+        )
+        metric(
+            "fixed_expense_ratio",
+            available=True,
+            unavailable_reason=None,
+            sample_count=len(income_rows) + len(spending),
+        )
+    else:
+        income_reason = (
+            "No verified income was recorded in the selected completed month. "
+            "Record actual income or confirm a matching credit."
+        )
+        metric(
+            "savings_rate",
+            available=False,
+            unavailable_reason=income_reason,
+            sample_count=len(spending),
+        )
+        metric(
+            "fixed_expense_ratio",
+            available=False,
+            unavailable_reason=income_reason,
+            sample_count=len(spending),
+        )
 
-    profile.savings_rate = round((income - total_spend) / income * 100, 1)
-    profile.fixed_expense_ratio = round(fixed_spend / income * 100, 1)
     frequency_divisors = {"monthly": 1, "quarterly": 3, "annual": 12}
-    monthly_recurring = sum(
-        float(pattern.avg_amount) / frequency_divisors[pattern.frequency]
+    recurring_patterns = [
+        pattern
         for pattern in db.query(RecurringPattern)
         .filter(RecurringPattern.is_active.is_(True))
         .all()
         if pattern.frequency in frequency_divisors
+    ]
+    profile.recurring_sample_count = len(recurring_patterns)
+    if income > 0 and recurring_patterns:
+        monthly_recurring = sum(
+            float(pattern.avg_amount) / frequency_divisors[pattern.frequency]
+            for pattern in recurring_patterns
+        )
+        profile.recurring_burden = round(monthly_recurring / income * 100, 1)
+        metric(
+            "recurring_burden",
+            available=True,
+            unavailable_reason=None,
+            sample_count=len(recurring_patterns),
+        )
+    else:
+        reason = (
+            "No verified income was recorded in the selected completed month."
+            if income <= 0
+            else "No confirmed repeat-payment pattern is available yet."
+        )
+        metric(
+            "recurring_burden",
+            available=False,
+            unavailable_reason=reason,
+            sample_count=len(recurring_patterns),
+        )
+
+    available_count = sum(
+        bool(item["available"]) for item in profile.metrics.values()
     )
-    profile.recurring_burden = round(monthly_recurring / income * 100, 1)
-    profile.data_status = "calculated"
+    if available_count == len(profile.metrics):
+        profile.data_status = "calculated"
+    elif available_count > 0:
+        profile.data_status = "partial"
+    elif income <= 0:
+        profile.data_status = "income_unavailable"
     return profile

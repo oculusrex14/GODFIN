@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import io
+import sys
 import threading
+import zipfile
 from datetime import date
 
 import pytest
@@ -12,9 +14,15 @@ from app.core.parsers import parse_registered_statement
 from app.core.statement_parser import (
     StatementParseResult,
     StatementTransaction,
+    _append_strict_savings_txn,
     _validate_savings_controls,
     _parse_hdfc_savings_statement,
     _process_savings_table_v2,
+)
+from app.core.statement_file_safety import (
+    UnsafeStatementFile,
+    validate_pdf_structure,
+    validate_xlsx_archive,
 )
 
 
@@ -44,6 +52,43 @@ def test_all_debit_statement_controls_keep_decimal_zero_for_credits():
     assert result.reconciliation_status == "passed"
     assert result.total_debits == 725
     assert result.total_credits == 0
+
+
+def test_negative_explicit_withdrawal_is_a_reversal_credit():
+    result = StatementParseResult()
+    _append_strict_savings_txn(
+        {
+            "date": date(2026, 7, 15),
+            "narration": "SYNTHETIC PURCHASE",
+            "withdrawal": 100,
+            "deposit": None,
+            "balance": 900,
+        },
+        result.transactions,
+        result.errors,
+        row_label="row 1",
+    )
+    _append_strict_savings_txn(
+        {
+            "date": date(2026, 7, 16),
+            "narration": "SYNTHETIC PURCHASE REVERSAL",
+            "withdrawal": -50,
+            "deposit": None,
+            "balance": 950,
+        },
+        result.transactions,
+        result.errors,
+        row_label="row 2",
+    )
+
+    _validate_savings_controls(result)
+
+    assert result.errors == []
+    assert result.reconciliation_status == "passed"
+    assert [(row.txn_type, row.amount) for row in result.transactions] == [
+        ("debit", 100),
+        ("credit", 50),
+    ]
 
 
 HEADER = [
@@ -96,6 +141,50 @@ def _valid_rows() -> list[list[object]]:
             9800.0,
         ],
     ]
+
+
+def test_pdf_preflight_rejects_active_content_and_incomplete_documents():
+    validate_pdf_structure(b"%PDF-1.7\n1 0 obj<<>>endobj\n%%EOF")
+
+    with pytest.raises(UnsafeStatementFile, match="scripts"):
+        validate_pdf_structure(
+            b"%PDF-1.7\n1 0 obj<</JavaScript 2 0 R>>endobj\n%%EOF"
+        )
+    with pytest.raises(UnsafeStatementFile, match="incomplete"):
+        validate_pdf_structure(b"%PDF-1.7\n1 0 obj<<>>endobj")
+
+
+def test_xlsx_preflight_rejects_macro_external_and_traversal_entries():
+    for unsafe_name, unsafe_contents in (
+        ("xl/vbaProject.bin", b"macro"),
+        (
+            "xl/_rels/workbook.xml.rels",
+            b'<Relationship Target="https://attacker.invalid" TargetMode="External"/>',
+        ),
+        ("../escape.xml", b"escape"),
+    ):
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("[Content_Types].xml", b"<Types/>")
+            archive.writestr("xl/workbook.xml", b"<workbook/>")
+            archive.writestr(unsafe_name, unsafe_contents)
+        with pytest.raises(UnsafeStatementFile):
+            validate_xlsx_archive(output.getvalue())
+
+
+def test_linux_parser_limits_fail_closed_when_the_os_rejects_them(monkeypatch):
+    from app.api.v1.endpoints import statement
+    import resource
+
+    monkeypatch.setattr(statement.sys, "platform", "linux")
+    monkeypatch.setattr(
+        resource,
+        "setrlimit",
+        lambda *_args: (_ for _ in ()).throw(OSError("denied")),
+    )
+
+    with pytest.raises(statement.StatementParserSandboxError):
+        statement._apply_parser_resource_limits()
 
 
 def test_salary_credit_and_unknown_merchant_debit_remain_separate_and_reconcile():
@@ -220,7 +309,7 @@ def test_unrecognized_pdf_does_not_fall_back_to_any_registered_parser(monkeypatc
     assert result.transactions == []
     assert result.recognized is False
     assert result.errors == [
-        "Unsupported or unrecognized PDF statement; select a supported HDFC profile",
+        "Unsupported or unrecognized PDF statement; choose a supported bank export",
     ]
 
 

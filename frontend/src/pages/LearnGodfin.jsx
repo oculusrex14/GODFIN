@@ -173,14 +173,14 @@ export default function LearnGodfin() {
     <div className="max-w-5xl mx-auto space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-cyan-300/55 text-xs uppercase tracking-[0.18em]">Learn GODFIN</p>
-          <h1 className="mt-2 text-white/90 text-2xl sm:text-3xl font-light">Finance basics, one calm step at a time</h1>
-          <p className="mt-2 text-white/35 text-sm">All examples on this page are synthetic and are never saved as your financial data.</p>
+          <p className="text-cyan-200 text-xs uppercase tracking-[0.18em]">Learn GODFIN</p>
+          <h1 className="mt-2 text-ink-primary text-2xl sm:text-3xl font-light">Finance basics, one calm step at a time</h1>
+          <p className="mt-2 text-ink-muted text-sm">All examples on this page are synthetic and are never saved as your financial data.</p>
         </div>
         <button
           type="button"
           onClick={() => navigate('/')}
-          className="min-h-11 px-4 rounded-xl text-white/45 hover:bg-white/[0.06] text-sm"
+          className="min-h-11 px-4 rounded-xl text-ink-muted hover:bg-white/[0.06] text-sm"
         >
           Leave learning
         </button>
@@ -206,7 +206,7 @@ export default function LearnGodfin() {
                   onClick={() => move(number)}
                   aria-current={active ? 'step' : undefined}
                   className={`w-full min-h-11 rounded-xl px-3 flex items-center gap-3 text-left ${
-                    active ? 'bg-white/[0.09] text-white/75' : 'text-white/35 hover:bg-white/[0.05]'
+                    active ? 'bg-white/[0.09] text-ink-secondary' : 'text-ink-muted hover:bg-white/[0.05]'
                   }`}
                 >
                   <span className="w-5 text-center text-xs">{complete ? '✓' : number}</span>
@@ -219,22 +219,22 @@ export default function LearnGodfin() {
 
         <article className="rounded-2xl border border-white/[0.11] bg-white/[0.05] p-5 sm:p-7" aria-live="polite">
           <div className="w-12 h-12 grid place-items-center rounded-2xl bg-cyan-300/[0.09] border border-cyan-300/[0.15]">
-            <Icon size={22} className="text-cyan-100/70" />
+            <Icon size={22} className="text-cyan-100" />
           </div>
-          <p className="mt-5 text-white/25 text-xs uppercase tracking-wide">Lesson {step} of {LESSONS.length}</p>
-          <h2 className="mt-1 text-white/85 text-2xl font-light">{lesson.title}</h2>
-          <p className="mt-3 text-white/50 leading-relaxed">{lesson.summary}</p>
+          <p className="mt-5 text-ink-muted text-xs uppercase tracking-wide">Lesson {step} of {LESSONS.length}</p>
+          <h2 className="mt-1 text-ink-primary text-2xl font-light">{lesson.title}</h2>
+          <p className="mt-3 text-ink-muted leading-relaxed">{lesson.summary}</p>
           <ul className="mt-5 space-y-3">
             {lesson.points.map(point => (
-              <li key={point} className="flex gap-3 text-white/45 text-sm leading-relaxed">
+              <li key={point} className="flex gap-3 text-ink-muted text-sm leading-relaxed">
                 <span className="mt-1.5 w-1.5 h-1.5 shrink-0 rounded-full bg-cyan-300/55" />
                 {point}
               </li>
             ))}
           </ul>
           <div className="mt-6 rounded-2xl border border-emerald-300/[0.13] bg-emerald-300/[0.045] p-4">
-            <p className="text-emerald-100/45 text-[0.68rem] uppercase tracking-wide">Synthetic walkthrough</p>
-            <p className="mt-2 text-white/55 text-sm leading-relaxed">{lesson.example}</p>
+            <p className="text-emerald-100 text-[0.68rem] uppercase tracking-wide">Synthetic walkthrough</p>
+            <p className="mt-2 text-ink-secondary text-sm leading-relaxed">{lesson.example}</p>
           </div>
 
           <div className="mt-7 flex flex-wrap items-center justify-between gap-3">
@@ -242,7 +242,7 @@ export default function LearnGodfin() {
               type="button"
               onClick={back}
               disabled={step === 1}
-              className="min-h-11 px-4 rounded-xl border border-white/[0.09] text-white/50 disabled:opacity-30 text-sm flex items-center gap-2"
+              className="min-h-11 px-4 rounded-xl border border-white/[0.09] text-ink-muted disabled:opacity-30 text-sm flex items-center gap-2"
             >
               <ChevronLeft size={15} />
               Back
@@ -250,13 +250,13 @@ export default function LearnGodfin() {
             <button
               type="button"
               onClick={next}
-              className="min-h-11 px-4 rounded-xl border border-cyan-300/[0.18] bg-cyan-300/[0.08] text-cyan-100/75 text-sm flex items-center gap-2"
+              className="min-h-11 px-4 rounded-xl border border-cyan-300/[0.18] bg-cyan-300/[0.08] text-cyan-100 text-sm flex items-center gap-2"
             >
               {step === LESSONS.length ? 'Finish learning' : 'Next lesson'}
               <ChevronRight size={15} />
             </button>
           </div>
-          <p className="mt-4 text-white/20 text-[0.65rem]">
+          <p className="mt-4 text-ink-muted text-[0.65rem]">
             Keyboard: Left/Right Arrow to move, Escape to leave. Buttons are touch-friendly and screen-reader labeled.
           </p>
         </article>

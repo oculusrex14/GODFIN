@@ -6,6 +6,7 @@ import json
 import re
 import unicodedata
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any
 from urllib.parse import urlparse
 
@@ -13,6 +14,11 @@ from urllib.parse import urlparse
 HOSTED_DATA_CONSENT_VERSION = "2026-08-02"
 LOCAL_PROVIDER_IDS = frozenset({"ollama_local"})
 MAX_HOSTED_PROMPT_CHARS = 60_000
+HOSTED_REDACTION_BUDGET_SECONDS = 0.75
+
+
+class HostedPromptRedactionError(RuntimeError):
+    """A hosted prompt could not be made safe within the local privacy budget."""
 
 _EMAIL_OR_UPI = re.compile(
     r"(?i)\b[a-z0-9._%+\-]{1,64}@[a-z0-9.\-]{2,80}\.[a-z]{2,20}\b"
@@ -161,21 +167,38 @@ def _labeled_amount_band(match: re.Match[str]) -> str:
     return f"{match.group(1)} {_amount_band(synthetic)}"
 
 
+def _enforce_redaction_deadline(started_at: float) -> None:
+    if monotonic() - started_at > HOSTED_REDACTION_BUDGET_SECONDS:
+        raise HostedPromptRedactionError(
+            "Hosted AI redaction exceeded its safe preprocessing budget"
+        )
+
+
 def redact_hosted_prompt(prompt: str) -> str:
     """Remove direct identifiers and exact financial values before any network call."""
     if not isinstance(prompt, str):
         raise TypeError("LLM prompt must be text")
-    text = unicodedata.normalize("NFKC", prompt)
+    started_at = monotonic()
+    # Bound attacker-controlled work before normalization or regex evaluation. Any
+    # content outside this prefix can never be sent to a hosted provider.
+    text = unicodedata.normalize("NFKC", prompt[:MAX_HOSTED_PROMPT_CHARS])
+    _enforce_redaction_deadline(started_at)
     text = "".join(
         char if char in "\n\t" or not unicodedata.category(char).startswith("C") else " "
         for char in text
+    )[:MAX_HOSTED_PROMPT_CHARS]
+    _enforce_redaction_deadline(started_at)
+    substitutions = (
+        (_EMAIL_OR_UPI, "<email-or-payment-address removed>"),
+        (_PHONE, "<phone removed>"),
+        (_MASKED_ACCOUNT, "<account fragment removed>"),
+        (_REFERENCE, "<transaction reference removed>"),
+        (_EXACT_DATE, "<exact date removed>"),
+        (_AMOUNT, _amount_band),
+        (_LABELED_AMOUNT, _labeled_amount_band),
+        (_LONG_NUMBER, "<long number removed>"),
     )
-    text = _EMAIL_OR_UPI.sub("<email-or-payment-address removed>", text)
-    text = _PHONE.sub("<phone removed>", text)
-    text = _MASKED_ACCOUNT.sub("<account fragment removed>", text)
-    text = _REFERENCE.sub("<transaction reference removed>", text)
-    text = _EXACT_DATE.sub("<exact date removed>", text)
-    text = _AMOUNT.sub(_amount_band, text)
-    text = _LABELED_AMOUNT.sub(_labeled_amount_band, text)
-    text = _LONG_NUMBER.sub("<long number removed>", text)
+    for pattern, replacement in substitutions:
+        text = pattern.sub(replacement, text)
+        _enforce_redaction_deadline(started_at)
     return text[:MAX_HOSTED_PROMPT_CHARS]

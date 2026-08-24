@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import uuid
 from datetime import date, datetime
 from typing import List, Literal, Optional
@@ -13,11 +14,19 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.audit import FinalizedPeriodError
 from app.core.database import get_db
+from app.core.errors import StateConflictError
 from app.core.income_matching import (
     eligible_income_credit,
     scan_historical_income_matches,
     suggestion_evidence,
+)
+from app.core.manual_income import (
+    ManualIncomeEntry,
+    manual_income_preview_fingerprint,
+    monthly_income_entries,
+    record_manual_income_entries,
 )
 from app.core.time import utcnow_naive
 from app.core.transaction_semantics import (
@@ -31,6 +40,7 @@ from app.models.income_source import IncomeMatchSuggestion, IncomeSource
 from app.models.transaction import Transaction
 from app.schemas.financial import (
     IncomeFrequency,
+    PastOrTodayDate,
     PositiveMoney,
     YearMonth,
     reject_explicit_nulls,
@@ -186,6 +196,59 @@ class IncomeMatchDecisionResponse(BaseModel):
     source_id: str
 
 
+IncomeSubcategory = Literal["Salary", "Freelance", "Interest", "Other Income"]
+
+
+class ManualIncomeBase(BaseModel):
+    source_name: str = Field(min_length=1, max_length=100)
+    income_source_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
+    amount: PositiveMoney
+    account_id: str = Field(min_length=1, max_length=36)
+    subcategory: IncomeSubcategory = "Other Income"
+    note: Optional[str] = Field(default=None, max_length=2000)
+    reference: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("source_name")
+    @classmethod
+    def normalize_actual_source_name(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("Income source name is required")
+        return normalized
+
+
+class ManualIncomeCreate(ManualIncomeBase):
+    date: PastOrTodayDate
+
+
+class ManualIncomePeriod(ManualIncomeBase):
+    start_month: YearMonth
+    end_month: YearMonth
+    payment_day: int = Field(default=1, ge=1, le=31)
+
+
+class ManualIncomePeriodConfirm(ManualIncomePeriod):
+    preview_fingerprint: str = Field(min_length=64, max_length=64)
+    confirm: Literal[True]
+
+
+class ManualIncomeEntryResponse(BaseModel):
+    date: str
+    amount: float
+
+
+class ManualIncomePreviewResponse(BaseModel):
+    entries: list[ManualIncomeEntryResponse]
+    total_amount: float
+    preview_fingerprint: str
+
+
+class ManualIncomeRecordResponse(BaseModel):
+    created: int
+    skipped_existing: int
+    transaction_ids: list[str]
+
+
 def _calculate_default_next_date(frequency: str) -> Optional[date]:
     """Calculate default next expected date based on frequency."""
     today = date.today()
@@ -240,6 +303,91 @@ def _validated_account_id(db: Session, account_id: str | None) -> str | None:
 def _clean_optional(value: str | None) -> str | None:
     normalized = " ".join(str(value or "").split())
     return normalized or None
+
+
+def _manual_income_context(
+    db: Session,
+    body: ManualIncomeBase,
+) -> tuple[Account, IncomeSource | None]:
+    account = db.query(Account).filter_by(id=body.account_id, is_active=True).first()
+    if not account:
+        raise HTTPException(status_code=400, detail="Select an active account")
+    source = None
+    if body.income_source_id:
+        source = db.query(IncomeSource).filter_by(id=body.income_source_id).first()
+        if not source:
+            raise HTTPException(status_code=404, detail="Income source not found")
+        if source.account_id and source.account_id != account.id:
+            raise HTTPException(
+                status_code=409,
+                detail="This income source is linked to a different account",
+            )
+    return account, source
+
+
+def _period_entries(body: ManualIncomePeriod) -> tuple[ManualIncomeEntry, ...]:
+    try:
+        return monthly_income_entries(
+            body.start_month,
+            body.end_month,
+            payment_day=body.payment_day,
+            amount=body.amount,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Choose a valid month range of no more than 120 months.",
+        ) from exc
+
+
+def _preview_fingerprint(
+    body: ManualIncomeBase,
+    entries: tuple[ManualIncomeEntry, ...],
+) -> str:
+    return manual_income_preview_fingerprint(
+        entries,
+        source_name=body.source_name,
+        income_source_id=body.income_source_id,
+        account_id=body.account_id,
+        subcategory=body.subcategory,
+        note=_clean_optional(body.note),
+        reference=_clean_optional(body.reference),
+    )
+
+
+def _record_actual_income(
+    db: Session,
+    body: ManualIncomeBase,
+    entries: tuple[ManualIncomeEntry, ...],
+) -> ManualIncomeRecordResponse:
+    _account, source = _manual_income_context(db, body)
+    try:
+        result = record_manual_income_entries(
+            db,
+            entries,
+            source_name=body.source_name,
+            income_source=source,
+            account_id=body.account_id,
+            subcategory=body.subcategory,
+            note=_clean_optional(body.note),
+            reference=_clean_optional(body.reference),
+        )
+        db.commit()
+    except FinalizedPeriodError as exc:
+        db.rollback()
+        raise StateConflictError(
+            code="FINALIZED_PERIOD_READ_ONLY",
+            message=(
+                "One of these months is finalized and read-only. "
+                "Reopen it before recording income."
+            ),
+            hint="Reopen the affected month, then review and confirm the entries again.",
+        ) from exc
+    return ManualIncomeRecordResponse(
+        created=len(result.created),
+        skipped_existing=result.skipped_existing,
+        transaction_ids=[transaction.id for transaction in result.created],
+    )
 
 
 def _source_applies_to_month(
@@ -389,6 +537,66 @@ def get_income_coverage(
         earliest_transaction_date=earliest.isoformat() if earliest else None,
         latest_transaction_date=latest.isoformat() if latest else None,
     )
+
+
+@router.post(
+    "/actual",
+    response_model=ManualIncomeRecordResponse,
+    status_code=201,
+)
+def record_actual_income(
+    body: ManualIncomeCreate,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Record one user-confirmed income event in the authoritative ledger."""
+    entry = ManualIncomeEntry(date=body.date, amount=body.amount)
+    return _record_actual_income(db, body, (entry,))
+
+
+@router.post(
+    "/actual/period/preview",
+    response_model=ManualIncomePreviewResponse,
+)
+def preview_actual_income_period(
+    body: ManualIncomePeriod,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Preview exact historical monthly entries without writing to the ledger."""
+    _manual_income_context(db, body)
+    entries = _period_entries(body)
+    return ManualIncomePreviewResponse(
+        entries=[
+            ManualIncomeEntryResponse(
+                date=entry.date.isoformat(),
+                amount=float(entry.amount),
+            )
+            for entry in entries
+        ],
+        total_amount=float(sum((entry.amount for entry in entries), start=0)),
+        preview_fingerprint=_preview_fingerprint(body, entries),
+    )
+
+
+@router.post(
+    "/actual/period/confirm",
+    response_model=ManualIncomeRecordResponse,
+)
+def confirm_actual_income_period(
+    body: ManualIncomePeriodConfirm,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Create only the unchanged monthly entries the user previewed."""
+    entries = _period_entries(body)
+    expected = _preview_fingerprint(body, entries)
+    if not secrets.compare_digest(expected, body.preview_fingerprint.lower()):
+        raise HTTPException(
+            status_code=409,
+            detail="The income dates or amounts changed. Preview them again.",
+        )
+    return _record_actual_income(db, body, entries)
 
 
 @router.post("/{source_id}/matches/scan", response_model=IncomeMatchScanResponse)

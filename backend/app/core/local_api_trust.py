@@ -10,11 +10,15 @@ typed policy with no implicit wildcard origins or DNS hostnames.
 from __future__ import annotations
 
 import ipaddress
+import base64
+import hashlib
+import hmac
 import os
 import secrets
+import time
 from dataclasses import dataclass
 from enum import Enum
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from starlette.responses import HTMLResponse, JSONResponse
 
@@ -42,6 +46,68 @@ _ALLOWED_BROWSER_PORTS = {5173, 5200}
 _GMAIL_OAUTH_START_PATH = "/api/v1/auth/gmail/url"
 _GMAIL_OAUTH_CALLBACK_PATH = "/api/v1/auth/gmail/callback"
 TRUSTED_DESKTOP_STATE_KEY = "godfin_trusted_desktop"
+_OAUTH_STATE_VERSION = "v1"
+_OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60
+_LAN_PUBLIC_PATHS = frozenset(
+    {
+        "/api/v1/health",
+        "/api/v1/ready",
+        "/api/v1/auth/status",
+        "/api/v1/auth/verify-pin",
+    }
+)
+
+
+def _oauth_state_signature(payload: str, launch_secret: str) -> str:
+    digest = hmac.new(
+        launch_secret.encode("utf-8"),
+        payload.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def mint_oauth_callback_state(
+    launch_secret: str,
+    *,
+    now: int | None = None,
+    nonce: str | None = None,
+) -> str:
+    """Mint a short-lived state that a browser callback can prove came from GODFIN."""
+
+    if not launch_secret:
+        raise ValueError("A launch secret is required to sign OAuth state")
+    timestamp = int(time.time() if now is None else now)
+    random_nonce = nonce or secrets.token_urlsafe(24)
+    payload = f"{_OAUTH_STATE_VERSION}.{timestamp}.{random_nonce}"
+    return f"{payload}.{_oauth_state_signature(payload, launch_secret)}"
+
+
+def verify_oauth_callback_state(
+    state: str | None,
+    launch_secret: str | None,
+    *,
+    now: int | None = None,
+    max_age_seconds: int = _OAUTH_STATE_MAX_AGE_SECONDS,
+) -> bool:
+    """Validate the launch-bound portion of a Gmail OAuth state value."""
+
+    if not state or not launch_secret:
+        return False
+    parts = state.split(".")
+    if len(parts) != 4 or parts[0] != _OAUTH_STATE_VERSION:
+        return False
+    try:
+        issued_at = int(parts[1])
+    except ValueError:
+        return False
+    current_time = int(time.time() if now is None else now)
+    age = current_time - issued_at
+    if age < 0 or age > max_age_seconds:
+        return False
+    payload = ".".join(parts[:3])
+    expected = _oauth_state_signature(payload, launch_secret)
+    return secrets.compare_digest(parts[3], expected)
 
 
 def runtime_mode() -> RuntimeMode:
@@ -166,6 +232,9 @@ class LocalApiPolicy:
         supplied: str | None,
         method: str,
         path: str,
+        *,
+        oauth_state: str | None = None,
+        has_bearer_authorization: bool = False,
     ) -> bool:
         if method == "OPTIONS":
             return True
@@ -173,19 +242,21 @@ class LocalApiPolicy:
             return False
         if not self.launch_secret:
             return True
+        if self.matches_launch_secret(supplied):
+            return True
         # Google's installed-app flow returns through the user's default
         # browser, which cannot possess Electron's per-launch secret. This
         # single loopback GET remains protected by an expiring, one-time OAuth
         # state bound to the active GODFIN session, the fixed redirect URI, and
         # a PKCE verifier. Host and Origin checks above still apply.
         if method == "GET" and path == _GMAIL_OAUTH_CALLBACK_PATH:
-            return True
+            return verify_oauth_callback_state(oauth_state, self.launch_secret)
         # LAN mode is a separate, explicitly enabled bearer-authenticated API
         # policy. The Electron renderer still sends its secret, but supported
         # private-network clients are not expected to possess a process secret.
         if self.mode is RuntimeMode.LAN:
-            return True
-        return self.matches_launch_secret(supplied)
+            return path in _LAN_PUBLIC_PATHS or has_bearer_authorization
+        return False
 
     def matches_launch_secret(self, supplied: str | None) -> bool:
         """Return whether a request came through the active desktop process."""
@@ -269,7 +340,13 @@ class LocalApiTrustMiddleware:
         hosts = header_values.get("host", [])
         origins = header_values.get("origin", [])
         launch_secrets = header_values.get(LAUNCH_SECRET_HEADER, [])
-        if len(hosts) != 1 or len(origins) > 1 or len(launch_secrets) > 1:
+        authorizations = header_values.get("authorization", [])
+        if (
+            len(hosts) != 1
+            or len(origins) > 1
+            or len(launch_secrets) > 1
+            or len(authorizations) > 1
+        ):
             await self._reject(
                 scope,
                 receive,
@@ -297,10 +374,19 @@ class LocalApiTrustMiddleware:
             )
             return
         supplied_launch_secret = launch_secrets[0] if launch_secrets else None
+        query = parse_qs(
+            scope.get("query_string", b"").decode("ascii", errors="ignore"),
+            keep_blank_values=True,
+        )
+        states = query.get("state", [])
+        oauth_state = states[0] if len(states) == 1 else None
+        authorization = authorizations[0] if authorizations else ""
         if not self.policy.launch_secret_allowed(
             supplied_launch_secret,
             scope.get("method", "GET"),
             scope.get("path", ""),
+            oauth_state=oauth_state,
+            has_bearer_authorization=authorization.startswith("Bearer "),
         ):
             await self._reject(
                 scope,

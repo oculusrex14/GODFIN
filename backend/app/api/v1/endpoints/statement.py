@@ -4,9 +4,13 @@ import asyncio
 import hashlib
 import logging
 import multiprocessing
+import os
 import re
 import secrets
+import socket
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 from typing import Optional
@@ -27,6 +31,7 @@ from app.core.classifier import classify_transaction
 from app.core.database import get_db
 from app.core.errors import LocalOperationError, StateConflictError
 from app.core.merchant_memory_service import upsert_merchant_memory
+from app.core.manual_income import link_exact_statement_manual_income_matches
 from app.core.import_postprocessing import postprocess_imported_transactions
 from app.core.mapped_import import (
     GENERIC_MAPPING_VERSION,
@@ -44,6 +49,7 @@ from app.core.reconciliation import (
     reconcile_statement,
 )
 from app.core.statement_parser import ParsedStatement
+from app.core.statement_file_safety import UnsafeStatementFile, validate_statement_file
 from app.core.transaction_semantics import (
     TransactionSemantic,
     apply_category_semantic,
@@ -74,25 +80,54 @@ router = APIRouter()
 
 # --- Helpers ---
 
-def _resolve_account_id(db: Session, statement_type: str, account_id: str = None) -> str:
-    """Resolve account_id from statement type if not provided."""
+def _resolve_account_id(db: Session, parse_result, account_id: str = None) -> str:
+    """Resolve one active account and prove it matches the parsed statement."""
+    bank, account_type = account_requirements(parse_result.statement_type)
     if account_id:
         acct = db.query(Account).filter_by(id=account_id, is_active=True).first()
         if not acct:
             raise HTTPException(status_code=400, detail="Invalid account_id")
+        if bank and acct.bank.upper() != bank.upper():
+            raise HTTPException(
+                status_code=409,
+                detail="The selected account bank does not match this statement.",
+            )
+        if account_type and acct.account_type != account_type:
+            raise HTTPException(
+                status_code=409,
+                detail="The selected account type does not match this statement.",
+            )
+        parsed_last4 = getattr(parse_result, "account_last4", None)
+        if parsed_last4 and acct.last_4_digits != parsed_last4:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The selected account's last four digits do not match this statement."
+                ),
+            )
         return account_id
 
-    bank, account_type = account_requirements(statement_type)
     query = db.query(Account).filter_by(is_active=True)
     if bank:
         query = query.filter(Account.bank == bank)
     if account_type:
         query = query.filter(Account.account_type == account_type)
-    acct = query.order_by(Account.created_at.asc()).first()
+    parsed_last4 = getattr(parse_result, "account_last4", None)
+    if parsed_last4:
+        query = query.filter(Account.last_4_digits == parsed_last4)
+    accounts = query.order_by(Account.created_at.asc()).all()
 
-    if not acct:
-        raise HTTPException(status_code=400, detail="No matching account found. Please specify account_id.")
-    return acct.id
+    if not accounts:
+        raise HTTPException(
+            status_code=400,
+            detail="No active account matches the bank statement. Add or select the account.",
+        )
+    if len(accounts) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="More than one account matches this statement. Select the correct account.",
+        )
+    return accounts[0].id
 
 
 def _statement_balance_snapshot(
@@ -217,6 +252,7 @@ STATEMENT_READ_CHUNK_BYTES = 1024 * 1024
 MAX_PARSED_TRANSACTIONS = 10_000
 PARSER_TIMEOUT_SECONDS = 45.0
 PARSER_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024
+PARSER_CPU_LIMIT_SECONDS = 40
 _PARSER_SLOTS = threading.BoundedSemaphore(value=2)
 
 
@@ -228,21 +264,55 @@ class StatementParserWorkerError(RuntimeError):
     """A statement parser worker crashed or returned an invalid result."""
 
 
-def _apply_parser_memory_limit() -> None:
-    """Bound parser address space on Linux without weakening portability."""
-    if not sys.platform.startswith("linux"):
-        return
+class StatementParserSandboxError(RuntimeError):
+    """The worker could not establish its required local safety controls."""
+
+
+def _apply_parser_resource_limits() -> None:
+    """Apply every supported OS process limit and fail closed on Linux."""
     try:
         import resource
-
-        resource.setrlimit(
-            resource.RLIMIT_AS,
-            (PARSER_MEMORY_LIMIT_BYTES, PARSER_MEMORY_LIMIT_BYTES),
-        )
-    except (ImportError, OSError, ValueError):
-        # Windows and macOS use the same process/timeout isolation, but do not
-        # expose a dependable per-child address-space limit through stdlib.
+    except ImportError:
+        if sys.platform.startswith("linux"):
+            raise StatementParserSandboxError(
+                "Parser resource controls are unavailable."
+            )
         return
+    limits = (
+        (resource.RLIMIT_CPU, PARSER_CPU_LIMIT_SECONDS),
+        (resource.RLIMIT_FSIZE, 1024 * 1024),
+        (resource.RLIMIT_NOFILE, 64),
+        (resource.RLIMIT_CORE, 0),
+    )
+    try:
+        for kind, ceiling in limits:
+            resource.setrlimit(kind, (ceiling, ceiling))
+        if sys.platform.startswith("linux"):
+            resource.setrlimit(
+                resource.RLIMIT_AS,
+                (PARSER_MEMORY_LIMIT_BYTES, PARSER_MEMORY_LIMIT_BYTES),
+            )
+    except (OSError, ValueError) as exc:
+        if sys.platform.startswith("linux"):
+            raise StatementParserSandboxError(
+                "Parser resource controls could not be applied."
+            ) from exc
+
+
+def _deny_parser_network_and_subprocesses() -> None:
+    """Remove capabilities that financial document parsers never require."""
+
+    def blocked(*_args, **_kwargs):
+        raise PermissionError("This parser worker has no network or subprocess access.")
+
+    socket.socket = blocked
+    socket.create_connection = blocked
+    subprocess.Popen = blocked
+    subprocess.run = blocked
+    subprocess.call = blocked
+    subprocess.check_call = blocked
+    subprocess.check_output = blocked
+    os.system = blocked
 
 
 def _statement_parser_worker(
@@ -250,11 +320,26 @@ def _statement_parser_worker(
     contents: bytes,
     file_format: str,
     password: Optional[str],
+    account_last4: Optional[str],
 ) -> None:
     """Parse one untrusted statement in a disposable child process."""
     try:
-        _apply_parser_memory_limit()
-        result = parse_registered_statement(contents, file_format, password)
+        _apply_parser_resource_limits()
+        validate_statement_file(contents, file_format)
+        _deny_parser_network_and_subprocesses()
+        original_directory = os.getcwd()
+        with tempfile.TemporaryDirectory(prefix="godfin-parser-") as work_directory:
+            os.chmod(work_directory, 0o700)
+            os.chdir(work_directory)
+            try:
+                result = parse_registered_statement(
+                    contents,
+                    file_format,
+                    password,
+                    account_last4,
+                )
+            finally:
+                os.chdir(original_directory)
         if len(result.transactions) > MAX_PARSED_TRANSACTIONS:
             result.transactions.clear()
             result.reconciliation_status = "failed"
@@ -289,6 +374,7 @@ def _run_parser_process(
     file_format: str,
     password: Optional[str],
     cancel_event: threading.Event,
+    account_last4: Optional[str] = None,
     *,
     timeout_seconds: float = PARSER_TIMEOUT_SECONDS,
 ):
@@ -297,7 +383,7 @@ def _run_parser_process(
     receive_connection, send_connection = context.Pipe(duplex=False)
     process = context.Process(
         target=_statement_parser_worker,
-        args=(send_connection, contents, file_format, password),
+        args=(send_connection, contents, file_format, password, account_last4),
         daemon=True,
         name="godfin-statement-parser",
     )
@@ -343,6 +429,7 @@ async def _parse_in_isolated_process(
     contents: bytes,
     file_format: str,
     password: Optional[str],
+    account_last4: Optional[str] = None,
 ):
     cancel_event = threading.Event()
     task = asyncio.create_task(
@@ -352,6 +439,7 @@ async def _parse_in_isolated_process(
             file_format,
             password,
             cancel_event,
+            account_last4,
         )
     )
     try:
@@ -384,7 +472,11 @@ def _detect_file_format(filename: str, contents: bytes) -> str:
     return 'unknown'
 
 
-async def _read_and_parse(file: UploadFile, password: Optional[str]):
+async def _read_and_parse(
+    file: UploadFile,
+    password: Optional[str],
+    account_last4: Optional[str] = None,
+):
     """Read file and parse PDF or XLS, returning the parse result."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
@@ -407,6 +499,14 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
 
     if fmt not in {"pdf", "xls", "xlsx"}:
         raise HTTPException(status_code=400, detail="Unrecognized file format")
+    try:
+        validate_statement_file(contents, fmt)
+    except UnsafeStatementFile as exc:
+        logger.info("Statement safety preflight rejected an upload", exc_info=exc)
+        raise HTTPException(
+            status_code=400,
+            detail="This statement file failed the safety check and was not opened.",
+        ) from exc
     if not _PARSER_SLOTS.acquire(blocking=False):
         raise HTTPException(
             status_code=429,
@@ -415,7 +515,19 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
         )
     try:
         try:
-            parse_result = await _parse_in_isolated_process(contents, fmt, password)
+            if account_last4:
+                parse_result = await _parse_in_isolated_process(
+                    contents,
+                    fmt,
+                    password,
+                    account_last4,
+                )
+            else:
+                parse_result = await _parse_in_isolated_process(
+                    contents,
+                    fmt,
+                    password,
+                )
         except StatementParserTimeout as exc:
             raise HTTPException(
                 status_code=408,
@@ -689,11 +801,25 @@ async def import_mapped_spreadsheet(
 async def preview_statement(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
+    account_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Step 1: Parse PDF and return transaction preview. No database writes."""
-    parse_result = await _read_and_parse(file, password)
+    selected_account = (
+        db.query(Account).filter_by(id=account_id, is_active=True).first()
+        if account_id
+        else None
+    )
+    if account_id and selected_account is None:
+        raise HTTPException(status_code=400, detail="Invalid account_id")
+    parse_result = (
+        await _read_and_parse(file, password, selected_account.last_4_digits)
+        if selected_account
+        else await _read_and_parse(file, password)
+    )
+    if selected_account:
+        _resolve_account_id(db, parse_result, selected_account.id)
 
     # Convert to ParsedStatement for consistent output
     parsed = ParsedStatement.from_statement_result(parse_result)
@@ -744,10 +870,21 @@ async def reconcile_statement_preview(
     _user: bool = Depends(get_current_user),
 ):
     """Step 2: Parse + reconcile against existing transactions. No imports."""
-    parse_result = await _read_and_parse(file, password)
+    selected_account = (
+        db.query(Account).filter_by(id=account_id, is_active=True).first()
+        if account_id
+        else None
+    )
+    if account_id and selected_account is None:
+        raise HTTPException(status_code=400, detail="Invalid account_id")
+    parse_result = (
+        await _read_and_parse(file, password, selected_account.last_4_digits)
+        if selected_account
+        else await _read_and_parse(file, password)
+    )
     parsed = ParsedStatement.from_statement_result(parse_result)
 
-    resolved_account_id = _resolve_account_id(db, parse_result.statement_type, account_id)
+    resolved_account_id = _resolve_account_id(db, parse_result, account_id)
 
     recon_result = ReconciliationService.reconcile(db, parsed, resolved_account_id)
     income_txns = ReconciliationService.detect_income_sources(db, parsed)
@@ -828,7 +965,18 @@ async def import_statement(
 ):
     """Step 3: Parse + reconcile + import new transactions with classification."""
     try:
-        parse_result = await _read_and_parse(file, password)
+        selected_account = (
+            db.query(Account).filter_by(id=account_id, is_active=True).first()
+            if account_id
+            else None
+        )
+        if account_id and selected_account is None:
+            raise HTTPException(status_code=400, detail="Invalid account_id")
+        parse_result = (
+            await _read_and_parse(file, password, selected_account.last_4_digits)
+            if selected_account
+            else await _read_and_parse(file, password)
+        )
         if not confirm_reconciled:
             raise HTTPException(
                 status_code=400,
@@ -848,9 +996,14 @@ async def import_statement(
             )
         parsed = ParsedStatement.from_statement_result(parse_result)
 
-        resolved_account_id = _resolve_account_id(db, parse_result.statement_type, account_id)
+        resolved_account_id = _resolve_account_id(db, parse_result, account_id)
 
         recon_result = ReconciliationService.reconcile(db, parsed, resolved_account_id)
+        link_exact_statement_manual_income_matches(
+            db,
+            getattr(recon_result, "matches", ()),
+            statement_fingerprint=parse_result.source_digest,
+        )
 
         imported_count = 0
         classified_count = 0
