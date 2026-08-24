@@ -70,7 +70,8 @@
     },
     "recurring_detection_1000_merchants_ms": {
       "absolute_max": 3000,
-      "accepted_baseline": 1500,
+      "accepted_baseline": 2050,
+      "baseline_source": "GitHub Actions ubuntu-latest, Python 3.12, CI run 32786842182; 2043.26 ms observed before the selected-column scan optimization",
       "unit": "milliseconds",
       "consumer": "backend/tests/test_performance_budgets.py"
     },

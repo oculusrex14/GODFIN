@@ -257,7 +257,27 @@ def detect_recurring_patterns(
     requested_keys = set(merchant_keys or [])
     reference_date = as_of or date.today()
     active_filter = Transaction.status.notin_(_EXCLUDED_STATUSES)
-    transaction_query = db.query(Transaction).filter(active_filter)
+    transaction_query = db.query(
+        Transaction.id.label("id"),
+        Transaction.date.label("date"),
+        Transaction.amount.label("amount"),
+        Transaction.type.label("type"),
+        Transaction.account_id.label("account_id"),
+        Transaction.category.label("category"),
+        Transaction.status.label("status"),
+        Transaction.is_transfer.label("is_transfer"),
+        Transaction.semantic_type.label("semantic_type"),
+        Transaction.merchant_normalized.label("merchant_normalized"),
+        # Unknown legacy semantics still require this evidence. Selecting the
+        # exact fields keeps the decision logic identical without hydrating
+        # every unrelated ledger column during a full Re-detect scan.
+        Transaction.subcategory.label("subcategory"),
+        Transaction.source.label("source"),
+        Transaction.classification_source.label("classification_source"),
+        Transaction.raw_text.label("raw_text"),
+        Transaction.merchant_raw.label("merchant_raw"),
+        Transaction.notes.label("notes"),
+    ).filter(active_filter)
     if requested_keys:
         transaction_query = transaction_query.filter(
             or_(
