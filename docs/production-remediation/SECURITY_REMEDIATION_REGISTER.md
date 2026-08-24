@@ -2,7 +2,7 @@
 
 Status date: 2026-08-25
 
-Candidate: `WORKTREE-CANDIDATE` (replace with the immutable release SHA when evidence is regenerated)
+Application-code candidate: `b62946e5958af1d37a00ff63ca7258805e59c357`
 
 Release posture: **NO-GO until the owner actions and independent final pentest are complete**
 

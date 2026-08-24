@@ -4,7 +4,7 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 ## Repository and source
 
-- [x] Production repository is private.
+- [ ] Production repository is private. GitHub reports PUBLIC on 25 Aug 2026; this must be corrected before tagging or release work.
 - [x] Deprecated archive is private, clearly deprecated, and archived/read-only.
 - [x] PolyForm Noncommercial 1.0.0 is the repository license.
 - [x] Full-history secret scan passes.
@@ -14,10 +14,11 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 ## Deterministic app correctness
 
-- [x] Complete backend regression passes (883 at this evidence point).
+- [x] Complete backend regression passes (1,008 on application-code candidate `b62946e`).
 - [x] Exact money, shared semantics, finalized periods, parser failure, report reconciliation, transfer, net-worth, subscription, goal, and behavior invariants pass.
 - [x] Backup, restore, migration, update-recovery, and destructive-reset tests pass.
-- [x] Gmail OAuth/sync/restart tests pass; private owner live OAuth and initial sync pass.
+- [x] Gmail OAuth/state/trust/sync/restart automated tests pass.
+- [ ] Fresh owner OAuth, first sync, restart, disconnect/reconnect, and seven-day soak pass on a package built from `b62946e` or a documentation-only descendant.
 - [x] Frontend lint/build/access-policy contracts pass at the current production baseline.
 - [x] Website contracts/lint/build and Cashfree unit tests pass at the current production baseline.
 - [x] Desktop privacy/integrity and release/update contract tests pass at the current production baseline.
@@ -25,7 +26,7 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 ## SQLite and recovery
 
-- [x] Current local schema registry is ordered through revision 19.
+- [x] Current local schema registry is ordered through revision 22.
 - [x] Fresh, upgrade, double-run, malformed/future, lock/failure, integrity, and rollback fixtures pass.
 - [x] Isolated owner-database copy migration preserves controls; live database was not used as a test target.
 - [ ] Immediate-predecessor signed package upgrades and rolls back on every supported platform.
@@ -36,9 +37,9 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 - [x] Dedicated desktop OAuth client JSON is outside source/package.
 - [x] Scope is Gmail readonly.
-- [x] Owner is a test user and private installed-app consent succeeds.
-- [x] Loopback callback passes OAuth state/PKCE/session binding and does not require the Electron launch secret.
-- [x] First live owner sync completes.
+- [x] Both owner addresses are listed as Google test users.
+- [x] Automated callback contracts pass signed state, nonce, expiry, single-use, launch binding, and exact loopback validation.
+- [ ] Fresh installed-candidate consent and first live sync complete without `MISSING_LAUNCH_TRUST`.
 - [ ] Decide and document Google verification/publication requirements before non-test users.
 - [ ] Run fresh token refresh, revocation, reauthorization, and another native-platform package flow.
 
@@ -48,7 +49,7 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 - [x] Lifetime Pro/Max include zero hosted-AI credits.
 - [x] Signed entitlements bind exact features, state version, installation, issuer/audience, and expiry.
 - [x] Three-device logic and deactivation/replacement contracts pass locally.
-- [ ] Back up target Supabase and apply migrations through `0006` to a non-production project.
+- [ ] Back up target Supabase and apply all 10 ordered migrations through `20260824211115_cashfree_email_delivery_claim.sql` to a non-production project.
 - [ ] Run PostgreSQL pgTAP/RLS/function-owner/two-user/service-role matrix.
 - [ ] Complete Cashfree KYC and separate sandbox/live secret configuration.
 - [ ] Replay success, duplicate, out-of-order refund, partial/full refund, and dispute events.
@@ -63,8 +64,10 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 - [x] App/website entitlement manifest rejects unreleased feature claims.
 - [x] Three-engine Playwright CI matrix is configured.
 - [ ] Resolve GitHub Actions account billing/spending-limit block and retain a successful private CI run.
-- [ ] Configure and test website Google OAuth with exact Supabase callback and two users.
-- [ ] Verify `godfin.dev` DNS, HTTPS, redirects, CSP, sitemap, robots, and 404.
+- [x] Website Google OAuth is configured with the exact Supabase callback and the owner account returns to `/account`.
+- [ ] Repeat website Google OAuth with a distinct second user and retain account-isolation evidence.
+- [x] `godfin.dev` DNS, HTTPS, apex/`www` redirects, CSP, sitemap, robots, and checkout safe-disable behavior are verified on the currently deployed older website.
+- [ ] Repeat domain/security-header acceptance after deploying the exact final website SHA.
 - [ ] Verify Resend domain, SPF, DKIM, DMARC, sender, delivery, and reply handling.
 - [ ] Review private Chromium/Firefox/WebKit CI results and native Safari behavior.
 - [ ] Obtain qualified legal/privacy/terms/accessibility review of exact deployed pages.
@@ -85,13 +88,13 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 - [x] Release, promotion, and rollback workflows use pinned actions and protected confirmation gates.
 - [x] Public promotion requires exact legal-clearance/SBOM evidence.
-- [ ] Confirm GitHub Actions jobs can start; current private runs fail before step 1 because the account payment/spending limit blocks runners.
+- [ ] Confirm GitHub Actions jobs can start; no workflow run was created for pushed SHA `b62946e`. Use the added manual workflow dispatch after account/policy repair.
 - [ ] Configure protected R2 release environment and immutable storage.
 - [ ] Create a private draft release only.
 - [ ] Exercise 5%, 25%, 50%, and 100% staged promotion with health review on a private channel.
 - [ ] Exercise immediate-predecessor rollback and interrupted rollback.
 - [ ] Complete independent penetration test and close findings.
-- [ ] Recheck repository privacy and full-history secret scan immediately before tagging.
+- [ ] Change `oculusrex14/GODFIN` back to PRIVATE, then recheck privacy and full-history secret scan immediately before tagging.
 
 ## Public launch authorization
 
