@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from '../router';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -231,13 +231,35 @@ export default function AppLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { pathname } = useLocation();
   const mainRef = useRef(null);
+  const lastRouteHeadingRef = useRef(null);
+  const restoreMobileMenuFocusRef = useRef(true);
+
+  const openMobileMenu = () => {
+    restoreMobileMenuFocusRef.current = true;
+    setMobileOpen(true);
+  };
+  const closeMobileMenu = () => {
+    restoreMobileMenuFocusRef.current = true;
+    setMobileOpen(false);
+  };
+  const followMobileNavigation = () => {
+    restoreMobileMenuFocusRef.current = false;
+    setMobileOpen(false);
+  };
+  const shouldRestoreMobileMenuFocus = useCallback(
+    () => restoreMobileMenuFocusRef.current,
+    [],
+  );
 
   useEffect(() => {
     let observer;
     let frame;
     const focusRouteHeading = () => {
-      const heading = mainRef.current?.querySelector('h1');
-      if (!heading) return false;
+      const main = mainRef.current;
+      if (!main || main.closest('[inert]')) return false;
+      const heading = main.querySelector('h1');
+      if (!heading || heading === lastRouteHeadingRef.current) return false;
+      lastRouteHeadingRef.current = heading;
       heading.tabIndex = -1;
       heading.focus({ preventScroll: false });
       return true;
@@ -247,7 +269,13 @@ export default function AppLayout({ children }) {
       observer = new MutationObserver(() => {
         if (focusRouteHeading()) observer?.disconnect();
       });
-      if (mainRef.current) observer.observe(mainRef.current, { childList: true, subtree: true });
+      if (mainRef.current) {
+        observer.observe(mainRef.current, {
+          attributes: true,
+          childList: true,
+          subtree: true,
+        });
+      }
     });
     return () => {
       window.cancelAnimationFrame(frame);
@@ -276,7 +304,7 @@ export default function AppLayout({ children }) {
         <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3 bg-white/[0.04] backdrop-blur-[32px] border-b border-white/[0.08]">
           <GodfinBrand compact showTagline={false} />
           <button
-            onClick={() => setMobileOpen(true)}
+            onClick={openMobileMenu}
             aria-label="Open navigation menu"
             className="p-2 rounded-[12px] bg-white/[0.08] border border-white/[0.12] text-ink-secondary"
           >
@@ -293,7 +321,7 @@ export default function AppLayout({ children }) {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
-                onClick={() => setMobileOpen(false)}
+                onClick={closeMobileMenu}
                 data-godfin-dialog-backdrop="true"
                 aria-hidden="true"
               />
@@ -304,17 +332,18 @@ export default function AppLayout({ children }) {
                 exit={{ x: -280 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                 ariaLabel="Navigation menu"
-                onClose={() => setMobileOpen(false)}
+                onClose={closeMobileMenu}
+                shouldRestoreFocus={shouldRestoreMobileMenuFocus}
                 className="fixed top-0 left-0 bottom-0 z-50 w-[260px] flex flex-col bg-[#0d2040]/95 backdrop-blur-[32px] border-r border-white/[0.08] lg:hidden"
               >
                 <button
-                  onClick={() => setMobileOpen(false)}
+                  onClick={closeMobileMenu}
                   aria-label="Close navigation menu"
                   className="absolute top-4 right-4 p-1.5 rounded-full text-ink-muted hover:text-ink-secondary"
                 >
                   <X size={18} />
                 </button>
-                <SidebarContent onItemClick={() => setMobileOpen(false)} />
+                <SidebarContent onItemClick={followMobileNavigation} />
               </DialogSurface>
             </>
           )}
@@ -354,7 +383,7 @@ export default function AppLayout({ children }) {
           </NavLink>
         ))}
         <button
-          onClick={() => setMobileOpen(true)}
+          onClick={openMobileMenu}
           className="min-h-[56px] flex flex-col items-center justify-center gap-1 text-[0.6rem] text-ink-muted"
         >
           <MoreHorizontal size={18} />

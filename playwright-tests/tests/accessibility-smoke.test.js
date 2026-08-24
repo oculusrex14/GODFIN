@@ -6,7 +6,6 @@ const path = require('node:path');
 test.use({
   viewport: { width: 390, height: 844 },
   hasTouch: true,
-  isMobile: true,
 });
 
 async function mockIsolatedAccessibilityApp(page) {
@@ -92,6 +91,17 @@ async function expectNoSeriousAxeViolations(page, include) {
   expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
 }
 
+async function finishOnboardingIfNeeded(page) {
+  const onboardingHeading = page.getByRole('heading', { name: 'Make GODFIN yours' });
+  const dashboardHeading = page.getByRole('heading', { name: 'Dashboard' });
+  await expect(onboardingHeading.or(dashboardHeading)).toBeVisible();
+  if (await onboardingHeading.isVisible()) {
+    await page.getByRole('button', { name: 'Finish setup later' }).click();
+  }
+  await expect(dashboardHeading).toBeVisible();
+  return dashboardHeading;
+}
+
 test('PIN and beginner tutorial support keyboard, touch, and accessible names', async ({ page }) => {
   await mockIsolatedAccessibilityApp(page);
   await page.goto('/pin');
@@ -112,13 +122,7 @@ test('PIN and beginner tutorial support keyboard, touch, and accessible names', 
   await expect(submit).toBeFocused();
   await page.keyboard.press('Enter');
 
-  const onboardingHeading = page.getByRole('heading', { name: 'Make GODFIN yours' });
-  const dashboardHeading = page.getByRole('heading', { name: 'Dashboard' });
-  await expect(onboardingHeading.or(dashboardHeading)).toBeVisible();
-  if (await onboardingHeading.isVisible()) {
-    await page.getByRole('button', { name: 'Finish setup later' }).click();
-  }
-  await expect(dashboardHeading).toBeVisible();
+  const dashboardHeading = await finishOnboardingIfNeeded(page);
 
   await page.getByRole('button', { name: 'Open navigation menu' }).click();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
@@ -180,10 +184,7 @@ test('app keeps essential content available at 400% text scaling and reduced mot
   await page.goto('/pin');
   await page.locator('input[type="password"]').fill('2468');
   await page.getByRole('button', { name: /Set PIN|Unlock/ }).click();
-  const onboardingHeading = page.getByRole('heading', { name: 'Make GODFIN yours' });
-  if (await onboardingHeading.isVisible()) {
-    await page.getByRole('button', { name: 'Finish setup later' }).click();
-  }
+  await finishOnboardingIfNeeded(page);
   await page.evaluate(() => {
     document.documentElement.style.fontSize = '400%';
   });
@@ -192,7 +193,14 @@ test('app keeps essential content available at 400% text scaling and reduced mot
   const transitionDuration = await page.getByRole('button', { name: 'Open navigation menu' }).evaluate(
     (element) => getComputedStyle(element).transitionDuration,
   );
-  expect(['0s', '0.00001s']).toContain(transitionDuration);
+  const transitionDurations = transitionDuration
+    .split(',')
+    .map((value) => Number.parseFloat(value));
+  expect(
+    transitionDurations.every(
+      (value) => Number.isFinite(value) && value <= 0.00001,
+    ),
+  ).toBe(true);
 });
 
 test('representative glass surfaces retain contrast at 100, 200, and 400 percent zoom', async ({ page }, testInfo) => {
@@ -200,10 +208,7 @@ test('representative glass surfaces retain contrast at 100, 200, and 400 percent
   await page.goto('/pin');
   await page.locator('input[type="password"]').fill('2468');
   await page.getByRole('button', { name: /Set PIN|Unlock/ }).click();
-  const onboardingHeading = page.getByRole('heading', { name: 'Make GODFIN yours' });
-  if (await onboardingHeading.isVisible()) {
-    await page.getByRole('button', { name: 'Finish setup later' }).click();
-  }
+  await finishOnboardingIfNeeded(page);
   await page.getByRole('button', { name: 'Open navigation menu' }).click();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
 

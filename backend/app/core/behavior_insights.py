@@ -104,7 +104,25 @@ def compute_behavior_insights(
     reference_day = today or date.today()
     start, end, end_exclusive = _complete_period(reference_day)
     transactions = (
-        db.query(Transaction)
+        db.query(
+            Transaction.date.label("date"),
+            Transaction.amount.label("amount"),
+            Transaction.type.label("type"),
+            Transaction.category.label("category"),
+            Transaction.status.label("status"),
+            Transaction.is_transfer.label("is_transfer"),
+            Transaction.semantic_type.label("semantic_type"),
+            Transaction.merchant_normalized.label("merchant_normalized"),
+            Transaction.merchant_raw.label("merchant_raw"),
+            # Legacy rows with an unknown semantic still need the evidence
+            # fields used by semantic_type_for(). Selecting them explicitly
+            # avoids hydrating every unrelated ledger column for this read.
+            Transaction.subcategory.label("subcategory"),
+            Transaction.source.label("source"),
+            Transaction.classification_source.label("classification_source"),
+            Transaction.raw_text.label("raw_text"),
+            Transaction.notes.label("notes"),
+        )
         .filter(
             Transaction.date >= start,
             Transaction.date < end_exclusive,
@@ -116,8 +134,8 @@ def compute_behavior_insights(
         lambda: {"income": 0.0, "spend": 0.0, "discretionary": 0.0}
     )
     weekly_active_dates: dict[date, set[date]] = defaultdict(set)
-    debit_transactions: list[Transaction] = []
-    included_transactions: list[Transaction] = []
+    debit_transactions: list[Any] = []
+    included_transactions: list[Any] = []
     total_spend = 0.0
     discretionary = 0.0
     flexible_categories = {

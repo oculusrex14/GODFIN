@@ -18,6 +18,7 @@ const FOCUSABLE_SELECTOR = [
 const openDialogs = [];
 let bodyLockCount = 0;
 let previousBodyOverflow = '';
+const alwaysRestoreFocus = () => true;
 
 function focusableElements(panel) {
   return [...panel.querySelectorAll(FOCUSABLE_SELECTOR)].filter((element) => {
@@ -80,6 +81,7 @@ const DialogSurface = forwardRef(function DialogSurface({
   describedBy,
   ariaLabel,
   escapeCloses = true,
+  shouldRestoreFocus = alwaysRestoreFocus,
   children,
   ...props
 }, forwardedRef) {
@@ -150,13 +152,15 @@ const DialogSurface = forwardRef(function DialogSurface({
         newTop.inert = false;
         newTop.removeAttribute('aria-hidden');
       }
-      window.requestAnimationFrame(() => {
-        if (previouslyFocused instanceof HTMLElement && previouslyFocused.isConnected) {
-          previouslyFocused.focus({ preventScroll: true });
-        }
-      });
+      if (shouldRestoreFocus()) {
+        window.requestAnimationFrame(() => {
+          if (previouslyFocused instanceof HTMLElement && previouslyFocused.isConnected) {
+            previouslyFocused.focus({ preventScroll: true });
+          }
+        });
+      }
     };
-  }, [escapeCloses, initialFocusRef]);
+  }, [escapeCloses, initialFocusRef, shouldRestoreFocus]);
 
   return (
     <Component

@@ -6,6 +6,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.core import background_jobs
@@ -43,11 +44,17 @@ def job_runtime(monkeypatch, db_engine):
 
 
 def _job(session_factory, job_id: str) -> BackgroundJob:
-    db = session_factory()
-    try:
-        return db.query(BackgroundJob).filter_by(id=job_id).one()
-    finally:
-        db.close()
+    deadline = time.monotonic() + 1
+    while True:
+        db = session_factory()
+        try:
+            return db.query(BackgroundJob).filter_by(id=job_id).one()
+        except OperationalError as exc:
+            if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                raise
+        finally:
+            db.close()
+        time.sleep(0.01)
 
 
 def test_active_key_is_atomic_across_simultaneous_enqueues(job_runtime):
