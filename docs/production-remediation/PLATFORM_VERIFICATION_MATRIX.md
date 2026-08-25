@@ -16,9 +16,9 @@ Evidence JSON is retained under `docs/production-remediation/evidence/`.
 | --- | --- | --- | --- | --- | --- |
 | Source build | Passed | Not executed (owner-deferred) | Passed | Passed | Exact-SHA native run plus seven-job `main` run `32827447450` |
 | Unpacked package build | Passed | Not executed (owner-deferred) | Passed | Passed | Native run `32823401864`; no installer was uploaded or published |
-| Unpacked launch | Passed: 2.098 s CI; 0.991 s owner Mac | Not executed (owner-deferred) | Passed: 3.886 s | Passed: 3.224 s | All are below the 8 s cold-start budget |
-| Restart | Passed: 2.440 s CI; 0.822 s owner Mac | Not executed (owner-deferred) | Passed: 2.390 s | Passed: 2.360 s | Exact-SHA package verifier |
-| Idle memory | Passed: 529.2 MB | Not executed (owner-deferred) | Passed: 488.1 MB | Passed: 498.5 MB | All are below the 700 MB budget |
+| Unpacked launch | Passed: 2.098 s CI; 0.991 s owner Mac | Not executed (owner-deferred) | Passed: 3.886 s CI; 2.258 s owner STRIX | Passed: 3.224 s | Repeatable runs are below the 8 s cold-start budget; STRIX evidence also retains a rejected 19.230 s one-time unsigned-binary scan |
+| Restart | Passed: 2.440 s CI; 0.822 s owner Mac | Not executed (owner-deferred) | Passed: 2.390 s CI; 1.955 s owner STRIX | Passed: 2.360 s | Exact-SHA package verifier |
+| Idle memory | Passed: 529.2 MB | Not executed (owner-deferred) | Passed: 488.1 MB CI; 552.7 MB owner STRIX | Passed: 498.5 MB | All are below the 700 MB budget |
 | Backend startup | Passed | Not executed (owner-deferred) | Passed | Passed | Bundled backend reached loopback readiness on every required platform |
 | Database creation and relaunch preservation | Passed | Not executed (owner-deferred) | Passed | Passed | Isolated synthetic user-data directory; preservation flag is true |
 | Local trust / maintenance boundary | Passed | Not executed (owner-deferred) | Passed | Passed | Package verifier exercised trusted and rejected paths |
@@ -41,6 +41,7 @@ Evidence JSON is retained under `docs/production-remediation/evidence/`.
 - `native-smoke-windows-x64-5ee71fa.json`
 - `native-smoke-linux-x64-5ee71fa.json`
 - `owner-macos-arm64-smoke-5ee71fa.json`
+- `owner-windows-x64-smoke-9a0fc3c.json`
 
 Each file records the exact commit, Actions run/job, runner OS/architecture,
 launch and restart timing, idle memory, privacy-boundary results, executable

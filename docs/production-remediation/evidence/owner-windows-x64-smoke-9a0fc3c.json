@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "commit": "9a0fc3cf3b21c0b006028d55da348b0a26b67359",
+  "application_tree_matches": "5ee71fabfe8c7f28726bf625b75801cb254b23a1",
+  "source_archive_sha256": "fb57ba854cf0ea33a124853fd012098fdc2c958681e625bc1ab6d0d229e83dd8",
+  "host": "NARAHARI-STRIX",
+  "runner_os": "Windows 11 Home Single Language 10.0.26200",
+  "runner_arch": "x64",
+  "hardware": {
+    "cpu": "Intel Core i7-10870H",
+    "logical_processors": 16,
+    "memory_gb": 15.8
+  },
+  "toolchain": {
+    "node": "22.23.2",
+    "npm": "10.9.8",
+    "python": "3.12.10"
+  },
+  "verification": {
+    "first_start_ms": 2258,
+    "restart_ms": 1955,
+    "max_idle_memory_mb": 552.7,
+    "process_count": 6,
+    "database_preserved": true,
+    "trust_boundary_enforced": true,
+    "maintenance_boundary_enforced": true,
+    "request_only_integrations_loaded": true
+  },
+  "first_unsigned_binary_scan_observation": {
+    "first_start_ms": 19230,
+    "budget_ms": 7935,
+    "accepted": false,
+    "interpretation": "One-time first execution of newly built unsigned Electron and PyInstaller binaries. The unchanged package passed on immediate rerun with a fresh synthetic user-data directory. Signing and clean-installer endpoint-security acceptance remain open."
+  },
+  "desktop_executable": {
+    "bytes": 225678336,
+    "sha256": "15c102de62b4b67c23dd547a67dd1641c9c8179d79cffce1cc8b849abd1dfee8"
+  },
+  "backend_executable": {
+    "bytes": 23625983,
+    "sha256": "4beba400e130834f29a8babecb0bb045f2e4538c8b952f230da43c634d42a06d"
+  },
+  "isolated_synthetic_data": true,
+  "existing_owner_data_accessed": false,
+  "installer_uploaded": false,
+  "signed": false,
+  "published": false,
+  "verified_at_utc": "2026-08-25T10:16:00Z"
+}
