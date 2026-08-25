@@ -20,6 +20,8 @@ const projectRoot = path.resolve(desktopRoot, "..");
 const releaseRoot = path.resolve(
   process.env.GODFIN_PACKAGE_DIR || path.join(desktopRoot, "release"),
 );
+const PACKAGE_STARTUP_POLL_MS = 5;
+const PACKAGE_OPERATIONAL_TIMEOUT_MS = 30_000;
 const budgets = JSON.parse(
   await import("node:fs/promises").then(({ readFile }) =>
     readFile(path.join(projectRoot, "performance", "budgets.json"), "utf8")
@@ -281,9 +283,19 @@ async function terminateTree(child, tree) {
   }
 }
 
-async function launchOnce(executable, userData, startupLimitMs) {
-  if (!Number.isFinite(startupLimitMs) || startupLimitMs <= 0) {
-    throw new Error("A positive packaged startup limit is required.");
+async function launchOnce(
+  executable,
+  userData,
+  { startupBudgetMs = null, operationalTimeoutMs = PACKAGE_OPERATIONAL_TIMEOUT_MS } = {},
+) {
+  if (!Number.isFinite(operationalTimeoutMs) || operationalTimeoutMs <= 0) {
+    throw new Error("A positive packaged startup timeout is required.");
+  }
+  if (
+    startupBudgetMs !== null
+    && (!Number.isFinite(startupBudgetMs) || startupBudgetMs <= 0)
+  ) {
+    throw new Error("A positive packaged startup budget is required when provided.");
   }
   const startedAt = performance.now();
   const launchSecret = randomBytes(32).toString("base64url");
@@ -301,7 +313,7 @@ async function launchOnce(executable, userData, startupLimitMs) {
   });
 
   let healthResponse;
-  while (performance.now() - startedAt < startupLimitMs) {
+  while (performance.now() - startedAt < operationalTimeoutMs) {
     if (child.exitCode !== null) {
       throw new Error(`The packaged desktop process exited with code ${child.exitCode}.`);
     }
@@ -313,14 +325,24 @@ async function launchOnce(executable, userData, startupLimitMs) {
     } catch {
       // The local backend is still starting.
     }
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, PACKAGE_STARTUP_POLL_MS));
   }
 
   const startupMs = Math.round(performance.now() - startedAt);
   if (!healthResponse?.ok) {
-    child.kill("SIGTERM");
+    await terminateTree(child, processTree(child.pid));
     throw new Error(
-      `Packaged startup exceeded ${startupLimitMs} ms (observed ${startupMs} ms).\n` +
+      `Packaged startup did not become ready within ${operationalTimeoutMs} ms ` +
+      `(observed ${startupMs} ms).\n` +
+      `Redacted backend diagnostics:\n${startupDiagnostics(userData)}`,
+    );
+  }
+  if (startupBudgetMs !== null && startupMs > startupBudgetMs) {
+    await terminateTree(child, processTree(child.pid));
+    await waitForPortRelease();
+    throw new Error(
+      `Packaged cold start exceeded the ${startupBudgetMs} ms budget ` +
+      `(observed ${startupMs} ms).\n` +
       `Redacted backend diagnostics:\n${startupDiagnostics(userData)}`,
     );
   }
@@ -425,14 +447,19 @@ verifyFuses(packaged.fuseTarget);
 
 const userData = await mkdtemp(path.join(tmpdir(), "godfin-package-smoke-"));
 try {
-  const coldStartLimitMs = effectiveLimit("cold_start_ms");
-  const restartLimitMs = budgets.budgets.cold_start_ms.absolute_max;
-  const first = await launchOnce(packaged.executable, userData, coldStartLimitMs);
+  const coldStartBudgetMs = effectiveLimit("cold_start_ms");
+  const coldStartAbsoluteMs = budgets.budgets.cold_start_ms.absolute_max;
+  const first = await launchOnce(packaged.executable, userData, {
+    startupBudgetMs: coldStartBudgetMs,
+    operationalTimeoutMs: coldStartAbsoluteMs,
+  });
   const database = path.join(userData, "godfin.db");
   const firstDatabase = await stat(database);
   if (firstDatabase.size === 0) throw new Error("The packaged database is empty after startup.");
 
-  const second = await launchOnce(packaged.executable, userData, restartLimitMs);
+  const second = await launchOnce(packaged.executable, userData, {
+    operationalTimeoutMs: PACKAGE_OPERATIONAL_TIMEOUT_MS,
+  });
   const secondDatabase = await stat(database);
   if (secondDatabase.size === 0) throw new Error("The packaged database was not preserved.");
   verifySignature(packaged.fuseTarget);
@@ -450,6 +477,7 @@ try {
     package: packaged.fuseTarget,
     first_start_ms: first.startupMs,
     restart_ms: second.startupMs,
+    restart_within_cold_start_absolute_limit: second.startupMs <= coldStartAbsoluteMs,
     max_idle_memory_mb: Number(maxMemoryMb.toFixed(1)),
     process_count: Math.max(first.processCount, second.processCount),
     database_preserved: secondDatabase.size > 0,

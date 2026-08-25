@@ -56,23 +56,26 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.match(verifyPackage, /child\.once\("exit", finish\)/);
   assert.match(verifyPackage, /maxRetries: 10/);
   assert.match(verifyPackage, /retryDelay: 250/);
-  assert.match(verifyPackage, /setTimeout\(resolve, 20\)/);
+  assert.match(verifyPackage, /const PACKAGE_STARTUP_POLL_MS = 5/);
+  assert.match(verifyPackage, /setTimeout\(resolve, PACKAGE_STARTUP_POLL_MS\)/);
   assert.match(verifyPackage, /async function waitForPortRelease\(timeoutMs = 5_000\)/);
   assert.match(verifyPackage, /if \(await portIsFree\(\)\) return/);
   assert.match(verifyPackage, /await waitForPortRelease\(\)/);
   assert.match(verifyPackage, /path\.join\(userData, "logs", "godfin\.log"\)/);
   assert.match(verifyPackage, /\.filter\(Boolean\)\.slice\(-20\)/);
   assert.match(verifyPackage, /Redacted backend diagnostics/);
-  assert.match(verifyPackage, /const coldStartLimitMs = effectiveLimit\("cold_start_ms"\)/);
-  assert.match(verifyPackage, /const restartLimitMs = budgets\.budgets\.cold_start_ms\.absolute_max/);
+  assert.match(verifyPackage, /const PACKAGE_OPERATIONAL_TIMEOUT_MS = 30_000/);
+  assert.match(verifyPackage, /const coldStartBudgetMs = effectiveLimit\("cold_start_ms"\)/);
+  assert.match(verifyPackage, /const coldStartAbsoluteMs = budgets\.budgets\.cold_start_ms\.absolute_max/);
   assert.match(
     verifyPackage,
-    /launchOnce\(packaged\.executable, userData, coldStartLimitMs\)/,
+    /startupBudgetMs: coldStartBudgetMs,[\s\S]*operationalTimeoutMs: coldStartAbsoluteMs/,
   );
   assert.match(
     verifyPackage,
-    /launchOnce\(packaged\.executable, userData, restartLimitMs\)/,
+    /operationalTimeoutMs: PACKAGE_OPERATIONAL_TIMEOUT_MS/,
   );
+  assert.match(verifyPackage, /restart_within_cold_start_absolute_limit/);
 });
 
 test("initial backend startup overlaps Electron readiness without exposing the renderer", () => {
