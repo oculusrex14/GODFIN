@@ -60,6 +60,9 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.match(verifyPackage, /async function waitForPortRelease\(timeoutMs = 5_000\)/);
   assert.match(verifyPackage, /if \(await portIsFree\(\)\) return/);
   assert.match(verifyPackage, /await waitForPortRelease\(\)/);
+  assert.match(verifyPackage, /path\.join\(userData, "logs", "godfin\.log"\)/);
+  assert.match(verifyPackage, /\.filter\(Boolean\)\.slice\(-20\)/);
+  assert.match(verifyPackage, /Redacted backend diagnostics/);
   assert.match(verifyPackage, /const coldStartLimitMs = effectiveLimit\("cold_start_ms"\)/);
   assert.match(verifyPackage, /const restartLimitMs = budgets\.budgets\.cold_start_ms\.absolute_max/);
   assert.match(

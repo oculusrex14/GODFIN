@@ -237,6 +237,18 @@ async function waitForPortRelease(timeoutMs = 5_000) {
   throw new Error("The packaged backend did not release port 5100 after shutdown.");
 }
 
+function startupDiagnostics(userData) {
+  try {
+    const log = readFileSync(path.join(userData, "logs", "godfin.log"), "utf8");
+    const lines = log.trim().split("\n").filter(Boolean).slice(-20);
+    return lines.length
+      ? lines.join("\n")
+      : "The redacted backend startup log was empty.";
+  } catch {
+    return "No redacted backend startup log was produced.";
+  }
+}
+
 async function terminateTree(child, tree) {
   if (process.platform === "win32") {
     spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
@@ -308,7 +320,8 @@ async function launchOnce(executable, userData, startupLimitMs) {
   if (!healthResponse?.ok) {
     child.kill("SIGTERM");
     throw new Error(
-      `Packaged startup exceeded ${startupLimitMs} ms (observed ${startupMs} ms).`,
+      `Packaged startup exceeded ${startupLimitMs} ms (observed ${startupMs} ms).\n` +
+      `Redacted backend diagnostics:\n${startupDiagnostics(userData)}`,
     );
   }
 
