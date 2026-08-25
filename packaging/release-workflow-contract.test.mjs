@@ -62,9 +62,24 @@ test("release and dependency trust controls require owner review", async () => {
   }
 });
 
+test("native smoke builds are manual, read-only, non-publishing, and evidence-only", async () => {
+  const workflow = await source(".github/workflows/native-package-smoke.yml");
+
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /permissions:\s*\{\}/);
+  assert.match(workflow, /contents: read/);
+  assert.match(workflow, /--dir/);
+  assert.match(workflow, /--publish never/);
+  assert.match(workflow, /GODFIN_REQUIRE_SIGNING: "0"/);
+  assert.match(workflow, /installer_uploaded": False/);
+  assert.doesNotMatch(workflow, /gh release create/);
+  assert.doesNotMatch(workflow, /desktop\/release\/\*\.(?:dmg|zip|exe|AppImage|deb)/);
+});
+
 test("all GitHub Actions dependencies are pinned to immutable commits", async () => {
   for (const path of [
     ".github/workflows/ci.yml",
+    ".github/workflows/native-package-smoke.yml",
     ".github/workflows/promote-updates.yml",
     ".github/workflows/refresh-python-locks.yml",
     ".github/workflows/release.yml",

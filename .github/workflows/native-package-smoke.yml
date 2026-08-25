@@ -1,0 +1,210 @@
+name: Native package smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact commit SHA or private branch to verify
+        required: true
+        default: main
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: native-package-smoke-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package-smoke:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-15
+            target: --mac --arm64 --dir
+            evidence: macos-arm64
+          - name: macOS x64
+            os: macos-15-intel
+            target: --mac --x64 --dir
+            evidence: macos-x64
+          - name: Windows x64
+            os: windows-latest
+            target: --win --x64 --dir
+            evidence: windows-x64
+          - name: Linux x64
+            os: ubuntu-22.04
+            target: --linux --x64 --dir
+            evidence: linux-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements-lock.txt
+            backend/requirements-build-lock.txt
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+      - name: Install the reviewed, hash-locked backend build environment
+        run: python -m pip install --require-hashes -r backend/requirements-build-lock.txt
+      - name: Verify dependency and supply-chain boundaries
+        run: |
+          python scripts/verify_dependency_boundaries.py
+          python scripts/verify_supply_chain_artifacts.py
+      - name: Install locked frontend dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Install locked desktop dependencies
+        run: npm ci
+        working-directory: desktop
+      - name: Verify package privacy and release contracts before building
+        shell: bash
+        run: |
+          node --test \
+            scripts/package-integrity.test.mjs \
+            scripts/package-privacy.test.mjs \
+            scripts/package-security-contract.test.mjs
+          npm run test:update
+        working-directory: desktop
+      - name: Record immutable build identity
+        shell: bash
+        run: |
+          echo "GODFIN_BUILD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "GODFIN_BUILD_CHANNEL=private-smoke" >> "$GITHUB_ENV"
+          python - <<'PY' >> "$GITHUB_ENV"
+          from datetime import UTC, datetime
+          print(f"GODFIN_BUILD_TIMESTAMP={datetime.now(UTC).replace(microsecond=0).isoformat().replace('+00:00', 'Z')}")
+          PY
+      - name: Build frontend and frozen backend
+        run: npm run build:assets
+        working-directory: desktop
+        env:
+          PYTHON_BIN: python
+      - name: Build an unpacked, non-publishing package
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            npx electron-builder ${{ matrix.target }} --publish never \
+              -c.mac.notarize=false -c.mac.identity=-
+          else
+            npx electron-builder ${{ matrix.target }} --publish never
+          fi
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Verify startup, backend auto-start, privacy, integrity, fuses, and budgets
+        shell: bash
+        run: |
+          set -o pipefail
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            xvfb-run --auto-servernum npm run verify:package \
+              | tee release/package-verification.log
+          else
+            npm run verify:package | tee release/package-verification.log
+          fi
+        working-directory: desktop
+        env:
+          GODFIN_REQUIRE_SIGNING: "0"
+      - name: Create secret-free verification evidence
+        shell: bash
+        env:
+          GODFIN_MATRIX_NAME: ${{ matrix.name }}
+          GODFIN_RUN_ID: ${{ github.run_id }}
+          GODFIN_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import platform
+          import subprocess
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          root = Path.cwd()
+          release = root / "desktop" / "release"
+          log = release / "package-verification.log"
+          if not log.is_file():
+              raise SystemExit("Package verification log is missing")
+
+          def digest(path: Path) -> str:
+              value = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      value.update(chunk)
+              return value.hexdigest()
+
+          def first_file(candidates: list[Path], label: str) -> Path:
+              matches = sorted(path for path in candidates if path.is_file())
+              if not matches:
+                  raise SystemExit(f"Could not locate packaged {label}")
+              return matches[0]
+
+          if platform.system() == "Darwin":
+              app = first_file(
+                  list(release.glob("**/GODFIN.app/Contents/MacOS/GODFIN")),
+                  "desktop executable",
+              )
+              backend = first_file(
+                  list(release.glob("**/GODFIN.app/Contents/Resources/backend/godfin-backend")),
+                  "backend executable",
+              )
+          elif platform.system() == "Windows":
+              app = first_file(list(release.glob("**/win-unpacked/GODFIN.exe")), "desktop executable")
+              backend = first_file(
+                  list(release.glob("**/win-unpacked/resources/backend/godfin-backend.exe")),
+                  "backend executable",
+              )
+          else:
+              app = first_file(list(release.glob("**/linux-unpacked/godfin")), "desktop executable")
+              backend = first_file(
+                  list(release.glob("**/linux-unpacked/resources/backend/godfin-backend")),
+                  "backend executable",
+              )
+
+          evidence = {
+              "schema_version": 1,
+              "commit": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], text=True
+              ).strip(),
+              "matrix": os.environ["GODFIN_MATRIX_NAME"],
+              "runner_os": platform.system(),
+              "runner_arch": platform.machine(),
+              "github_run_id": os.environ["GODFIN_RUN_ID"],
+              "github_run_attempt": os.environ["GODFIN_RUN_ATTEMPT"],
+              "verified_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+              "desktop_executable_sha256": digest(app),
+              "backend_executable_sha256": digest(backend),
+              "verification_log_sha256": digest(log),
+              "installer_uploaded": False,
+              "signed": False,
+              "published": False,
+          }
+          output = release / "package-smoke-evidence.json"
+          output.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(evidence, indent=2))
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: native-smoke-evidence-${{ matrix.evidence }}
+          path: |
+            desktop/release/package-smoke-evidence.json
+            desktop/release/package-verification.log
+          if-no-files-found: error
+          retention-days: 14
