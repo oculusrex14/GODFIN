@@ -289,7 +289,7 @@ async function launchOnce(executable, userData) {
     } catch {
       // The local backend is still starting.
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
   const startupMs = Math.round(performance.now() - startedAt);

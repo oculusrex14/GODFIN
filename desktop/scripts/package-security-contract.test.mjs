@@ -56,4 +56,5 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.match(verifyPackage, /child\.once\("exit", finish\)/);
   assert.match(verifyPackage, /maxRetries: 10/);
   assert.match(verifyPackage, /retryDelay: 250/);
+  assert.match(verifyPackage, /setTimeout\(resolve, 20\)/);
 });
