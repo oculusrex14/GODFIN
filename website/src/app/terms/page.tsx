@@ -1,17 +1,20 @@
 import type { Metadata } from "next";
 
+import { publicContactConfig } from "@/lib/env";
+
 export const metadata: Metadata = {
   title: "Terms",
-  description: "Terms for GODFIN Core, Pro, Max, and one-time AI credit packs.",
+  description: "Terms for GODFIN Core, Pro, and Max lifetime licenses.",
 };
 
 export default function TermsPage() {
+  const { supportEmail } = publicContactConfig();
   return (
     <>
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
-            Effective 28 July 2026
+          <div className="eyebrow eyebrow-accent">
+            Effective 29 July 2026
           </div>
           <h1>Terms of service</h1>
           <p>
@@ -46,36 +49,50 @@ export default function TermsPage() {
             any individual device. There is no recurring software fee.
           </p>
 
-          <h2>4. AI credits</h2>
+          <h2>4. Optional AI</h2>
           <p>
-            AI credit packs are one-time purchases for eligible hosted
-            operations. Included allowances and operation costs are shown in the
-            product. Your own supported provider key can bypass the hosted
-            credit system. Purchased credits have no cash value.
+            Lifetime licenses include no hosted AI service or recurring AI
+            allowance. GODFIN does not currently sell hosted AI credit packs.
+            You may use supported local models or your own supported provider
+            key, subject to that provider&apos;s terms and charges.
           </p>
 
           <h2>5. Payments and refunds</h2>
           <p>
-            Payments are processed by Stripe. Taxes, invoices, and supported
+            Payments are processed by Cashfree. Taxes, invoices, and supported
             methods depend on location and checkout. Except where applicable law
             requires otherwise, digital license refunds may be limited after a
-            key has been activated. Contact support@godfin.dev for a good-faith
-            review of billing mistakes or technical inability to use the
-            product.
+            key has been activated.
+            {supportEmail ? (
+              <>
+                {" "}
+                Contact <a href={`mailto:${supportEmail}`}>{supportEmail}</a> for
+                a good-faith review of billing mistakes or technical inability
+                to use the product.
+              </>
+            ) : (
+              <>
+                {" "}
+                Checkout remains disabled until a verified support address is
+                configured for billing mistakes or technical inability to use
+                the product.
+              </>
+            )}
           </p>
 
           <h2>6. Accounts and keys</h2>
           <p>
             Keep your website account and license key secure. You may not sell,
-            publish, or share a key outside the devices or profiles permitted by
-            its tier. We may suspend keys involved in fraud, chargebacks, abuse,
-            or material violation of these terms.
+            publish, or share a key outside its three active installations.
+            Devices can be reviewed and deactivated from the website account.
+            We may suspend keys involved in fraud, chargebacks, abuse, or
+            material violation of these terms.
           </p>
 
           <h2>7. Availability</h2>
           <p>
             The local app is designed to remain useful offline. Website
-            licensing, downloads, email, hosted AI, and third-party integrations
+            licensing, downloads, email, and third-party integrations
             can experience downtime or provider changes. We will use reasonable
             care but do not promise uninterrupted service.
           </p>
@@ -89,10 +106,20 @@ export default function TermsPage() {
           </p>
 
           <h2>9. Changes and contact</h2>
-          <p>
-            Material changes will be dated on this page. Questions can be sent
-            to legal@godfin.dev.
-          </p>
+          {supportEmail ? (
+            <p>
+              Material changes will be dated on this page. Product and billing
+              questions can be sent to
+              {" "}
+              <a href={`mailto:${supportEmail}`}>{supportEmail}</a>.
+            </p>
+          ) : (
+            <p>
+              Material changes will be dated on this page. This private preview
+              is not accepting payment because a verified public support
+              address has not yet been configured.
+            </p>
+          )}
         </article>
       </section>
     </>

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink } from '../router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { NavLink, useLocation } from '../router';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -20,12 +20,24 @@ import {
   CalendarDays,
   ScanSearch,
   MoreHorizontal,
+  Scale,
+  Sparkles,
+  Lock,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import ChangePinModal from './ChangePinModal';
 import { GlassBackground } from './GlassBackground';
-import { fetchReviewStats, fetchSyncStatus } from '../api/client';
+import GodfinBrand from './GodfinBrand';
+import GuidedTour from './GuidedTour';
+import DialogSurface from './DialogSurface';
+import {
+  fetchLicenseNavigation,
+  fetchReviewStats,
+  fetchSyncStatus,
+  fetchSystemStatus,
+} from '../api/client';
+import { navigationGroupsForLicense } from '../lib/tierNavigation';
 
 const NAV_GROUPS = [
   {
@@ -51,6 +63,8 @@ const NAV_GROUPS = [
     items: [
       { to: '/reports', icon: FileText, label: 'Reports' },
       { to: '/cash-flow', icon: CalendarDays, label: 'Cash Flow' },
+      { to: '/net-worth', icon: Scale, label: 'Net Worth' },
+      { to: '/behavior-insights', icon: Sparkles, label: 'Behavior Insights' },
       { to: '/advisor', icon: Bot, label: 'Advisor' },
     ],
   },
@@ -107,24 +121,34 @@ function SyncBanner() {
 function SidebarContent({ onItemClick }) {
   const { logout } = useAuth();
   const [changePinOpen, setChangePinOpen] = useState(false);
+  const { data: systemStatus } = useQuery({
+    queryKey: ['systemStatus'],
+    queryFn: fetchSystemStatus,
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: licenseNavigation } = useQuery({
+    queryKey: ['licenseNavigation'],
+    queryFn: fetchLicenseNavigation,
+    staleTime: 60 * 1000,
+  });
+  const build = systemStatus?.build;
+  const buildLabel = build?.version
+    ? `v${build.version} · ${build.channel || 'unknown'}`
+    : 'Build details unavailable';
+  const navigationGroups = navigationGroupsForLicense(NAV_GROUPS, licenseNavigation);
 
   return (
     <>
       {/* Logo */}
       <div className="px-5 py-6 mb-2">
-        <h1 className="text-white/90 text-[1.3rem] tracking-[-0.04em]" style={{ fontWeight: 300 }}>
-          GODFIN
-        </h1>
-        <p className="text-white/25 text-[0.65rem] tracking-[0.15em] uppercase mt-0.5">
-          Personal Finance
-        </p>
+        <GodfinBrand compact />
       </div>
 
       {/* Nav */}
       <nav className="flex-1 px-3 space-y-3 overflow-y-auto pb-3">
-        {NAV_GROUPS.map((group) => (
+        {navigationGroups.map((group) => (
           <div key={group.label}>
-            <div className="px-3.5 mb-1 text-white/20 text-[0.58rem] uppercase tracking-[0.16em]">
+            <div className="px-3.5 mb-1 text-ink-muted text-[0.58rem] uppercase tracking-[0.16em]">
               {group.label}
             </div>
             <div className="space-y-0.5">
@@ -134,11 +158,14 @@ function SidebarContent({ onItemClick }) {
                   to={item.to}
                   end={item.to === '/'}
                   onClick={onItemClick}
+                  aria-label={item.lock
+                    ? `${item.label}, requires GODFIN ${item.lock.required_tier}`
+                    : item.label}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3.5 py-2 rounded-[14px] transition-all duration-200 text-[0.8rem] group relative ${
                       isActive
                         ? 'bg-white/[0.12] text-white shadow-[0_2px_12px_rgba(100,180,255,0.1),inset_0_1px_0_rgba(255,255,255,0.15)] border border-white/[0.12]'
-                        : 'text-white/40 hover:bg-white/[0.06] hover:text-white/70 border border-transparent'
+                        : 'text-ink-muted hover:bg-white/[0.06] hover:text-ink-secondary border border-transparent'
                     }`
                   }
                   style={{ fontWeight: 400 }}
@@ -147,7 +174,16 @@ function SidebarContent({ onItemClick }) {
                     <item.icon size={16} className="shrink-0 opacity-70 group-hover:opacity-100 transition-opacity" />
                     {item.to === '/review' && <ReviewBadge />}
                   </div>
-                  {item.label}
+                  <span className="min-w-0 flex-1">{item.label}</span>
+                  {item.lock && (
+                    <span
+                      className="flex shrink-0 items-center gap-1 rounded-md border border-white/[0.12] bg-white/[0.05] px-1.5 py-0.5 text-[0.56rem] uppercase tracking-wide text-ink-muted"
+                      title={`Requires GODFIN ${item.lock.required_tier}`}
+                    >
+                      <Lock size={10} aria-hidden="true" />
+                      {item.lock.required_tier}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </div>
@@ -160,14 +196,14 @@ function SidebarContent({ onItemClick }) {
         <div className="flex items-center gap-2 mb-3">
           <button
             onClick={() => setChangePinOpen(true)}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] transition-all text-[0.75rem]"
+            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-ink-muted hover:text-ink-secondary hover:bg-white/[0.06] transition-all text-[0.75rem]"
           >
             <KeyRound size={14} />
             Change PIN
           </button>
           <button
             onClick={logout}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-white/40 hover:text-rose-400/70 hover:bg-rose-500/[0.06] transition-all text-[0.75rem]"
+            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-ink-muted hover:text-rose-200 hover:bg-rose-500/[0.06] transition-all text-[0.75rem]"
           >
             <LogOut size={14} />
             Lock
@@ -175,11 +211,13 @@ function SidebarContent({ onItemClick }) {
         </div>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400/30 to-violet-400/30 border border-white/[0.15] flex items-center justify-center">
-            <span className="text-white/70 text-[0.7rem]" style={{ fontWeight: 500 }}>GF</span>
+            <span className="text-ink-secondary text-[0.7rem]" style={{ fontWeight: 500 }}>GF</span>
           </div>
           <div>
-            <p className="text-white/60 text-[0.75rem]" style={{ fontWeight: 400 }}>User</p>
-            <p className="text-white/25 text-[0.65rem]">v2.0</p>
+            <p className="text-ink-secondary text-[0.75rem]" style={{ fontWeight: 400 }}>User</p>
+            <p className="text-ink-muted text-[0.65rem]" title={build?.short_sha || undefined}>
+              {buildLabel}
+            </p>
           </div>
         </div>
       </div>
@@ -191,9 +229,68 @@ function SidebarContent({ onItemClick }) {
 
 export default function AppLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { pathname } = useLocation();
+  const mainRef = useRef(null);
+  const lastRouteHeadingRef = useRef(null);
+  const restoreMobileMenuFocusRef = useRef(true);
+
+  const openMobileMenu = () => {
+    restoreMobileMenuFocusRef.current = true;
+    setMobileOpen(true);
+  };
+  const closeMobileMenu = () => {
+    restoreMobileMenuFocusRef.current = true;
+    setMobileOpen(false);
+  };
+  const followMobileNavigation = () => {
+    restoreMobileMenuFocusRef.current = false;
+    setMobileOpen(false);
+  };
+  const shouldRestoreMobileMenuFocus = useCallback(
+    () => restoreMobileMenuFocusRef.current,
+    [],
+  );
+
+  useEffect(() => {
+    let observer;
+    let frame;
+    const focusRouteHeading = () => {
+      const main = mainRef.current;
+      if (!main || main.closest('[inert]')) return false;
+      const heading = main.querySelector('h1');
+      if (!heading || heading === lastRouteHeadingRef.current) return false;
+      lastRouteHeadingRef.current = heading;
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: false });
+      return true;
+    };
+    frame = window.requestAnimationFrame(() => {
+      if (focusRouteHeading()) return;
+      observer = new MutationObserver(() => {
+        if (focusRouteHeading()) observer?.disconnect();
+      });
+      if (mainRef.current) {
+        observer.observe(mainRef.current, {
+          attributes: true,
+          childList: true,
+          subtree: true,
+        });
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [pathname]);
 
   return (
     <div className="min-h-screen w-full" style={{ fontFamily: "'Inter', sans-serif" }}>
+      <a
+        href="#main-content"
+        className="fixed left-4 top-2 z-[200] -translate-y-20 rounded-lg bg-cyan-100 px-4 py-2 text-sm font-semibold text-slate-950 shadow-lg transition-transform focus:translate-y-0"
+      >
+        Skip to main content
+      </a>
       <SyncBanner />
       <GlassBackground />
 
@@ -205,12 +302,11 @@ export default function AppLayout({ children }) {
 
         {/* Mobile Header */}
         <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3 bg-white/[0.04] backdrop-blur-[32px] border-b border-white/[0.08]">
-          <h1 className="text-white/90 text-[1.1rem] tracking-[-0.04em]" style={{ fontWeight: 300 }}>
-            GODFIN
-          </h1>
+          <GodfinBrand compact showTagline={false} />
           <button
-            onClick={() => setMobileOpen(true)}
-            className="p-2 rounded-[12px] bg-white/[0.08] border border-white/[0.12] text-white/60"
+            onClick={openMobileMenu}
+            aria-label="Open navigation menu"
+            className="p-2 rounded-[12px] bg-white/[0.08] border border-white/[0.12] text-ink-secondary"
           >
             <Menu size={18} />
           </button>
@@ -225,29 +321,36 @@ export default function AppLayout({ children }) {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
-                onClick={() => setMobileOpen(false)}
+                onClick={closeMobileMenu}
+                data-godfin-dialog-backdrop="true"
+                aria-hidden="true"
               />
-              <motion.aside
+              <DialogSurface
+                as={motion.aside}
                 initial={{ x: -280 }}
                 animate={{ x: 0 }}
                 exit={{ x: -280 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                ariaLabel="Navigation menu"
+                onClose={closeMobileMenu}
+                shouldRestoreFocus={shouldRestoreMobileMenuFocus}
                 className="fixed top-0 left-0 bottom-0 z-50 w-[260px] flex flex-col bg-[#0d2040]/95 backdrop-blur-[32px] border-r border-white/[0.08] lg:hidden"
               >
                 <button
-                  onClick={() => setMobileOpen(false)}
-                  className="absolute top-4 right-4 p-1.5 rounded-full text-white/40 hover:text-white/70"
+                  onClick={closeMobileMenu}
+                  aria-label="Close navigation menu"
+                  className="absolute top-4 right-4 p-1.5 rounded-full text-ink-muted hover:text-ink-secondary"
                 >
                   <X size={18} />
                 </button>
-                <SidebarContent onItemClick={() => setMobileOpen(false)} />
-              </motion.aside>
+                <SidebarContent onItemClick={followMobileNavigation} />
+              </DialogSurface>
             </>
           )}
         </AnimatePresence>
 
         {/* Main Content */}
-        <main className="flex-1 min-w-0 pt-16 lg:pt-0">
+        <main id="main-content" ref={mainRef} tabIndex={-1} className="flex-1 min-w-0 pt-16 lg:pt-0">
           <div className="p-4 pb-24 sm:p-6 sm:pb-6 lg:p-8 max-w-[1100px]">
             {children}
           </div>
@@ -269,7 +372,7 @@ export default function AppLayout({ children }) {
             to={item.to}
             end={item.to === '/'}
             className={({ isActive }) => `relative min-h-[56px] flex flex-col items-center justify-center gap-1 text-[0.6rem] ${
-              isActive ? 'text-cyan-200/80' : 'text-white/35'
+              isActive ? 'text-cyan-200' : 'text-ink-muted'
             }`}
           >
             <div className="relative">
@@ -280,13 +383,14 @@ export default function AppLayout({ children }) {
           </NavLink>
         ))}
         <button
-          onClick={() => setMobileOpen(true)}
-          className="min-h-[56px] flex flex-col items-center justify-center gap-1 text-[0.6rem] text-white/35"
+          onClick={openMobileMenu}
+          className="min-h-[56px] flex flex-col items-center justify-center gap-1 text-[0.6rem] text-ink-muted"
         >
           <MoreHorizontal size={18} />
           More
         </button>
       </nav>
+      <GuidedTour />
     </div>
   );
 }

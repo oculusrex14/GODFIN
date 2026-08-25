@@ -1,0 +1,74 @@
+{
+  "environment": {
+    "logical_cpu_count": 10,
+    "machine": "arm64",
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "python": "3.12.13"
+  },
+  "fixture": "deterministic_synthetic_financial_ledger",
+  "generated_at": "2026-08-11T06:38:46.050006+00:00",
+  "live_database_accessed": false,
+  "results": [
+    {
+      "database_mib": 5.07,
+      "operations": {
+        "behavior_insights": {
+          "elapsed_ms": 164.88,
+          "select_statements": 5
+        },
+        "dashboard": {
+          "elapsed_ms": 16.74,
+          "select_statements": 5
+        },
+        "report_summary": {
+          "elapsed_ms": 17.32,
+          "select_statements": 6
+        }
+      },
+      "process_max_rss_mib": 158.5,
+      "rows": 10000,
+      "seed_seconds": 0.301
+    },
+    {
+      "database_mib": 23.52,
+      "operations": {
+        "behavior_insights": {
+          "elapsed_ms": 820.76,
+          "select_statements": 5
+        },
+        "dashboard": {
+          "elapsed_ms": 145.89,
+          "select_statements": 5
+        },
+        "report_summary": {
+          "elapsed_ms": 155.67,
+          "select_statements": 6
+        }
+      },
+      "process_max_rss_mib": 290.5,
+      "rows": 50000,
+      "seed_seconds": 1.554
+    },
+    {
+      "database_mib": 46.87,
+      "operations": {
+        "behavior_insights": {
+          "elapsed_ms": 1782.09,
+          "select_statements": 5
+        },
+        "dashboard": {
+          "elapsed_ms": 327.31,
+          "select_statements": 5
+        },
+        "report_summary": {
+          "elapsed_ms": 339.24,
+          "select_statements": 6
+        }
+      },
+      "process_max_rss_mib": 459.9,
+      "rows": 100000,
+      "seed_seconds": 3.303
+    }
+  ],
+  "schema_version": 1
+}

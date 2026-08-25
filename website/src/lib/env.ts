@@ -6,8 +6,19 @@ function required(name: string): string {
   return value;
 }
 
+const PUBLIC_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function present(name: string): boolean {
+  return Boolean(process.env[name]?.trim());
+}
+
+function optionalPublicEmail(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value && PUBLIC_EMAIL_PATTERN.test(value) ? value : null;
+}
+
 export function siteUrl(): string {
-  return (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:5300").replace(
+  return (process.env.NEXT_PUBLIC_SITE_URL || "https://godfin.dev").replace(
     /\/$/,
     "",
   );
@@ -19,13 +30,71 @@ export function supabasePublicConfig() {
   return url && key ? { url, key } : null;
 }
 
+export function publicContactConfig() {
+  const supportEmail =
+    optionalPublicEmail("NEXT_PUBLIC_SUPPORT_EMAIL") || "hello@godfin.dev";
+  const privacyEmail =
+    optionalPublicEmail("NEXT_PUBLIC_PRIVACY_EMAIL") || "hello@godfin.dev";
+  return {
+    supportEmail,
+    privacyEmail,
+    commerceReady: Boolean(supportEmail && privacyEmail),
+    waitlistReady: Boolean(privacyEmail),
+  };
+}
+
+export function commerceConfigured(): boolean {
+  const requiredCommerceEnvironment = [
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "ABUSE_HASH_SECRET",
+    "CASHFREE_CLIENT_ID",
+    "CASHFREE_CLIENT_SECRET",
+    "LICENSE_SIGNING_SECRET",
+    "LICENSE_ENTITLEMENT_ACTIVE_KEY_VERSION",
+    "LICENSE_ENTITLEMENT_PRIVATE_KEYS_JSON",
+    "RESEND_API_KEY",
+    "RESEND_FROM_EMAIL",
+  ];
+  if (process.env.PPP_CHECKOUT_ENABLED === "true") {
+    requiredCommerceEnvironment.push("CASHFREE_GLOBAL_PAYMENTS_APPROVED");
+  }
+  return Boolean(
+    process.env.CHECKOUT_ENABLED === "true"
+      && (
+        process.env.PPP_CHECKOUT_ENABLED !== "true"
+        || process.env.CASHFREE_GLOBAL_PAYMENTS_APPROVED === "true"
+      )
+      && publicContactConfig().commerceReady
+      && requiredCommerceEnvironment.every(present),
+  );
+}
+
+export function waitlistConfigured(): boolean {
+  return Boolean(
+    publicContactConfig().waitlistReady
+      && [
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "ABUSE_HASH_SECRET",
+        "RESEND_API_KEY",
+        "RESEND_FROM_EMAIL",
+      ].every(present),
+  );
+}
+
 export const serverEnv = {
   required,
   supabaseServiceRoleKey: () => required("SUPABASE_SERVICE_ROLE_KEY"),
-  stripeSecretKey: () => required("STRIPE_SECRET_KEY"),
-  stripeWebhookSecret: () => required("STRIPE_WEBHOOK_SECRET"),
+  abuseHashSecret: () => required("ABUSE_HASH_SECRET"),
+  cashfreeClientId: () => required("CASHFREE_CLIENT_ID"),
+  cashfreeClientSecret: () => required("CASHFREE_CLIENT_SECRET"),
   licenseSigningSecret: () => required("LICENSE_SIGNING_SECRET"),
+  licenseEntitlementActiveKeyVersion: () =>
+    required("LICENSE_ENTITLEMENT_ACTIVE_KEY_VERSION"),
+  licenseEntitlementPrivateKeysJson: () =>
+    required("LICENSE_ENTITLEMENT_PRIVATE_KEYS_JSON"),
   resendApiKey: () => required("RESEND_API_KEY"),
-  resendFromEmail: () =>
-    process.env.RESEND_FROM_EMAIL || "GODFIN <licenses@godfin.dev>",
+  resendFromEmail: () => required("RESEND_FROM_EMAIL"),
 };

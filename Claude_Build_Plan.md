@@ -1,3 +1,8 @@
+> **ARCHIVED HISTORICAL DOCUMENT — DO NOT USE FOR CURRENT IMPLEMENTATION.**
+> This pre-production plan references retired tools, Alembic, and an obsolete
+> phase model. Use `PLAN.md` for product requirements and
+> `docs/ENGINEERING_GUIDE.md` for current technical instructions.
+
 # GODFIN - Claude Code (Opus 4.6) Build Plan
 
 This document outlines the optimal strategy for executing the GODFIN build using Claude Code (powered by Opus 4.6) **running inside Antigravity**. It integrates the project's specification with your specifically installed tools and skills to ensure a clean, efficient, and high-quality build process.
@@ -118,4 +123,3 @@ When writing the frontend code, Claude Code should adhere to the following stric
   * Hide scrollbars on lists, keep borders minimal. 
 
 ---
-

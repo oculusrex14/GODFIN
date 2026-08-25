@@ -31,11 +31,11 @@ and Playwright jobs on the release commit.
 - Supabase migration applied; RLS policies manually verified with two test
   users.
 - Google OAuth consent, domain, callback, privacy page, and terms page verified.
-- Stripe products are one-time INR prices with exact server-side amounts.
-- Stripe webhook signature failure returns HTTP 400.
-- A Stripe test payment provisions exactly one purchase/license and one email,
+- Cashfree orders use exact server-side product amounts and never subscriptions.
+- Cashfree webhook signature failure returns HTTP 400.
+- A Cashfree sandbox payment provisions exactly one purchase/license and one email,
   including after webhook replay.
-- A credit-pack test payment increments the balance exactly once.
+- Partial/full refunds and lost/won disputes suspend, revoke, or restore exactly once.
 - Resend domain DKIM/SPF passes and delivery is tested on Gmail plus one other
   provider.
 - Production environment variables are present in Vercel and absent from git.
@@ -53,6 +53,21 @@ and Playwright jobs on the release commit.
 - Auto-update metadata and release artifacts are signed and checksummed.
 - The previous stable version can update to the candidate without losing the
   SQLite database, encryption key, license, or Gmail/LLM credentials.
+- Confirm the draft release includes `release-compatibility.json`, its app
+  version matches the tag, its schema revision matches the binary, and its
+  `previous_release_version` is the reviewed immediate predecessor.
+- Start promotion at 5% using `PUBLISH_STAGED_RELEASE`. Do not advance to 25%,
+  50%, or 100% until the owner has reviewed the clean-machine startup,
+  migration, import, backup, and support/error evidence and enters
+  `ADVANCE_AFTER_HEALTH_REVIEW` in the protected release environment.
+- For rollback, provide both the currently published tag and its declared
+  immediate predecessor. The workflow must reject skipped versions, verify both
+  checksum sets, and publish rollback metadata at 100% only after the desktop
+  has restored the verified pre-upgrade SQLite snapshot.
+- Exercise an interrupted rollback: after snapshot restoration but before
+  installer launch, restart the current build and confirm its preserved current
+  database is restored automatically. Then repeat and allow the predecessor to
+  start, confirming its journal status becomes completed.
 
 ## 5. Functional acceptance
 
@@ -75,7 +90,8 @@ and Playwright jobs on the release commit.
 - Attach signed installers, blockmaps/update metadata, checksums, SBOM, and
   release notes to a private draft GitHub Release.
 - Point website download variables to those immutable release assets.
-- Run a final production payment with a low-value test product, then remove it.
+- Run a controlled production purchase only after Cashfree KYC, tax, refund,
+  email, and support procedures are approved.
 - Capture the final website and app screenshots from the shipped build.
 - Obtain explicit owner authorization.
 - Publish the website, GitHub Release, Homebrew cask, and prepared launch

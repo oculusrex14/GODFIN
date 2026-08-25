@@ -57,7 +57,7 @@ export function DownloadChooser() {
     <div className="download-panel">
       <div className="download-card">
         <primary.icon size={30} color="#c9f36b" />
-        <h2 style={{ marginTop: 24 }}>GODFIN for {primary.name}</h2>
+        <h2 className="section-heading-spaced">GODFIN for {primary.name}</h2>
         <p>
           Version {process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0"} ·{" "}
           {primary.label}. The app runs locally and creates its database on your

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.models.audit_session import AuditSession
+from app.models.audit_log import AuditLog
+from app.models.transaction import Transaction
+from app.core.audit import reopen_audit
 from app.seed import SAVINGS_ACCOUNT_ID, CC_ACCOUNT_ID
 
 
@@ -54,6 +58,45 @@ def test_create_transaction_missing_fields(auth_client):
     assert resp.status_code == 422
 
 
+def test_create_transaction_rejects_finalized_period(
+    auth_client,
+    db_session,
+):
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=2,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+
+    response = auth_client.post("/api/v1/transactions", json=_make_txn())
+
+    assert response.status_code == 409
+    assert "reopen" in response.json()["detail"].lower()
+    assert db_session.query(Transaction).count() == 0
+
+
+def test_create_transaction_allows_explicitly_reopened_period(
+    auth_client,
+    db_session,
+):
+    finalized = AuditSession(
+        period_year=2026,
+        period_month=2,
+        status="finalized",
+    )
+    db_session.add(finalized)
+    db_session.commit()
+    reopen_audit(db_session, finalized.id)
+    db_session.commit()
+
+    response = auth_client.post("/api/v1/transactions", json=_make_txn())
+
+    assert response.status_code == 201
+
+
 def test_list_transactions_empty(auth_client):
     resp = auth_client.get("/api/v1/transactions")
     assert resp.status_code == 200
@@ -72,6 +115,19 @@ def test_list_transactions_with_data(auth_client):
     data = resp.json()
     assert data["total"] == 3
     assert len(data["items"]) == 3
+
+
+def test_transaction_time_round_trips_without_list_failure(auth_client):
+    created = auth_client.post(
+        "/api/v1/transactions",
+        json=_make_txn(time="10:30:00"),
+    )
+    assert created.status_code == 201
+    assert created.json()["time"] == "10:30:00"
+
+    listed = auth_client.get("/api/v1/transactions")
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["time"] == "10:30:00"
 
 
 def test_list_transactions_filter_date(auth_client):
@@ -171,6 +227,31 @@ def test_delete_transaction(auth_client):
 
     resp = auth_client.get(f"/api/v1/transactions/{txn_id}")
     assert resp.status_code == 404
+
+
+def test_delete_transaction_audit_preserves_pre_delete_status(
+    auth_client,
+    db_session,
+):
+    create_resp = auth_client.post("/api/v1/transactions", json=_make_txn())
+    txn_id = create_resp.json()["id"]
+    original_status = create_resp.json()["status"]
+
+    response = auth_client.delete(f"/api/v1/transactions/{txn_id}")
+
+    assert response.status_code == 204
+    db_session.expire_all()
+    audit = (
+        db_session.query(AuditLog)
+        .filter_by(
+            transaction_id=txn_id,
+            field_changed="status",
+            change_source="user_delete",
+        )
+        .one()
+    )
+    assert audit.old_value == original_status
+    assert audit.new_value == "deleted"
 
 
 def test_delete_locked_transaction(auth_client, db_session):

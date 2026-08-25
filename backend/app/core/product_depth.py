@@ -12,6 +12,14 @@ from app.models.account import Account
 from app.models.subscription import Subscription
 from app.models.subscription_suggestion import SubscriptionSuggestion
 from app.models.transaction import Transaction
+from app.core.audit import assert_period_writable
+from app.core.transaction_semantics import (
+    TransactionSemantic,
+    active_clause,
+    apply_transaction_semantic,
+    is_spending,
+    is_verified_income,
+)
 from app.models.transfer_match import TransferMatch
 
 
@@ -29,20 +37,21 @@ def cash_flow_calendar(db: Session, month: str) -> dict[str, Any]:
         .filter(
             Transaction.date >= start,
             Transaction.date < end,
-            Transaction.status != "deleted",
-            Transaction.is_transfer.is_(False),
+            active_clause(Transaction),
         )
         .all()
     )
     by_day: dict[date, dict[str, float | int]] = {}
     for txn in rows:
+        if not is_spending(txn) and not is_verified_income(txn):
+            continue
         day = by_day.setdefault(
             txn.date, {"spend": 0.0, "income": 0.0, "transaction_count": 0}
         )
         day["transaction_count"] += 1
-        if txn.type == "debit" and not txn.is_income:
+        if is_spending(txn):
             day["spend"] += float(txn.amount)
-        elif txn.is_income:
+        elif is_verified_income(txn):
             day["income"] += float(txn.amount)
 
     days = []
@@ -234,12 +243,17 @@ def decide_transfer_match(
 ) -> None:
     debit = db.query(Transaction).filter_by(id=match.debit_transaction_id).one()
     credit = db.query(Transaction).filter_by(id=match.credit_transaction_id).one()
-    match.decision_note = note
     if decision == "confirm":
+        for txn in (debit, credit):
+            assert_period_writable(db, txn.date)
+        match.decision_note = note
         match.status = "confirmed"
         match.snoozed_until = None
         for txn in (debit, credit):
-            txn.is_transfer = True
+            apply_transaction_semantic(
+                txn,
+                TransactionSemantic.INTERNAL_TRANSFER.value,
+            )
             txn.category = "TRANSFERS"
             txn.subcategory = "Matched Transfer"
         db.query(TransferMatch).filter(
@@ -257,24 +271,45 @@ def decide_transfer_match(
             synchronize_session=False,
         )
     elif decision == "ignore":
+        match.decision_note = note
         match.status = "ignored"
         match.snoozed_until = None
     elif decision == "snooze":
+        match.decision_note = note
         match.status = "snoozed"
         match.snoozed_until = date.today() + timedelta(days=snooze_days)
     else:
         raise ValueError("Unsupported decision")
 
 
-def sync_subscription_suggestions(db: Session) -> int:
+def sync_subscription_suggestions(
+    db: Session,
+    *,
+    run_detection: bool = True,
+) -> int:
     from app.core.recurring import detect_recurring_patterns
     from app.models.recurring_pattern import RecurringPattern
 
-    detect_recurring_patterns(db)
+    if run_detection:
+        detect_recurring_patterns(db)
+    suggestions = db.query(SubscriptionSuggestion).all()
     existing = {
         suggestion.recurring_pattern_id
-        for suggestion in db.query(SubscriptionSuggestion).all()
+        for suggestion in suggestions
     }
+    active_pattern_ids = {
+        row[0]
+        for row in db.query(RecurringPattern.id)
+        .filter_by(is_active=True)
+        .all()
+    }
+    for suggestion in suggestions:
+        if (
+            suggestion.recurring_pattern_id not in active_pattern_ids
+            and suggestion.status in {"pending", "snoozed"}
+        ):
+            suggestion.status = "ignored"
+            suggestion.snoozed_until = None
     created = 0
     patterns = db.query(RecurringPattern).filter_by(is_active=True).all()
     for pattern in patterns:
@@ -295,6 +330,41 @@ def sync_subscription_suggestions(db: Session) -> int:
     return created
 
 
+def subscription_suggestion_scan_summary(db: Session) -> dict[str, int]:
+    """Run the conservative detector and return privacy-safe aggregate reasons."""
+
+    from app.core.recurring import detect_recurring_patterns
+    from app.models.recurring_pattern import RecurringPattern
+
+    detection = detect_recurring_patterns(db)
+    existing_pattern_ids = {
+        row[0]
+        for row in db.query(SubscriptionSuggestion.recurring_pattern_id).all()
+    }
+    active_pattern_ids = {
+        row[0]
+        for row in db.query(RecurringPattern.id)
+        .filter(RecurringPattern.detection_status == "active")
+        .all()
+    }
+    created = sync_subscription_suggestions(db, run_detection=False)
+    return {
+        "transactions_considered": detection.transactions_considered,
+        "merchant_groups_scanned": detection.merchant_groups_scanned,
+        "active_patterns": detection.active_patterns,
+        "candidate_patterns": detection.candidate_patterns,
+        "created_suggestions": created,
+        "updated_patterns": detection.updated,
+        "retired_patterns": detection.retired_patterns,
+        "already_suggested": len(active_pattern_ids & existing_pattern_ids),
+        "insufficient_evidence": detection.insufficient_evidence,
+        "irregular_interval": detection.irregular_interval,
+        "high_amount_variability": detection.high_amount_variability,
+        "missing_merchant_identity": detection.missing_merchant_identity,
+        "excluded_non_spend": detection.excluded_non_spend,
+    }
+
+
 def decide_subscription_suggestion(
     db: Session,
     suggestion: SubscriptionSuggestion,
@@ -306,7 +376,7 @@ def decide_subscription_suggestion(
         if suggestion.confirmed_subscription_id:
             return (
                 db.query(Subscription)
-                .filter_by(id=suggestion.confirmed_subscription_id)
+                .filter_by(id=suggestion.confirmed_subscription_id, deleted_at=None)
                 .first()
             )
         frequency = (
@@ -347,7 +417,10 @@ def upcoming_subscription_reminders(
     today = date.today()
     horizon = today + timedelta(days=days)
     reminders = []
-    for subscription in db.query(Subscription).filter_by(is_active=True).all():
+    for subscription in db.query(Subscription).filter_by(
+        is_active=True,
+        deleted_at=None,
+    ).all():
         due = subscription.next_payment_date
         if not due:
             continue

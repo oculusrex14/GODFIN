@@ -6,7 +6,10 @@ from typing import Callable, Optional
 from app.core.statement_parser import StatementParseResult
 
 
-ParseCallable = Callable[[bytes, str, Optional[str]], StatementParseResult]
+ParseCallable = Callable[
+    [bytes, str, Optional[str], Optional[str]],
+    StatementParseResult,
+]
 DetectCallable = Callable[[str], bool]
 
 

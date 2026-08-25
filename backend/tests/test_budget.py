@@ -11,6 +11,7 @@ from app.core.budget import (
     simulate_goal,
 )
 from app.core.recurring import detect_recurring_patterns
+from app.models.recurring_pattern import RecurringPattern
 from app.models.transaction import Transaction
 from app.seed import SAVINGS_ACCOUNT_ID
 
@@ -70,9 +71,10 @@ def test_simulate_goal(db_session):
     )
     assert result.required_monthly > 0
     assert result.months_remaining > 0
-    assert 'minimal' in result.pressure_savings
-    assert 'moderate' in result.pressure_savings
-    assert 'aggressive' in result.pressure_savings
+    assert result.is_feasible is None
+    assert result.capacity_status == "insufficient_data"
+    assert result.coverage_months == 0
+    assert result.pressure_savings == {}
 
 
 # --- Recurring Detection ---
@@ -87,37 +89,161 @@ def test_detect_monthly_recurring(db_session):
         )
     db_session.flush()
 
-    detected = detect_recurring_patterns(db_session)
-    assert detected >= 1
+    summary = detect_recurring_patterns(db_session)
+    assert summary.created >= 1
 
 
 def test_no_recurring_single_txn(db_session):
     _add_txn(db_session, 'ONE TIME SHOP', 500.0, date.today())
     db_session.flush()
 
-    detected = detect_recurring_patterns(db_session)
-    assert detected == 0
+    summary = detect_recurring_patterns(db_session)
+    assert summary.detected == 0
 
 
 # --- Financial Profile ---
 
 def test_financial_profile_empty(db_session):
-    profile = compute_financial_profile(db_session)
-    assert profile.savings_rate == 0.0
-    assert profile.impulse_index == 0.0
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+    assert profile.savings_rate is None
+    assert profile.impulse_index is None
+    assert profile.data_status == "insufficient_history"
+    assert profile.period_start == "2026-07-01"
+    assert profile.period_end == "2026-07-31"
 
 
 def test_financial_profile_with_data(db_session):
-    today = date.today()
-    _add_txn(db_session, 'SALARY', 75000, today, category='INCOME', txn_type='credit')
-    _add_txn(db_session, 'RENT', 20000, today, category='HOUSING')
-    _add_txn(db_session, 'SWIGGY', 200, today, category='FOOD & DINING')
-    _add_txn(db_session, 'COFFEE', 100, today, category='FOOD & DINING')
+    complete_month = date(2026, 7, 15)
+    _add_txn(db_session, 'SALARY', 75000, complete_month, category='INCOME', txn_type='credit')
+    _add_txn(db_session, 'RENT', 20000, complete_month, category='HOUSING')
+    _add_txn(db_session, 'SWIGGY', 200, complete_month, category='FOOD & DINING')
+    _add_txn(db_session, 'COFFEE', 100, complete_month, category='FOOD & DINING')
     db_session.flush()
 
-    profile = compute_financial_profile(db_session)
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
     assert profile.savings_rate > 0
     assert profile.fixed_expense_ratio > 0
+    assert profile.impulse_index is None
+    assert profile.data_status == "partial"
+    assert profile.metrics["savings_rate"]["available"] is True
+    assert profile.metrics["impulse_index"]["available"] is False
+    assert "At least 5 purchases" in profile.metrics["impulse_index"]["unavailable_reason"]
+
+
+def test_financial_profile_uses_latest_completed_month_with_data(db_session):
+    _add_txn(
+        db_session,
+        "JUNE SALARY",
+        50000,
+        date(2026, 6, 5),
+        category="INCOME",
+        txn_type="credit",
+    )
+    _add_txn(
+        db_session,
+        "JUNE RENT",
+        10000,
+        date(2026, 6, 6),
+        category="HOUSING",
+    )
+    db_session.flush()
+
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+
+    assert profile.period_start == "2026-06-01"
+    assert profile.period_end == "2026-06-30"
+    assert profile.savings_rate == 80.0
+    assert profile.verified_income_count == 1
+    assert profile.spending_transaction_count == 1
+    assert profile.complete_month_count == 1
+
+
+def test_financial_profile_distinguishes_zero_from_unavailable(db_session):
+    _add_txn(
+        db_session,
+        "GROCER",
+        900,
+        date(2026, 7, 5),
+        category="FOOD & DINING",
+    )
+    db_session.flush()
+
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+
+    assert profile.subscription_dependency == 0.0
+    assert profile.metrics["subscription_dependency"]["available"] is True
+    assert profile.savings_rate is None
+    assert profile.metrics["savings_rate"]["available"] is False
+    assert "No verified income" in profile.metrics["savings_rate"]["unavailable_reason"]
+    assert profile.verified_income_total == 0.0
+    assert profile.spending_total == 900.0
+
+
+def test_financial_profile_ignores_partial_current_month(db_session):
+    _add_txn(
+        db_session,
+        'JULY SALARY',
+        10000,
+        date(2026, 7, 5),
+        category='INCOME',
+        txn_type='credit',
+    )
+    _add_txn(db_session, 'JULY RENT', 2000, date(2026, 7, 6), category='HOUSING')
+    _add_txn(
+        db_session,
+        'AUGUST PARTIAL SALARY',
+        999999,
+        date(2026, 8, 2),
+        category='INCOME',
+        txn_type='credit',
+    )
+    _add_txn(
+        db_session,
+        'AUGUST PARTIAL SPEND',
+        999999,
+        date(2026, 8, 3),
+        category='SHOPPING',
+    )
+    db_session.flush()
+
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+    assert profile.savings_rate == 80.0
+    assert profile.fixed_expense_ratio == 20.0
+    assert profile.transaction_count == 2
+
+
+def test_financial_profile_monthly_equivalent_recurring_costs(db_session):
+    _add_txn(
+        db_session,
+        'SALARY',
+        10000,
+        date(2026, 7, 5),
+        category='INCOME',
+        txn_type='credit',
+    )
+    for merchant, amount, frequency in (
+        ('MONTHLY BILL', 120, 'monthly'),
+        ('QUARTERLY BILL', 300, 'quarterly'),
+        ('YEARLY BILL', 1200, 'annual'),
+    ):
+        db_session.add(
+            RecurringPattern(
+                merchant_normalized=merchant,
+                avg_amount=amount,
+                frequency=frequency,
+                last_occurrence=date(2026, 7, 1),
+                next_expected=date(2026, 8, 1),
+                times_detected=4,
+                confidence=0.9,
+                evidence_count=4,
+                detection_status='active',
+                is_active=True,
+            )
+        )
+    db_session.flush()
+
+    profile = compute_financial_profile(db_session, as_of=date(2026, 8, 15))
+    assert profile.recurring_burden == 3.2
 
 
 # --- Elasticity ---
@@ -219,6 +345,11 @@ def test_financial_profile_api(auth_client):
     assert "savings_rate" in data
     assert "impulse_index" in data
     assert "fixed_expense_ratio" in data
+    assert data["calculation_version"] == "3.0"
+    assert data["period_start"]
+    assert data["verified_income_count"] == 0
+    assert data["spending_transaction_count"] == 0
+    assert data["metrics"]["savings_rate"]["available"] is False
 
 
 def test_elasticity_api(auth_client):

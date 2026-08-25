@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import accounts, advisor, auth, audit, budget, cash_flow, dashboard, gmail, health, income, license, llm, onboarding, reports, review, settings, statement, subscriptions, system, taxonomy, transactions, transfers
+from app.api.v1.endpoints import accounts, advisor, auth, audit, behavior_insights, budget, cash_flow, dashboard, feature_flags, gmail, health, income, license, llm, net_worth, onboarding, reports, review, reward_pilot, settings, statement, subscriptions, system, taxonomy, transactions, transfers
 
 router = APIRouter()
 router.include_router(health.router, tags=["system"])
@@ -25,3 +25,7 @@ router.include_router(cash_flow.router, prefix="/cash-flow", tags=["cash-flow"])
 router.include_router(transfers.router, prefix="/transfers", tags=["transfers"])
 router.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
 router.include_router(system.router, prefix="/system", tags=["system"])
+router.include_router(feature_flags.router, prefix="/system/feature-flags", tags=["system"])
+router.include_router(net_worth.router, prefix="/net-worth", tags=["net-worth"])
+router.include_router(behavior_insights.router, prefix="/behavior-insights", tags=["behavior-insights"])
+router.include_router(reward_pilot.router, prefix="/reward-pilot", tags=["reward-pilot"])

@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "status": "pending",
+  "reviewed_release": null,
+  "reviewed_sbom_sha256": null,
+  "reviewed_by": null,
+  "reviewed_at": null,
+  "note": "Public promotion is intentionally blocked until qualified counsel approves the exact release SBOM and records that evidence here. Private draft builds remain allowed."
+}

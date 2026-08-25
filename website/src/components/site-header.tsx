@@ -1,12 +1,12 @@
 import Link from "next/link";
+import { GodfinLogo } from "./godfin-logo";
 
 export function SiteHeader() {
   return (
     <header className="site-header">
       <div className="shell nav-row">
         <Link className="brand" href="/">
-          <span className="brand-mark">GF</span>
-          GODFIN
+          <GodfinLogo />
         </Link>
         <nav className="nav-links" aria-label="Primary navigation">
           <Link href="/#features">Features</Link>

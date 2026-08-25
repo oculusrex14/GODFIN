@@ -182,6 +182,22 @@ def test_parse_upi_email():
     assert result.vpa_handle == 'swiggy@ybl'
     assert result.upi_ref_number == '504123456789'
     assert result.is_p2p is False
+    assert result.account_last4 == '0000'
+
+
+def test_explicit_savings_upi_content_overrides_credit_sender_hint():
+    body = (
+        'Dear Customer, Rs.350.00 has been debited from account 0000 to VPA '
+        'cafe@ybl Synthetic Cafe on 10-02-26. '
+        'Your UPI transaction reference number is 504123456789.'
+    )
+
+    result = parse_email_body(body, 'hdfc_credit')
+
+    assert result is not None
+    assert result.account_type == 'hdfc_savings'
+    assert result.account_last4 == '0000'
+    assert result.instrument == 'upi'
 
 
 def test_parse_upi_p2p():
@@ -207,6 +223,7 @@ def test_parse_cc_email():
     assert result.amount == 2499.00
     assert result.merchant_normalized == 'AMAZON PAY'
     assert result.instrument == 'credit_card'
+    assert result.account_last4 == '0001'
 
 
 def test_parse_no_match():
@@ -275,6 +292,8 @@ def test_parse_rupay_credit_upi_email():
     assert result.txn_type == 'debit'
     assert result.vpa_handle == 'amznplprvr4000621@yapi'
     assert result.upi_ref_number == '605990103912'
+    assert result.account_type == 'hdfc_credit'
+    assert result.account_last4 == '4525'
 
 
 # --- UPI Credit Pattern Tests ---

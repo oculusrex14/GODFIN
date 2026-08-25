@@ -119,9 +119,11 @@ def _save_to_keychain(key: bytes) -> bool:
             getpass.getuser(),
             "-s",
             KEYCHAIN_SERVICE,
+            "-T",
+            "",
             "-w",
-            key.decode("ascii"),
         ],
+        input=f"{key.decode('ascii')}\n",
         capture_output=True,
         text=True,
         timeout=5,
@@ -144,8 +146,20 @@ def _load_from_file() -> Optional[bytes]:
 
 def _save_to_file(key: bytes) -> None:
     path = _key_file_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    if path.is_symlink() or path.parent.is_symlink():
+        raise EncryptionError("Encryption key path must not be a symbolic link")
+    parent_existed = path.parent.exists()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not parent_existed:
+        os.chmod(path.parent, 0o700)
+    descriptor = os.open(
+        path,
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_TRUNC
+        | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
     try:
         os.write(descriptor, key + b"\n")
         os.fsync(descriptor)
@@ -203,11 +217,29 @@ def _encrypted_values() -> list[str]:
                     "WHERE type='table' AND name='app_settings'"
                 ).fetchone()
                 if app_settings_exists:
-                    license_row = connection.execute(
-                        "SELECT value FROM app_settings WHERE key='license_key'"
-                    ).fetchone()
-                    if license_row and isinstance(license_row[0], str) and license_row[0]:
-                        values.append(license_row[0])
+                    secret_rows = connection.execute(
+                        "SELECT value FROM app_settings "
+                        "WHERE key IN ('license_key', 'twelve_data_api_key')"
+                    ).fetchall()
+                    values.extend(
+                        row[0]
+                        for row in secret_rows
+                        if isinstance(row[0], str) and row[0]
+                    )
+                gmail_attempts_exist = connection.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name='gmail_oauth_attempts'"
+                ).fetchone()
+                if gmail_attempts_exist:
+                    verifier_rows = connection.execute(
+                        "SELECT code_verifier_encrypted "
+                        "FROM gmail_oauth_attempts WHERE consumed_at IS NULL"
+                    ).fetchall()
+                    values.extend(
+                        row[0]
+                        for row in verifier_rows
+                        if isinstance(row[0], str) and row[0]
+                    )
             finally:
                 connection.close()
         except sqlite3.Error:
@@ -285,28 +317,28 @@ def decrypt(encrypted: str) -> str:
 def get_encryption_health() -> dict:
     try:
         _get_encryption_key()
-    except EncryptionKeyUnavailable as exc:
+    except EncryptionKeyUnavailable:
         return {
             "status": "missing",
             "source": None,
-            "message": str(exc),
+            "message": "The local encryption key is unavailable.",
         }
-    except EncryptionError as exc:
+    except EncryptionError:
         return {
             "status": "error",
             "source": _KEY_SOURCE,
-            "message": str(exc),
+            "message": "GODFIN could not access the local encryption key safely.",
         }
 
     values = [value for value in _encrypted_values() if not value.startswith("<")]
     try:
         for value in values:
             decrypt(value)
-    except SecretDecryptionError as exc:
+    except SecretDecryptionError:
         return {
             "status": "decrypt_failed",
             "source": _KEY_SOURCE,
-            "message": str(exc),
+            "message": "A stored connection must be reconnected securely.",
         }
     return {
         "status": "ok",

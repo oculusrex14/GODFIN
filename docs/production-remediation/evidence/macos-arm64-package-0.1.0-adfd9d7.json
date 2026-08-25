@@ -1,0 +1,68 @@
+{
+  "artifact_version": "0.1.0",
+  "built_at_utc": "2026-08-24T03:44:17.475Z",
+  "repository_commit": "adfd9d7938f1a1e9348224827cb21e05297db6bb",
+  "candidate_kind": "private-local-ad-hoc",
+  "host": {
+    "architecture": "arm64",
+    "operating_system": "macOS",
+    "python": "3.12.13"
+  },
+  "artifacts": [
+    {
+      "name": "GODFIN-0.1.0-mac-arm64.dmg",
+      "sha256": "0707a6498851af3891ed8d9564a463da183d61559f7615c1de1b023f7f6e8d1f",
+      "size_bytes": 216698063
+    },
+    {
+      "name": "GODFIN-0.1.0-mac-arm64.zip",
+      "sha256": "7e08ef8aca7aedffe9e90f39bf6a92423453af8f09a517f4a5945f983a8bd700",
+      "size_bytes": 216614915
+    }
+  ],
+  "package_verification": {
+    "first_start_ms": 3373,
+    "restart_ms": 1219,
+    "max_idle_memory_mb": 616,
+    "process_count": 5,
+    "database_preserved": true,
+    "trust_boundary_enforced": true,
+    "maintenance_boundary_enforced": true,
+    "package_privacy_tests_passed": 7,
+    "update_and_release_contract_tests_passed": 12,
+    "production_dependency_vulnerabilities": 0
+  },
+  "owner_installation_verification": {
+    "installed_path": "/Applications/GODFIN.app",
+    "previous_app_moved_to_trash": true,
+    "application_support_preserved": true,
+    "installed_tree_matches_candidate": true,
+    "codesign_deep_strict_passed": true,
+    "backend_auto_started_on_loopback": true,
+    "database_quick_check": "ok",
+    "configured_pin_length": 4,
+    "license_tier": "max",
+    "license_status": "active",
+    "signed_entitlement_stored": true
+  },
+  "license_provider_verification": {
+    "primary_domain": "https://godfin.dev",
+    "primary_http_status": 200,
+    "fallback_domain": "https://godfin.vercel.app",
+    "fallback_http_status": 200,
+    "signed_tier": "max",
+    "activation_limit": 3,
+    "cashfree_checkout_enabled": false,
+    "supabase_migrations_applied": [
+      "20260824032944_fix_public_rate_limit_bigint.sql",
+      "20260824033128_fix_public_rate_limit_greatest_expression.sql"
+    ],
+    "remaining_supabase_advisor_warning": "Leaked Password Protection Disabled"
+  },
+  "signing": {
+    "identity": "ad-hoc",
+    "hardened_runtime": true,
+    "notarized": false
+  },
+  "public_release_authorized": false
+}

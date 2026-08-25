@@ -4,13 +4,51 @@ import json
 from datetime import date, datetime, timezone
 
 from sqlalchemy import func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.core.budget import ELASTICITY
+from app.core.money import exact_money_statement_values
 from app.models.audit_log import AuditLog
 from app.models.audit_session import AuditSession
 from app.models.monthly_aggregate import MonthlyAggregate
 from app.models.transaction import Transaction
+from app.core.transaction_semantics import spending_clause, verified_income_clause
+
+
+class FinalizedPeriodError(ValueError):
+    """Raised when a ledger write targets a finalized accounting period."""
+
+    def __init__(self, transaction_date: date):
+        self.transaction_date = transaction_date
+        self.period = transaction_date.strftime("%Y-%m")
+        super().__init__(
+            f"{self.period} is finalized. Reopen the month before adding "
+            "transactions dated in this period."
+        )
+
+
+def assert_period_writable(db: Session, transaction_date: date) -> None:
+    """Enforce the accounting-period write boundary for every ledger ingress.
+
+    Reopening creates a newer draft session while retaining the prior session
+    as non-authoritative history, so the latest active session is the
+    authoritative period state.
+    """
+    latest_session = (
+        db.query(AuditSession)
+        .filter_by(
+            period_year=transaction_date.year,
+            period_month=transaction_date.month,
+        )
+        .filter(
+            AuditSession.status.in_(["draft", "finalized", "locked"])
+        )
+        .order_by(AuditSession.created_at.desc(), AuditSession.id.desc())
+        .first()
+    )
+    if latest_session and latest_session.status in {"finalized", "locked"}:
+        raise FinalizedPeriodError(transaction_date)
 
 
 def get_month_status(db: Session, year: int, month: int) -> str:
@@ -18,13 +56,13 @@ def get_month_status(db: Session, year: int, month: int) -> str:
     session = (
         db.query(AuditSession)
         .filter_by(period_year=year, period_month=month)
-        .filter(AuditSession.status.in_(['draft', 'finalized']))
-        .order_by(AuditSession.created_at.desc())
+        .filter(AuditSession.status.in_(['draft', 'finalized', 'locked']))
+        .order_by(AuditSession.created_at.desc(), AuditSession.id.desc())
         .first()
     )
     if session is None:
         return 'no_audit'
-    return session.status
+    return 'finalized' if session.status == 'locked' else session.status
 
 
 def start_audit(db: Session, year: int, month: int) -> AuditSession:
@@ -153,8 +191,14 @@ def reopen_audit(db: Session, session_id: str) -> AuditSession:
     if agg:
         agg.is_finalized = False
 
-    # Old session remains 'finalized' but with no linked transactions;
-    # a new draft session is created below for continued editing.
+    # Retain the old session as non-authoritative history. This also releases
+    # the partial unique index before the replacement draft is created.
+    session.status = 'discarded'
+    prior_summary = (session.change_summary or '').strip()
+    session.change_summary = (
+        f"{prior_summary} Reopened; this audit was superseded by a new draft."
+    ).strip()
+    db.flush()
 
     # Create new draft
     new_session = AuditSession(
@@ -180,12 +224,12 @@ def _compute_aggregate(
     )
 
     total_spend = float(
-        base.filter(Transaction.type == 'debit', Transaction.is_transfer == False)
+        base.filter(spending_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
     )
     total_income = float(
-        base.filter(Transaction.is_income == True)
+        base.filter(verified_income_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
     )
@@ -195,7 +239,7 @@ def _compute_aggregate(
         savings_rate = round(((total_income - total_spend) / total_income) * 100, 1)
 
     transaction_count = base.filter(
-        Transaction.type == 'debit', Transaction.is_transfer == False
+        spending_clause(Transaction)
     ).count()
 
     # Elasticity totals
@@ -205,7 +249,7 @@ def _compute_aggregate(
     transfer_total = 0.0
 
     cat_rows = (
-        base.filter(Transaction.type == 'debit', Transaction.category.isnot(None))
+        base.filter(spending_clause(Transaction), Transaction.category.isnot(None))
         .with_entities(Transaction.category, func.sum(Transaction.amount).label('total'))
         .group_by(Transaction.category)
         .all()
@@ -227,34 +271,52 @@ def _compute_aggregate(
 
     # Recurring total
     recurring_total = float(
-        base.filter(Transaction.is_recurring == True, Transaction.type == 'debit')
+        base.filter(Transaction.is_recurring == True, spending_clause(Transaction))
         .with_entities(func.coalesce(func.sum(Transaction.amount), 0))
         .scalar()
     )
 
-    # Upsert aggregate
+    # Upsert the derived aggregate atomically. The partial unique index is the
+    # final race boundary for concurrent finalization attempts.
     month_str = f'{year}-{month:02d}'
-    agg = db.query(MonthlyAggregate).filter_by(month=month_str, account_id=None).first()
-    if agg is None:
-        agg = MonthlyAggregate(month=month_str)
-        db.add(agg)
-
-    agg.total_spend = round(total_spend, 2)
-    agg.total_income = round(total_income, 2)
-    agg.savings_rate = savings_rate
-    agg.fixed_total = round(fixed_total, 2)
-    agg.semi_flexible_total = round(semi_flex_total, 2)
-    agg.flexible_total = round(flex_total, 2)
-    agg.transfer_total = round(transfer_total, 2)
-    agg.recurring_total = round(recurring_total, 2)
-    agg.category_breakdown = json.dumps(cat_breakdown)
-    agg.transaction_count = transaction_count
-    agg.is_finalized = True
-    agg.audit_session_id = session_id
-    agg.computed_at = datetime.now(timezone.utc)
-
+    aggregate_values = exact_money_statement_values(
+        MonthlyAggregate.__table__,
+        {
+        "total_spend": round(total_spend, 2),
+        "total_income": round(total_income, 2),
+        "fixed_total": round(fixed_total, 2),
+        "semi_flexible_total": round(semi_flex_total, 2),
+        "flexible_total": round(flex_total, 2),
+        "transfer_total": round(transfer_total, 2),
+        "recurring_total": round(recurring_total, 2),
+        },
+    )
+    aggregate_values.update({
+        "savings_rate": savings_rate,
+        "category_breakdown": json.dumps(cat_breakdown),
+        "transaction_count": transaction_count,
+        "is_finalized": True,
+        "audit_session_id": session_id,
+        "computed_at": datetime.now(timezone.utc),
+    })
+    insert_values = {
+        "month": month_str,
+        "account_id": None,
+    }
+    insert_values.update(aggregate_values)
+    statement = sqlite_insert(MonthlyAggregate).values(insert_values)
+    statement = statement.on_conflict_do_update(
+        index_elements=[MonthlyAggregate.month],
+        index_where=MonthlyAggregate.account_id.is_(None),
+        set_=aggregate_values,
+    )
+    db.execute(statement)
     db.flush()
-    return agg
+    return (
+        db.query(MonthlyAggregate)
+        .filter_by(month=month_str, account_id=None)
+        .one()
+    )
 
 
 def _update_merchant_memory_from_corrections(db: Session, txns: list) -> None:

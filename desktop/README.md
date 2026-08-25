@@ -1,14 +1,20 @@
 # GODFIN desktop packaging
 
+Repository architecture, supported versions, and shared verification commands
+are defined in [`../docs/ENGINEERING_GUIDE.md`](../docs/ENGINEERING_GUIDE.md).
+This file covers only the native desktop packaging surface.
+
 Electron is a hardened shell around two bundled, local artifacts:
 
 - `frontend/dist` is served through the privileged `godfin://app` protocol.
 - `backend/dist/godfin-backend` is a native PyInstaller bundle listening only
   on `127.0.0.1:5100`.
 
-The renderer has no Node.js integration or preload bridge. Context isolation,
-Chromium sandboxing, navigation restrictions, denied permissions, CSP, a
-single-instance lock, and Electron fuse hardening are enabled.
+The renderer has no Node.js integration. A context-isolated, one-method preload
+bridge can only ask the main process to complete a short-lived, PIN-authorized
+backup restore. Context isolation, Chromium sandboxing, navigation restrictions,
+denied permissions, CSP, a single-instance lock, and Electron fuse hardening are
+enabled.
 
 ## Local packaging
 

@@ -5,19 +5,15 @@ from datetime import UTC, date, datetime, timedelta
 
 from app.models.account import Account
 from app.models.app_setting import AppSetting
+from app.models.audit_session import AuditSession
 from app.models.recurring_pattern import RecurringPattern
 from app.models.subscription import Subscription
 from app.models.transaction import Transaction
+from tests.license_helpers import install_test_license
 
 
 def _activate_pro(db_session) -> None:
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
-    db_session.commit()
+    install_test_license(db_session, "pro")
 
 
 def _transaction(
@@ -134,6 +130,50 @@ def test_transfer_matching_requires_paid_license(auth_client):
     assert response.status_code == 403
 
 
+def test_transfer_confirmation_returns_409_for_finalized_period(
+    auth_client,
+    db_session,
+):
+    _activate_pro(db_session)
+    accounts = db_session.query(Account).limit(2).all()
+    _transaction(
+        db_session,
+        account_id=accounts[0].id,
+        txn_date=date(2026, 7, 10),
+        amount=5000,
+        txn_type="debit",
+        merchant="Card payment",
+    )
+    _transaction(
+        db_session,
+        account_id=accounts[1].id,
+        txn_date=date(2026, 7, 11),
+        amount=5000,
+        txn_type="credit",
+        merchant="Payment received",
+    )
+    db_session.commit()
+    candidate = auth_client.post("/api/v1/transfers/scan").json()[
+        "candidates"
+    ][0]
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=7,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+
+    response = auth_client.post(
+        f"/api/v1/transfers/{candidate['id']}/decision",
+        json={"decision": "confirm"},
+    )
+
+    assert response.status_code == 409
+    assert "reopen" in response.json()["detail"].lower()
+
+
 def test_subscription_confirmation_and_reminder(auth_client, db_session):
     account = db_session.query(Account).first()
     pattern = RecurringPattern(
@@ -147,8 +187,10 @@ def test_subscription_confirmation_and_reminder(auth_client, db_session):
     db_session.add(pattern)
     db_session.commit()
 
-    response = auth_client.post("/api/v1/subscriptions/suggestions/scan")
-    assert response.status_code == 200
+    from app.core.product_depth import sync_subscription_suggestions
+
+    sync_subscription_suggestions(db_session, run_detection=False)
+    db_session.commit()
     response = auth_client.get("/api/v1/subscriptions/suggestions")
     suggestion = response.json()[0]
     response = auth_client.post(
@@ -161,6 +203,45 @@ def test_subscription_confirmation_and_reminder(auth_client, db_session):
     response = auth_client.get("/api/v1/subscriptions/reminders?days=7")
     assert response.status_code == 200
     assert response.json()["reminders"][0]["days_until"] == 3
+
+
+def test_subscription_scan_explains_candidates_without_auto_creating_them(
+    auth_client,
+    db_session,
+):
+    account = db_session.query(Account).first()
+    today = date.today()
+    for offset in (31, 0):
+        _transaction(
+            db_session,
+            account_id=account.id,
+            txn_date=today - timedelta(days=offset),
+            amount=749,
+            txn_type="debit",
+            merchant="Possible Stream",
+        )
+    db_session.commit()
+
+    response = auth_client.post("/api/v1/subscriptions/suggestions/scan")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["transactions_considered"] >= 2
+    assert payload["merchant_groups_scanned"] >= 1
+    assert payload["candidate_patterns"] >= 1
+    assert payload["created_suggestions"] == 0
+
+    candidates = auth_client.get(
+        "/api/v1/subscriptions/suggestions/candidates"
+    )
+    assert candidates.status_code == 200, candidates.text
+    candidate = next(
+        item for item in candidates.json() if item["merchant"] == "POSSIBLE STREAM"
+    )
+    assert candidate["evidence_count"] == 2
+    assert candidate["amount_behavior"] == "fixed"
+    assert candidate["recurring_kind"] == "subscription_candidate"
+    assert db_session.query(Subscription).filter_by(name="Possible Stream").first() is None
 
 
 def test_financial_year_export_csv_and_json(auth_client, db_session):
@@ -220,8 +301,46 @@ def test_first_pin_starts_onboarding(auth_client):
     response = auth_client.get("/api/v1/onboarding")
     assert response.status_code == 200
     assert response.json()["completed"] is False
+    assert response.json()["deferred"] is False
+    assert response.json()["step_count"] == 6
     response = auth_client.put(
-        "/api/v1/onboarding", json={"step": 5, "completed": True}
+        "/api/v1/onboarding", json={"step": 6, "completed": True}
     )
     assert response.status_code == 200
     assert response.json()["completed"] is True
+
+
+def test_finish_later_preserves_setup_and_tutorial_progress(auth_client):
+    response = auth_client.put(
+        "/api/v1/onboarding",
+        json={"step": 4, "deferred": True},
+    )
+    assert response.status_code == 200
+    status = response.json()
+    assert status["completed"] is False
+    assert status["deferred"] is True
+    assert status["step"] == 4
+
+    response = auth_client.put(
+        "/api/v1/onboarding",
+        json={"tutorial_step": 7},
+    )
+    status = response.json()
+    assert status["tutorial_step"] == 7
+    assert status["tutorial_completed"] is False
+
+
+def test_tutorial_completion_is_versioned_and_restartable(auth_client):
+    completed = auth_client.put(
+        "/api/v1/onboarding",
+        json={"tutorial_step": 10, "tutorial_completed": True},
+    ).json()
+    assert completed["tutorial_completed"] is True
+    assert completed["tutorial_completed_version"] == completed["tutorial_version"]
+
+    restarted = auth_client.put(
+        "/api/v1/onboarding",
+        json={"restart_tutorial": True},
+    ).json()
+    assert restarted["tutorial_step"] == 1
+    assert restarted["tutorial_completed"] is False

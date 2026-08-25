@@ -13,11 +13,11 @@ const articles = {
       ],
       [
         "Keep commerce separate",
-        "The website needs an email address, a purchase record, a license state, and optional credit balance. It does not need a copy of the user’s ledger. Separating these systems narrows both the security surface and the meaning of consent.",
+        "The website needs an email address, a purchase record, a license state, and device activation records. It does not need a copy of the user’s ledger. Separating these systems narrows both the security surface and the meaning of consent.",
       ],
       [
         "Make network features optional",
-        "Gmail ingestion, hosted AI, license checks, and updates can improve the product without becoming prerequisites for local bookkeeping. When the network disappears, the local rules and records should remain useful.",
+        "Gmail ingestion, optional AI provider connections, license checks, and updates can improve the product without becoming prerequisites for local bookkeeping. When the network disappears, the local rules and records should remain useful.",
       ],
     ],
   },
@@ -44,9 +44,7 @@ const articles = {
 
 type ArticleSlug = keyof typeof articles;
 
-export function generateStaticParams() {
-  return Object.keys(articles).map((slug) => ({ slug }));
-}
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
@@ -73,7 +71,7 @@ export default async function ArticlePage({
     <>
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+          <div className="eyebrow eyebrow-accent">
             GODFIN guide
           </div>
           <h1>{article.title}</h1>

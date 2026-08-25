@@ -16,7 +16,9 @@ class AuditLog(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     transaction_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("transactions.id"), nullable=True
+        String(36),
+        ForeignKey("transactions.id", ondelete="SET NULL"),
+        nullable=True,
     )
     field_changed: Mapped[str] = mapped_column(String(50), nullable=False)
     old_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

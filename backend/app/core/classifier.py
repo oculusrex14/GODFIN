@@ -101,22 +101,48 @@ def classify_transaction(
     if layer1:
         return layer1
 
-    # Layer 2: Classification rules (regex/contains)
+    # Layer 2: User-confirmed generalized transaction pattern. Exact merchant
+    # memory always remains the highest learned layer.
+    from app.core.classification_learning import match_confirmed_pattern
+
+    pattern = match_confirmed_pattern(db, merchant_normalized, instrument)
+    if pattern:
+        return ClassificationResult(
+            category=pattern.category,
+            subcategory=pattern.subcategory,
+            confidence=pattern.confidence,
+            source="confirmed_pattern",
+        )
+
+    # Layer 3: Classification rules (regex/contains)
     layer2 = _layer_rules(db, merchant_normalized)
     if layer2:
         return layer2
 
-    # Layer 3: Fuzzy string match against merchant_memory
+    # Layer 4: Fuzzy string match against merchant_memory
     layer3 = _layer_fuzzy_match(db, merchant_normalized)
     if layer3:
         return layer3
 
-    # Layer 4: Embedding similarity
+    # Layer 5: Optional personal supervised classifier. It remains unavailable
+    # until the user has confirmed at least 200 corrections across 5 categories.
+    from app.core.classification_learning import match_personal_classifier
+
+    personal = match_personal_classifier(db, merchant_normalized)
+    if personal:
+        return ClassificationResult(
+            category=personal["category"],
+            subcategory=personal["subcategory"],
+            confidence=personal["confidence"],
+            source="personal_model",
+        )
+
+    # Layer 6: Embedding similarity
     layer4 = _layer_embedding_match(db, merchant_normalized)
     if layer4:
         return layer4
 
-    # Layer 5: LLM fallback
+    # Layer 7: LLM fallback
     layer5 = _layer_llm(db, merchant_normalized, amount, instrument)
     if layer5:
         return layer5

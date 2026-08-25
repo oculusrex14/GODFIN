@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
@@ -14,21 +15,76 @@ from typing import Optional, Dict, Any, List
 import requests
 
 from app.core.llm_service import LLMClassificationResult
+from app.core.llm_privacy import validate_provider_base_url
 
 logger = logging.getLogger(__name__)
 
+PROVIDER_SMOKE_PROMPT = (
+    "This is a connection check using synthetic text only. "
+    "Reply with a short confirmation that the model can generate text."
+)
+MAX_PROVIDER_SMOKE_RESPONSE_CHARS = 8_192
 
-@dataclass
-class LLMResponse:
-    """Standardized LLM response."""
+
+@dataclass(frozen=True)
+class ProviderProbeResult:
     success: bool
-    content: Optional[str] = None
-    error: Optional[str] = None
-    usage: Optional[Dict[str, Any]] = None
+    error_code: str | None
+    latency_bucket: str
+
+
+class LLMProviderProbeError(RuntimeError):
+    """A selected model could not pass the privacy-safe generation probe."""
+
+    def __init__(self, code: str):
+        super().__init__("The selected AI model did not pass its connection check.")
+        self.code = code
+
+
+def _latency_bucket(elapsed_seconds: float) -> str:
+    if elapsed_seconds < 1:
+        return "under_1s"
+    if elapsed_seconds < 5:
+        return "1_to_5s"
+    if elapsed_seconds < 15:
+        return "5_to_15s"
+    return "15s_or_more"
+
+
+def probe_selected_model(provider: "LLMProvider") -> ProviderProbeResult:
+    """Prove the exact selected model can generate text without user data."""
+    started = time.monotonic()
+    error_code: str | None = None
+    try:
+        response = provider.call(PROVIDER_SMOKE_PROMPT, temperature=0.0)
+        if response is None:
+            error_code = "no_response"
+        elif not isinstance(response, str):
+            error_code = "malformed_response"
+        else:
+            normalized = response.strip()
+            if not normalized:
+                error_code = "empty_response"
+            elif len(normalized) > MAX_PROVIDER_SMOKE_RESPONSE_CHARS:
+                error_code = "response_too_large"
+    except requests.Timeout:
+        error_code = "timeout"
+    except requests.ConnectionError:
+        error_code = "provider_unreachable"
+    except Exception:
+        error_code = "provider_error"
+    return ProviderProbeResult(
+        success=error_code is None,
+        error_code=error_code,
+        latency_bucket=_latency_bucket(time.monotonic() - started),
+    )
 
 
 class LLMProvider(ABC):
     """Base class for LLM providers."""
+
+    is_local = False
+    hosted_data_consent = False
 
     def __init__(self, model: str, **kwargs):
         self.model = model
@@ -53,6 +109,7 @@ class OllamaLocalProvider(LLMProvider):
     """Local Ollama instance."""
 
     DEFAULT_BASE_URL = "http://localhost:11434"
+    is_local = True
 
     def __init__(self, model: str, base_url: Optional[str] = None, **kwargs):
         super().__init__(model, **kwargs)
@@ -106,6 +163,7 @@ class OllamaCloudProvider(OllamaLocalProvider):
     """Ollama Cloud API (same interface, different base URL)."""
 
     DEFAULT_BASE_URL = "https://api.ollama.com"
+    is_local = False
 
     def __init__(self, model: str, api_key: Optional[str] = None, base_url: Optional[str] = None, **kwargs):
         # Don't pass base_url to parent - set it directly to avoid conflict
@@ -598,14 +656,21 @@ class QwenProvider(LLMProvider):
             data = response.json()
 
             output = data.get("output", {})
-            text = output.get("text", "")
-
-            return LLMResponse(
-                success=True,
-                content=text,
-                usage=data.get("usage", {})
-            )
+            if not isinstance(output, dict):
+                return None
+            text = output.get("text")
+            if not isinstance(text, str):
+                choices = output.get("choices", [])
+                if isinstance(choices, list) and choices:
+                    first = choices[0] if isinstance(choices[0], dict) else {}
+                    message = first.get("message", {})
+                    text = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(text, str):
+                return None
+            text = text.strip()
+            return text or None
         except Exception as e:
+            logger.warning("Qwen request failed: %s", e)
             return None
 
     def test_connection(self) -> tuple[bool, str]:
@@ -690,6 +755,7 @@ def create_provider(
     provider_class = PROVIDER_MAP.get(provider)
     if not provider_class:
         raise ValueError(f"Unknown provider: {provider}. Available: {list(PROVIDER_MAP.keys())}")
+    validate_provider_base_url(provider, base_url)
 
     return provider_class(
         model=model,
@@ -699,28 +765,29 @@ def create_provider(
     )
 
 
-def get_available_providers() -> Dict[str, Dict[str, Any]]:
-    """Get list of available providers with their supported models."""
+def _provider_catalog() -> Dict[str, Dict[str, Any]]:
+    """Describe implemented adapters; this is not the production support list."""
     return {
         "ollama_local": {
             "name": "Ollama (Local)",
+            "is_local": True,
             "auth_methods": ["none"],
             "requires_auth": False,
             "models": {
                 "manual": True,
                 "suggestions": [
-                    "llama3.1:8b",
-                    "mistral:7b",
-                    "qwen2.5:7b",
-                    "gemma3:4b",
-                    "phi3:mini",
-                    "deepseek-coder:6.7b",
+                    "qwen3:1.7b",
+                    "qwen3:4b",
+                    "qwen3:8b",
+                    "qwen3.6:27b",
+                    "qwen3.6:35b-a3b",
                 ]
             },
             "description": "Run models locally on your machine"
         },
         "ollama_cloud": {
             "name": "Ollama (Cloud)",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": [
@@ -734,6 +801,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "anthropic": {
             "name": "Anthropic",
+            "is_local": False,
             "auth_methods": ["oauth", "openapi"],
             "requires_auth": True,
             "models": {
@@ -745,6 +813,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "openai": {
             "name": "OpenAI",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -756,6 +825,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "gemini": {
             "name": "Google Gemini",
+            "is_local": False,
             "auth_methods": ["oauth", "openapi"],
             "requires_auth": True,
             "models": {
@@ -767,6 +837,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "moonshot": {
             "name": "Kimi (Moonshot)",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -778,6 +849,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "zai": {
             "name": "GLM (Z.AI)",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -789,6 +861,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "deepseek": {
             "name": "Deepseek",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -800,6 +873,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "qwen": {
             "name": "Qwen",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -811,6 +885,7 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
         },
         "minimax": {
             "name": "Minimax",
+            "is_local": False,
             "auth_methods": ["openapi"],
             "requires_auth": True,
             "models": {
@@ -821,3 +896,37 @@ def get_available_providers() -> Dict[str, Dict[str, Any]]:
             "description": "Minimax models"
         },
     }
+
+
+# Hosted providers remain implemented for controlled acceptance testing, but a
+# provider/model is not advertised as production-supported until its exact pair
+# passes the release acceptance matrix on the candidate build. Add only exact
+# accepted model IDs here together with retained evidence for the candidate SHA.
+PRODUCTION_ACCEPTED_HOSTED_MODELS: dict[str, frozenset[str]] = {}
+
+
+def _accepted_models(
+    models: dict[str, object] | list[str],
+    accepted: frozenset[str],
+) -> dict[str, object] | list[str]:
+    if isinstance(models, list):
+        return [model for model in models if model in accepted]
+    return {
+        tier: model
+        for tier, model in models.items()
+        if isinstance(model, str) and model in accepted
+    }
+
+
+def get_available_providers() -> Dict[str, Dict[str, Any]]:
+    """Return only providers/models accepted for production presentation."""
+    catalog = _provider_catalog()
+    available = {"ollama_local": catalog["ollama_local"]}
+    for provider_id, accepted in PRODUCTION_ACCEPTED_HOSTED_MODELS.items():
+        provider = catalog.get(provider_id)
+        if provider is None or not accepted:
+            continue
+        models = _accepted_models(provider["models"], accepted)
+        if models:
+            available[provider_id] = {**provider, "models": models}
+    return available

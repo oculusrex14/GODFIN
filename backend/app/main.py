@@ -9,32 +9,41 @@ from starlette.exceptions import HTTPException
 
 from app.api.v1.router import router as api_v1_router
 from app.core.api_errors import (
+    STANDARD_ERROR_RESPONSES,
+    application_exception_handler,
     http_exception_handler,
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from app.core.errors import ApplicationError
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.logging_config import setup_logging
+from app.core.local_api_trust import LocalApiPolicy, LocalApiTrustMiddleware
+from app.core.request_limits import (
+    MAX_REQUEST_BODY_BYTES,
+    RequestBodyLimitMiddleware,
+)
+from app.core.request_context import RequestContextMiddleware
 from app.seed import run_seeds
 
 logger = logging.getLogger(__name__)
 
 DB_PATH = str(settings.database_path)
 
-# Allowed CORS origins (configure based on environment)
-ALLOWED_ORIGINS = os.environ.get(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:5200,http://localhost:5100,"
-    "http://127.0.0.1:5200,godfin://app"
-).split(",")
+LOCAL_API_POLICY = LocalApiPolicy.from_environment()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if os.environ.get("GODFIN_TESTING") == "1":
+        app.state.lifecycle_status = "test"
         yield
         return
+
+    app.state.lifecycle_status = "starting"
+    app.state.scheduler_status = "starting"
+    app.state.job_worker_status = "starting"
 
     # Initialize structured logging
     setup_logging()
@@ -45,21 +54,72 @@ async def lifespan(app: FastAPI):
     from app.core.encryption import initialize_encryption
     initialize_encryption()
 
-    # GODFIN intentionally uses create_all + idempotent seed migrations for its
-    # local SQLite lifecycle. This makes a first launch work with an empty path
-    # and keeps packaged builds independent from a separate migration command.
+    backup_dir = os.environ.get("GODFIN_BACKUP_DIR", "./backups")
+    from app.core.startup_migrations import (
+        apply_additive_schema_updates,
+        backup_before_schema_update,
+    )
+
+    migration_backup = backup_before_schema_update(DB_PATH, backup_dir)
+    if migration_backup:
+        logger.info("Created pre-migration backup: %s", migration_backup)
+    apply_additive_schema_updates(DB_PATH)
+
+    # GODFIN intentionally uses create_all plus the ordered startup registry for
+    # its single local SQLite lifecycle. Seeds never mutate schema.
     Base.metadata.create_all(bind=engine)
+
+    # A fresh database (or a legacy database missing a newly introduced table)
+    # has nothing for the pre-create migration pass to update. Re-run the
+    # restart-safe registry after every declared table exists so indexes,
+    # precision columns, and write guards are installed before seeds or API
+    # traffic can write to them. The only backup remains the pre-create backup
+    # above; this second pass never changes that recovery point.
+    apply_additive_schema_updates(DB_PATH)
 
     # Run database seeds
     db = SessionLocal()
     try:
         run_seeds(db)
+        from app.core.startup_migrations import (
+            record_schema_revision,
+            run_post_create_migrations,
+            validate_schema_postconditions,
+        )
+
+        run_post_create_migrations(db)
+        record_schema_revision(db)
+        validate_schema_postconditions(DB_PATH)
 
         # Load persistent auth token from database
         from app.core.auth import load_token_from_db
         load_token_from_db(db)
+
+        # Reconcile a model pull that completed or was interrupted while the
+        # backend was unavailable. This also terminates a verified orphaned
+        # Ollama CLI process before a user can retry the job.
+        from app.core.local_ai import restore_download_status
+
+        restore_download_status(db)
     finally:
         db.close()
+
+    # Register durable handlers only after the schema exists, then recover
+    # expired leases and start the bounded local dispatcher. API startup stays
+    # available in a degraded state if optional background work cannot start.
+    try:
+        from app.core.background_jobs import start_background_job_worker
+        from app.core.job_handlers import register_default_job_handlers
+
+        register_default_job_handlers()
+        start_background_job_worker()
+        app.state.job_worker_status = "ready"
+    except Exception as exc:
+        app.state.job_worker_status = "degraded"
+        logger.error(
+            "Background job worker startup failed (%s)",
+            type(exc).__name__,
+        )
 
     # Initialize LLM provider from database
     try:
@@ -74,22 +134,57 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to initialize LLM provider: {e}")
 
     # Start background scheduler
-    backup_dir = './backups'
+    scheduler_recovery = None
     try:
-        from app.core.scheduler import start_scheduler
-        start_scheduler(DB_PATH, backup_dir)
-    except Exception as e:
-        logger.warning(f"Scheduler not started: {e}")
+        from app.core.scheduler import (
+            schedule_scheduler_recovery,
+            start_scheduler,
+        )
 
+        scheduler_recovery = schedule_scheduler_recovery
+        if not start_scheduler(DB_PATH, backup_dir):
+            app.state.scheduler_status = "degraded"
+            logger.warning("Backup scheduler is degraded and will retry")
+        else:
+            app.state.scheduler_status = "ready"
+    except Exception as exc:
+        app.state.scheduler_status = "degraded"
+        logger.error("Backup scheduler startup failed (%s)", type(exc).__name__)
+        if scheduler_recovery is not None:
+            try:
+                scheduler_recovery(DB_PATH, backup_dir)
+            except Exception as recovery_exc:
+                logger.error(
+                    "Backup scheduler recovery could not be scheduled (%s)",
+                    type(recovery_exc).__name__,
+                )
+
+    app.state.lifecycle_status = "ready"
     yield
 
     # Shutdown scheduler
+    app.state.lifecycle_status = "stopping"
+    try:
+        from app.core.local_ai import shutdown_model_pull
+
+        shutdown_model_pull()
+    except Exception:
+        logger.warning("Local-model download shutdown did not finish cleanly")
     try:
         from app.core.scheduler import stop_scheduler
         stop_scheduler()
     except Exception:
         pass
+    try:
+        from app.core.background_jobs import stop_background_job_worker
 
+        stop_background_job_worker()
+    except Exception:
+        logger.warning("Background job worker did not stop cleanly")
+
+    app.state.lifecycle_status = "stopped"
+    app.state.scheduler_status = "stopped"
+    app.state.job_worker_status = "stopped"
     logger.info("GODFIN shutting down")
 
 
@@ -101,15 +196,34 @@ app = FastAPI(
 )
 
 app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(ApplicationError, application_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    RequestBodyLimitMiddleware,
+    max_bytes=MAX_REQUEST_BODY_BYTES,
 )
 
-app.include_router(api_v1_router, prefix=settings.API_V1_PREFIX)
+app.add_middleware(RequestContextMiddleware)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(LOCAL_API_POLICY.cors_origins),
+    allow_origin_regex=LOCAL_API_POLICY.cors_origin_regex,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Content-Disposition", "Retry-After", "X-GODFIN-Request-ID"],
+    max_age=600,
+)
+
+# Added last so the trust boundary is the outermost HTTP middleware and rejects
+# unexpected hosts/origins before any route or CORS preflight is processed.
+app.add_middleware(LocalApiTrustMiddleware, policy=LOCAL_API_POLICY)
+
+app.include_router(
+    api_v1_router,
+    prefix=settings.API_V1_PREFIX,
+    responses=STANDARD_ERROR_RESPONSES,
+)

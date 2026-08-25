@@ -1,14 +1,22 @@
 """Runtime activation for encrypted LLM configurations."""
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.session import object_session
 
 from app.core.encryption import decrypt
-from app.core.llm_providers import create_provider
-from app.core.llm_service import set_llm_provider
+from app.core.llm_providers import (
+    LLMProviderProbeError,
+    create_provider,
+    probe_selected_model,
+)
+from app.core.llm_privacy import has_hosted_data_consent, is_local_provider
+from app.core.llm_service import StubLLMProvider, set_llm_provider
 from app.models.llm_config import LLMConfiguration
 
 logger = logging.getLogger(__name__)
@@ -16,16 +24,54 @@ logger = logging.getLogger(__name__)
 
 def provider_from_config(config: LLMConfiguration):
     """Construct a provider using plaintext only in process memory."""
-    return create_provider(
+    provider = create_provider(
         provider=config.provider,
         model=config.model,
         api_key=decrypt(config.api_key) if config.api_key else None,
         base_url=config.base_url,
     )
+    provider.is_local = is_local_provider(config.provider)
+    provider.hosted_data_consent = has_hosted_data_consent(config)
+    return provider
 
 
-def activate_configuration(config: LLMConfiguration):
+def _record_probe_metadata(config: LLMConfiguration, probe) -> None:
+    try:
+        settings = json.loads(config.settings_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        settings = {}
+    if not isinstance(settings, dict):
+        settings = {}
+    settings["last_model_probe"] = {
+        "provider": config.provider,
+        "model": config.model,
+        "tested_at": datetime.now(UTC).isoformat(),
+        "success": probe.success,
+        "error_code": probe.error_code,
+        "latency_bucket": probe.latency_bucket,
+    }
+    config.settings_json = json.dumps(settings, separators=(",", ":"), sort_keys=True)
+
+
+def activate_configuration(
+    config: LLMConfiguration,
+    *,
+    verify_selected_model: bool = True,
+):
+    if not has_hosted_data_consent(config):
+        raise ValueError(
+            "Review and accept the hosted AI data disclosure before activation"
+        )
+    if is_local_provider(config.provider):
+        from app.core.local_ai import assert_local_model_ready
+
+        assert_local_model_ready(config.model, db=object_session(config))
     provider = provider_from_config(config)
+    if verify_selected_model:
+        probe = probe_selected_model(provider)
+        _record_probe_metadata(config, probe)
+        if not probe.success:
+            raise LLMProviderProbeError(probe.error_code or "provider_error")
     set_llm_provider(provider)
     return provider
 
@@ -35,6 +81,13 @@ def initialize_active_llm(db: Session) -> Optional[LLMConfiguration]:
     if config is None:
         logger.info("No active LLM configuration found, using stub provider")
         return None
-    activate_configuration(config)
+    try:
+        activate_configuration(config, verify_selected_model=False)
+    except (ValueError, RuntimeError):
+        set_llm_provider(StubLLMProvider())
+        logger.warning(
+            "Stored LLM configuration is not currently safe to activate"
+        )
+        return config
     logger.info("LLM provider initialized: %s with model %s", config.provider, config.model)
     return config

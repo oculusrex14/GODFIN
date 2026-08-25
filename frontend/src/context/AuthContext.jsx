@@ -6,6 +6,7 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isFirstRun, setIsFirstRun] = useState(null);
+  const [pinLength, setPinLength] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -17,6 +18,7 @@ export function AuthProvider({ children }) {
       fetchAuthStatus()
         .then((data) => {
           setIsFirstRun(data.is_first_run);
+          setPinLength(data.pin_length ?? null);
           setLoading(false);
         })
         .catch(() => {
@@ -28,6 +30,7 @@ export function AuthProvider({ children }) {
             // Backend appears unreachable — default to NOT first-run (safer).
             // PinScreen will show "Enter Your PIN" with the offline shield.
             setIsFirstRun(false);
+            setPinLength(null);
             setLoading(false);
           }
         });
@@ -43,27 +46,27 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  const handleAuth = useCallback((token) => {
+  const handleAuth = useCallback((token, configuredPinLength = null) => {
     setAuthToken(token);
     setIsAuthenticated(true);
     setIsFirstRun(false);
+    if (configuredPinLength) setPinLength(configuredPinLength);
   }, []);
 
   const logout = useCallback(async () => {
+    setIsAuthenticated(false);
     try {
-      // Call backend logout endpoint to invalidate token server-side
+      // The API client clears its memory-only token before awaiting the server.
       await logoutSession();
     } catch (e) {
-      // Continue with logout even if backend call fails
+      // The renderer remains locked even if the local backend is unavailable.
       console.warn('Logout API call failed:', e);
     }
-    setAuthToken(null);
-    setIsAuthenticated(false);
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ isAuthenticated, isFirstRun, loading, handleAuth, logout }}
+      value={{ isAuthenticated, isFirstRun, pinLength, loading, handleAuth, logout }}
     >
       {children}
     </AuthContext.Provider>

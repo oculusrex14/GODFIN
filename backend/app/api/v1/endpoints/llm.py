@@ -10,16 +10,43 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.errors import IntegrationUnavailableError, InvalidOperationError
 from app.core.encryption import encrypt, decrypt
-from app.core.llm_providers import create_provider, get_available_providers
+from app.core.llm_providers import (
+    LLMProviderProbeError,
+    create_provider,
+    get_available_providers,
+    probe_selected_model,
+)
+from app.core.llm_privacy import (
+    HOSTED_DATA_CONSENT_VERSION,
+    has_hosted_data_consent,
+    is_local_provider,
+    record_hosted_data_consent,
+)
 from app.core.llm_runtime import activate_configuration
 from app.core.llm_service import set_llm_provider
-from app.api.v1.endpoints.license import enforce_feature
+from app.api.v1.entitlements import require_entitlement
 from app.models.llm_config import LLMConfiguration
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+AI_CLASSIFICATION_ENTITLEMENT = require_entitlement("ai_classification")
+
+
+def _model_probe_failure(exc: LLMProviderProbeError) -> IntegrationUnavailableError:
+    if exc.code in {"timeout", "provider_unreachable"}:
+        hint = "Check your internet connection or start the local AI service, then retry."
+    elif exc.code in {"empty_response", "no_response"}:
+        hint = "Check that the selected model is installed and available to this account."
+    else:
+        hint = "Check the model name or choose another supported model, then retry."
+    return IntegrationUnavailableError(
+        code="LLM_MODEL_PROBE_FAILED",
+        message="The selected AI model did not produce a usable test response.",
+        hint=hint,
+    )
 
 
 # ============================================================================
@@ -27,18 +54,42 @@ router = APIRouter()
 # ============================================================================
 
 class LLMConfigCreate(BaseModel):
-    provider: str = Field(..., description="Provider type")
-    auth_method: str = Field(default="openapi", description="Authentication method")
-    model: str = Field(..., description="Model identifier")
-    api_key: Optional[str] = Field(None, description="API key for OpenAPI auth")
-    base_url: Optional[str] = Field(None, description="Custom base URL")
+    provider: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        pattern=r"^[a-z0-9_-]+$",
+        description="Provider type",
+    )
+    auth_method: str = Field(
+        default="openapi",
+        min_length=1,
+        max_length=50,
+        pattern=r"^[a-z0-9_-]+$",
+        description="Authentication method",
+    )
+    model: str = Field(..., min_length=1, max_length=200, description="Model identifier")
+    api_key: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=8192,
+        description="API key for OpenAPI auth",
+    )
+    base_url: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=2048,
+        description="Custom base URL",
+    )
+    hosted_data_consent: bool = False
 
 
 class LLMConfigUpdate(BaseModel):
-    model: Optional[str] = None
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
+    model: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    api_key: Optional[str] = Field(default=None, min_length=1, max_length=8192)
+    base_url: Optional[str] = Field(default=None, min_length=1, max_length=2048)
     is_active: Optional[bool] = None
+    hosted_data_consent: Optional[bool] = None
 
 
 class LLMConfigResponse(BaseModel):
@@ -51,17 +102,34 @@ class LLMConfigResponse(BaseModel):
     base_url: Optional[str]
     is_active: bool
     has_api_key: bool
+    is_local: bool
+    hosted_data_consent: bool
+    consent_version: str
     created_at: str
     updated_at: str
 
 class TestConnectionRequest(BaseModel):
-    provider: str
-    model: str
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
+    provider: str = Field(min_length=1, max_length=50, pattern=r"^[a-z0-9_-]+$")
+    model: str = Field(min_length=1, max_length=200)
+    api_key: Optional[str] = Field(default=None, min_length=1, max_length=8192)
+    base_url: Optional[str] = Field(default=None, min_length=1, max_length=2048)
 
 
 class TestConnectionResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class LLMProviderResponse(BaseModel):
+    name: str
+    is_local: bool
+    auth_methods: list[str]
+    requires_auth: bool
+    models: dict[str, object] | list[str]
+    description: str
+
+
+class LLMActionResponse(BaseModel):
     success: bool
     message: str
 
@@ -70,7 +138,7 @@ class TestConnectionResponse(BaseModel):
 # Endpoints
 # ============================================================================
 
-@router.get("/providers")
+@router.get("/providers", response_model=dict[str, LLMProviderResponse])
 def list_providers(_user: bool = Depends(get_current_user)):
     """List all available LLM providers with their supported models."""
     return get_available_providers()
@@ -94,19 +162,32 @@ def get_llm_config(
         "base_url": config.base_url,
         "is_active": config.is_active,
         "has_api_key": bool(config.api_key),
+        "is_local": is_local_provider(config.provider),
+        "hosted_data_consent": has_hosted_data_consent(config),
+        "consent_version": HOSTED_DATA_CONSENT_VERSION,
         "created_at": config.created_at.isoformat() if config.created_at else None,
         "updated_at": config.updated_at.isoformat() if config.updated_at else None,
     }
 
 
-@router.post("/config", response_model=LLMConfigResponse)
+@router.post(
+    "/config",
+    response_model=LLMConfigResponse,
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def create_llm_config(
     request: LLMConfigCreate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Create a new LLM configuration."""
-    enforce_feature(db, "ai_classification")
+    if request.provider not in get_available_providers():
+        raise HTTPException(status_code=422, detail="Unknown AI provider")
+    if not is_local_provider(request.provider) and not request.hosted_data_consent:
+        raise HTTPException(
+            status_code=400,
+            detail="Accept the hosted AI data disclosure before saving this provider",
+        )
     # Deactivate any existing config
     db.query(LLMConfiguration).filter_by(is_active=True).update({"is_active": False})
 
@@ -122,16 +203,27 @@ def create_llm_config(
         base_url=request.base_url,
         is_active=True,
     )
+    if not is_local_provider(request.provider):
+        record_hosted_data_consent(config, True)
     db.add(config)
+
+    # Activate before commit so a broken configuration cannot replace the
+    # currently working provider while appearing active.
+    try:
+        db.flush()
+        activate_configuration(config)
+    except LLMProviderProbeError as exc:
+        db.rollback()
+        raise _model_probe_failure(exc) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail="The AI configuration could not be activated",
+        ) from exc
     db.commit()
     db.refresh(config)
-
-    # Activate the provider (decrypt key for API use)
-    try:
-        activate_configuration(config)
-        logger.info(f"Activated LLM provider: {config.provider} with model {config.model}")
-    except Exception as e:
-        logger.warning(f"Failed to activate provider: {e}")
+    logger.info("Activated LLM provider: %s with model %s", config.provider, config.model)
 
     return {
         "id": config.id,
@@ -141,12 +233,19 @@ def create_llm_config(
         "base_url": config.base_url,
         "is_active": config.is_active,
         "has_api_key": bool(config.api_key),
+        "is_local": is_local_provider(config.provider),
+        "hosted_data_consent": has_hosted_data_consent(config),
+        "consent_version": HOSTED_DATA_CONSENT_VERSION,
         "created_at": config.created_at.isoformat(),
         "updated_at": config.updated_at.isoformat(),
     }
 
 
-@router.put("/config/{config_id}", response_model=LLMConfigResponse)
+@router.put(
+    "/config/{config_id}",
+    response_model=LLMConfigResponse,
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def update_llm_config(
     config_id: str,
     request: LLMConfigUpdate,
@@ -154,7 +253,6 @@ def update_llm_config(
     _user: bool = Depends(get_current_user),
 ):
     """Update an existing LLM configuration."""
-    enforce_feature(db, "ai_classification")
     config = db.query(LLMConfiguration).filter_by(id=config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
@@ -175,15 +273,32 @@ def update_llm_config(
                 LLMConfiguration.is_active == True
             ).update({"is_active": False})
 
-    db.commit()
-    db.refresh(config)
+    if request.hosted_data_consent is not None and not is_local_provider(
+        config.provider
+    ):
+        record_hosted_data_consent(config, request.hosted_data_consent)
+    if config.is_active and not has_hosted_data_consent(config):
+        raise HTTPException(
+            status_code=400,
+            detail="Accept the hosted AI data disclosure before activation",
+        )
 
-    # Reactivate provider if config changed
+    # Reactivate before commit so invalid changes roll back atomically.
     if config.is_active:
         try:
+            db.flush()
             activate_configuration(config)
-        except Exception as e:
-            logger.warning(f"Failed to reactivate provider: {e}")
+        except LLMProviderProbeError as exc:
+            db.rollback()
+            raise _model_probe_failure(exc) from exc
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=422,
+                detail="The AI configuration could not be activated",
+            ) from exc
+    db.commit()
+    db.refresh(config)
 
     return {
         "id": config.id,
@@ -193,12 +308,15 @@ def update_llm_config(
         "base_url": config.base_url,
         "is_active": config.is_active,
         "has_api_key": bool(config.api_key),
+        "is_local": is_local_provider(config.provider),
+        "hosted_data_consent": has_hosted_data_consent(config),
+        "consent_version": HOSTED_DATA_CONSENT_VERSION,
         "created_at": config.created_at.isoformat(),
         "updated_at": config.updated_at.isoformat(),
     }
 
 
-@router.delete("/config/{config_id}")
+@router.delete("/config/{config_id}", response_model=LLMActionResponse)
 def delete_llm_config(
     config_id: str,
     db: Session = Depends(get_db),
@@ -222,14 +340,23 @@ def delete_llm_config(
     return {"success": True, "message": "Configuration deleted"}
 
 
-@router.post("/config/test", response_model=TestConnectionResponse)
+@router.post(
+    "/config/test",
+    response_model=TestConnectionResponse,
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+)
 def test_llm_connection(
     request: TestConnectionRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Test connection to an LLM provider without saving."""
-    enforce_feature(db, "ai_classification")
+    if request.provider not in get_available_providers():
+        raise InvalidOperationError(
+            code="LLM_PROVIDER_NOT_RELEASE_ACCEPTED",
+            message="That AI provider is not available in this GODFIN build.",
+            hint="Choose a provider shown in the app.",
+        )
     try:
         provider = create_provider(
             provider=request.provider,
@@ -237,22 +364,41 @@ def test_llm_connection(
             api_key=request.api_key,
             base_url=request.base_url,
         )
-        success, message = provider.test_connection()
-        return {"success": success, "message": message}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        return {"success": False, "message": f"Connection test failed: {str(e)}"}
+        probe = probe_selected_model(provider)
+        if not probe.success:
+            raise IntegrationUnavailableError(
+                code="LLM_CONNECTION_FAILED",
+                message="GODFIN could not connect to that AI provider.",
+                hint="Check the provider, model, address, and key, then try again.",
+            )
+        return {"success": True, "message": "Connection successful"}
+    except ValueError as exc:
+        raise InvalidOperationError(
+            code="LLM_CONFIGURATION_INVALID",
+            message="The AI connection settings are not valid.",
+            hint="Check the provider, model, address, and key.",
+        ) from exc
+    except IntegrationUnavailableError:
+        raise
+    except Exception as exc:
+        raise IntegrationUnavailableError(
+            code="LLM_CONNECTION_FAILED",
+            message="GODFIN could not connect to that AI provider.",
+            hint="Check the provider, model, address, and key, then try again.",
+        ) from exc
 
 
-@router.post("/config/activate/{config_id}")
+@router.post(
+    "/config/activate/{config_id}",
+    dependencies=[Depends(AI_CLASSIFICATION_ENTITLEMENT)],
+    response_model=LLMActionResponse,
+)
 def activate_llm_config(
     config_id: str,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Activate a specific LLM configuration."""
-    enforce_feature(db, "ai_classification")
     config = db.query(LLMConfiguration).filter_by(id=config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
@@ -264,13 +410,23 @@ def activate_llm_config(
     ).update({"is_active": False})
 
     config.is_active = True
-    db.commit()
-
+    if not has_hosted_data_consent(config):
+        raise HTTPException(
+            status_code=409,
+            detail="Accept the hosted AI data disclosure before activation",
+        )
     # Activate provider
     try:
         activate_configuration(config)
-        logger.info(f"Activated LLM provider: {config.provider}")
-        return {"success": True, "message": "Configuration activated"}
-    except Exception as e:
-        logger.error(f"Failed to activate provider: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to activate: {str(e)}")
+    except LLMProviderProbeError as exc:
+        db.rollback()
+        raise _model_probe_failure(exc) from exc
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail="The AI configuration could not be activated",
+        ) from exc
+    db.commit()
+    logger.info("Activated LLM provider: %s", config.provider)
+    return {"success": True, "message": "Configuration activated"}

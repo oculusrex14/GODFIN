@@ -8,14 +8,25 @@ import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import List, Optional, Tuple
 from difflib import SequenceMatcher
 
 from sqlalchemy.orm import Session
 
+from app.core.money import money_decimal
 from app.models.transaction import Transaction
+from app.core.transaction_semantics import (
+    TransactionSemantic,
+    VALID_SEMANTICS,
+    infer_semantic_type,
+)
 from app.models.account import Account
 from app.core.statement_parser import ParsedTransaction, ParsedStatement, StatementTransaction, StatementMetadata
+from app.core.transaction_enrichment import (
+    apply_transaction_envelope,
+    build_transaction_envelope,
+)
 
 
 @dataclass
@@ -210,7 +221,9 @@ class ReconciliationService:
                 return 1.0, ['Exact reference number match']
 
         # Fast-path: exact amount + same date + same type = almost certain duplicate
-        exact_amount = (float(parsed_txn.amount) == float(existing.amount))
+        exact_amount = (
+            money_decimal(parsed_txn.amount) == money_decimal(existing.amount)
+        )
         same_type = (parsed_txn.type == existing.type)
         date_diff = abs((parsed_txn.date - existing.date).days)
 
@@ -253,18 +266,20 @@ class ReconciliationService:
         return total_score, reasons
 
     @staticmethod
-    def _match_amount(parsed_amount: float, existing_amount: float) -> float:
+    def _match_amount(parsed_amount: object, existing_amount: object) -> float:
         """Calculate amount match score"""
-        if parsed_amount == existing_amount:
+        parsed = money_decimal(parsed_amount)
+        existing = money_decimal(existing_amount)
+        if parsed == existing:
             return 1.0
 
-        # Allow small tolerance for floating point differences
-        diff_pct = abs(parsed_amount - existing_amount) / max(parsed_amount, existing_amount, 1)
-        if diff_pct <= ReconciliationService.AMOUNT_TOLERANCE:
+        denominator = max(abs(parsed), abs(existing), Decimal("1.00"))
+        diff_pct = abs(parsed - existing) / denominator
+        if diff_pct <= Decimal(str(ReconciliationService.AMOUNT_TOLERANCE)):
             return 0.95
 
         # Partial score for close amounts
-        if diff_pct <= 0.05:  # Within 5%
+        if diff_pct <= Decimal("0.05"):  # Within 5%
             return 0.7
 
         return 0.0
@@ -324,14 +339,27 @@ class ReconciliationService:
         merchant_raw = getattr(parsed_txn, 'merchant_name', None) or parsed_txn.description
         instrument = getattr(parsed_txn, 'instrument', None) or 'statement'
         is_transfer = getattr(parsed_txn, 'is_transfer', False)
-        is_income = getattr(parsed_txn, 'is_income', False) or parsed_txn.type == 'credit'
+        semantic_type = getattr(parsed_txn, 'semantic_type', None)
+        if semantic_type not in VALID_SEMANTICS or semantic_type == TransactionSemantic.UNKNOWN.value:
+            if getattr(parsed_txn, 'is_income', False):
+                semantic_type = TransactionSemantic.INCOME.value
+            else:
+                semantic_type = infer_semantic_type(
+                    transaction_type=parsed_txn.type,
+                    category=getattr(parsed_txn, 'category_hint', None),
+                    subcategory=getattr(parsed_txn, 'subcategory_hint', None),
+                    is_transfer=is_transfer,
+                    text_parts=(parsed_txn.description,),
+                )
+        is_income = semantic_type == TransactionSemantic.INCOME.value
+        is_transfer = semantic_type == TransactionSemantic.INTERNAL_TRANSFER.value
         vpa_handle = getattr(parsed_txn, 'vpa_handle', None)
         upi_ref = getattr(parsed_txn, 'upi_ref_number', None) or parsed_txn.reference
 
-        return Transaction(
+        transaction = Transaction(
             id=str(uuid.uuid4()),
             date=parsed_txn.date,
-            raw_text=f"Statement: {parsed_txn.description} {parsed_txn.amount}",
+            raw_text=parsed_txn.description,
             merchant_raw=merchant_raw,
             merchant_normalized=merchant_raw.upper().strip() if merchant_raw else parsed_txn.description.upper().strip(),
             amount=parsed_txn.amount,
@@ -341,12 +369,43 @@ class ReconciliationService:
             source=source,
             is_income=is_income,
             is_transfer=is_transfer,
+            semantic_type=semantic_type,
             vpa_handle=vpa_handle,
             upi_ref_number=upi_ref,
-            confidence=0.8,
-            classification_source='statement',
+            confidence=0.0,
+            classification_source='unclassified',
             checksum_source=checksum,
+            reconciled=True,
         )
+        envelope = build_transaction_envelope(
+            raw_text=parsed_txn.description,
+            source_type=source,
+            source_account_id=account_id,
+            source_bank=getattr(parsed_txn, "source_bank", None),
+            source_format_version=getattr(
+                parsed_txn, "source_format_version", None
+            ),
+            booking_date=parsed_txn.date,
+            value_date=getattr(parsed_txn, "value_date", None),
+            amount=parsed_txn.amount,
+            currency=getattr(parsed_txn, "currency", "INR") or "INR",
+            direction=parsed_txn.type,
+            running_balance=getattr(parsed_txn, "balance", None),
+            instrument=instrument,
+            merchant_raw=merchant_raw,
+            merchant_candidate=merchant_raw,
+            counterparty_candidate=getattr(
+                parsed_txn, "counterparty_candidate", None
+            ),
+            vpa=vpa_handle,
+            reference=upi_ref,
+            coarse_semantic=semantic_type,
+            category=getattr(parsed_txn, "category_hint", None),
+            subcategory=getattr(parsed_txn, "subcategory_hint", None),
+            parser_version=getattr(parsed_txn, "parser_version", None),
+        )
+        apply_transaction_envelope(transaction, envelope)
+        return transaction
 
     @staticmethod
     def detect_income_sources(
@@ -354,17 +413,15 @@ class ReconciliationService:
         statement: ParsedStatement,
     ) -> List[ParsedTransaction]:
         """
-        Detect income transactions from statement credits.
+        Detect only verified income transactions from statement credits.
 
-        ALL credit transactions are treated as income. Keywords are used
-        to assign subcategory hints for more specific classification.
+        Refunds, cashback, reimbursements, reversals, transfers and generic
+        credits remain non-income and available for explicit user review.
         """
         subcategory_keywords = {
             'Salary': ['SALARY', 'WAGES'],
-            'Refund': ['REFUND', 'CRV POS', 'REVERSAL', 'MANDATE REFUND'],
-            'Cashback': ['CASHBACK', 'CASH BACK'],
             'Interest': ['INTEREST', 'INT DIV', 'DIVIDEND'],
-            'Other Income': ['REIMBURSEMENT', 'BONUS', 'INCENTIVE'],
+            'Other Income': ['BONUS', 'INCENTIVE'],
         }
 
         income_transactions = []
@@ -373,8 +430,34 @@ class ReconciliationService:
             if txn.type != 'credit':
                 continue
 
-            txn.category_hint = 'INCOME'
             desc_upper = txn.description.upper()
+
+            semantic_type = getattr(txn, 'semantic_type', None)
+            if semantic_type not in VALID_SEMANTICS or semantic_type == TransactionSemantic.UNKNOWN.value:
+                if getattr(txn, 'is_income', False):
+                    semantic_type = TransactionSemantic.INCOME.value
+                else:
+                    semantic_type = infer_semantic_type(
+                        transaction_type=txn.type,
+                        category=txn.category_hint,
+                        subcategory=txn.subcategory_hint,
+                        is_transfer=getattr(txn, 'is_transfer', False),
+                        text_parts=(txn.description,),
+                    )
+            txn.semantic_type = semantic_type
+            txn.is_income = semantic_type == TransactionSemantic.INCOME.value
+            txn.is_transfer = semantic_type == TransactionSemantic.INTERNAL_TRANSFER.value
+
+            if not txn.is_income:
+                if semantic_type == TransactionSemantic.REFUND.value:
+                    txn.category_hint = 'INCOME'
+                    txn.subcategory_hint = 'Refund'
+                elif semantic_type == TransactionSemantic.CASHBACK.value:
+                    txn.category_hint = 'INCOME'
+                    txn.subcategory_hint = 'Cashback'
+                continue
+
+            txn.category_hint = 'INCOME'
 
             # Try to assign a subcategory hint based on keywords
             matched_sub = None
@@ -432,6 +515,19 @@ def import_new_transactions(
     Creates Transaction records and adds them to the database.
     Skips duplicates using checksum deduplication.
     """
+    from app.core.audit import assert_period_writable
+
+    # Validate the complete batch before adding anything. A mixed statement
+    # must not partially import writable months while silently omitting a
+    # finalized one.
+    checked_periods: set[tuple[int, int]] = set()
+    for parsed_txn in transactions:
+        period = (parsed_txn.date.year, parsed_txn.date.month)
+        if period in checked_periods:
+            continue
+        assert_period_writable(db, parsed_txn.date)
+        checked_periods.add(period)
+
     imported = []
     for parsed_txn in transactions:
         txn = ReconciliationService.create_transaction_from_parsed(
@@ -456,5 +552,5 @@ def import_new_transactions(
             continue
         db.add(txn)
         imported.append(txn)
-    db.commit()
+    db.flush()
     return imported

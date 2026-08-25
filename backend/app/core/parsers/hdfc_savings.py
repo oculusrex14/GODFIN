@@ -6,15 +6,17 @@ import re
 from datetime import date, datetime
 from typing import Optional
 
-import pdfplumber
 from openpyxl import load_workbook
 
 from app.core.parsers.base import StatementParserPlugin
+from app.core.parsers.certified_savings_pdf import parse_hdfc_savings_pdf
+from app.core.pdf_extraction import PDFPLUMBER_ENGINE, PdfExtractionError
 from app.core.statement_parser import (
     StatementParseResult,
-    _finalize_savings_txn,
-    _parse_hdfc_savings_statement,
+    _append_strict_savings_txn,
+    _parse_amount,
     _parse_statement_date,
+    _validate_savings_controls,
     parse_statement_xls,
 )
 
@@ -22,28 +24,42 @@ logger = logging.getLogger(__name__)
 
 
 def _detect(text: str) -> bool:
-    normalized = text.lower()
-    return "savings account" in normalized or "statement of account" in normalized
+    normalized = re.sub(r"[^a-z0-9]+", "", text.lower())
+    return all(
+        marker in normalized
+        for marker in (
+            "hdfcbank",
+            "statementofaccount",
+            "narration",
+            "withdrawalamt",
+            "depositamt",
+            "closingbalance",
+        )
+    )
 
 
 def _parse_pdf(
     contents: bytes,
     _file_format: str,
     password: Optional[str],
+    account_last4: Optional[str] = None,
 ) -> StatementParseResult:
-    result = StatementParseResult(statement_type="hdfc_savings")
+    result = StatementParseResult(
+        statement_type="hdfc_savings",
+        parser_profile="hdfc_savings",
+        recognized=True,
+    )
     try:
-        pdf = pdfplumber.open(io.BytesIO(contents), password=password)
-    except Exception as exc:
-        result.errors.append(f"Failed to open PDF: {exc}")
-        return result
-
-    try:
-        _parse_hdfc_savings_statement(pdf, result)
-    except Exception as exc:
-        result.errors.append(f"Parse error: {exc}")
-    finally:
-        pdf.close()
+        with PDFPLUMBER_ENGINE.open_document(contents, password) as document:
+            parse_hdfc_savings_pdf(document, result, account_last4)
+    except PdfExtractionError:
+        result.errors.append(
+            "The PDF could not be opened. Check the file and its password, then try again."
+        )
+    except Exception:
+        result.errors.append(
+            "The PDF layout could not be read as a certified HDFC savings statement."
+        )
     return result
 
 
@@ -60,15 +76,14 @@ def _amount_value(value: object) -> Optional[float]:
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    cleaned = re.sub(r"[^0-9.\-]", "", str(value))
-    try:
-        return float(cleaned) if cleaned else None
-    except ValueError:
-        return None
+    return _parse_amount(str(value))
 
 
 def _parse_xlsx(contents: bytes) -> StatementParseResult:
-    result = StatementParseResult(statement_type="hdfc_savings")
+    result = StatementParseResult(
+        statement_type="hdfc_savings",
+        parser_profile="hdfc_savings",
+    )
     try:
         workbook = load_workbook(
             io.BytesIO(contents),
@@ -77,13 +92,34 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
         )
         sheet = workbook.active
         rows = list(sheet.iter_rows(values_only=True))
-    except Exception as exc:
-        result.errors.append(f"Failed to open XLSX: {exc}")
+    except Exception:
+        result.errors.append(
+            "The XLSX file could not be opened. Check that it is a valid bank statement."
+        )
         return result
 
     header_index: Optional[int] = None
     columns: dict[str, int] = {}
     try:
+        metadata_text = " ".join(
+            str(value or "")
+            for row in rows[:30]
+            for value in row
+        ).upper()
+        if "HDFC" not in metadata_text:
+            result.errors.append("HDFC bank fingerprint was not found in XLSX metadata")
+            return result
+
+        account_match = re.search(
+            r"ACCOUNT\s+NO\.?\s*[:\-]?\s*([X*\d ]{4,})",
+            metadata_text,
+        )
+        if account_match:
+            digits = re.sub(r"\D", "", account_match.group(1))
+            if len(digits) >= 4:
+                result.account_last4 = digits[-4:]
+                result.available_account_last4s = [result.account_last4]
+
         for index, row in enumerate(rows[:30]):
             values = [str(value or "").strip() for value in row]
             joined = " ".join(values)
@@ -121,17 +157,14 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
             result.errors.append("Could not find header row in XLSX")
             return result
 
-        defaults = {
-            "date": 0,
-            "narration": 1,
-            "ref": 2,
-            "value_date": 3,
-            "withdrawal": 4,
-            "deposit": 5,
-            "balance": 6,
-        }
-        for key, value in defaults.items():
-            columns.setdefault(key, value)
+        required_columns = {"date", "narration", "withdrawal", "deposit", "balance"}
+        missing_columns = sorted(required_columns - set(columns))
+        if missing_columns:
+            result.errors.append(
+                "Missing required XLSX columns: " + ", ".join(missing_columns),
+            )
+            return result
+        result.recognized = True
 
         for row in rows[header_index + 1 :]:
             first = str(row[0] or "").strip() if row else ""
@@ -158,7 +191,7 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
                 position = columns[name]
                 return row[position] if position < len(row) else None
 
-            _finalize_savings_txn(
+            _append_strict_savings_txn(
                 {
                     "date": transaction_date,
                     "narration": narration,
@@ -169,12 +202,15 @@ def _parse_xlsx(contents: bytes) -> StatementParseResult:
                     "balance": _amount_value(cell("balance")),
                 },
                 result.transactions,
+                result.errors,
+                row_label=f"XLSX row {header_index + 2 + len(result.transactions)}",
             )
     finally:
         workbook.close()
 
-    if not result.transactions:
+    if not result.transactions and not result.errors:
         result.errors.append("No transactions found in XLSX")
+    _validate_savings_controls(result)
     logger.info("XLSX parser: found %s transactions", len(result.transactions))
     return result
 
@@ -183,9 +219,10 @@ def _parse(
     contents: bytes,
     file_format: str,
     password: Optional[str],
+    account_last4: Optional[str] = None,
 ) -> StatementParseResult:
     if file_format == "pdf":
-        return _parse_pdf(contents, file_format, password)
+        return _parse_pdf(contents, file_format, password, account_last4)
     if file_format == "xls":
         return parse_statement_xls(contents)
     if file_format == "xlsx":

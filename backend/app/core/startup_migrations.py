@@ -1,0 +1,2637 @@
+"""Small, additive migration guard for GODFIN's local SQLite lifecycle."""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from pathlib import Path
+from typing import Callable, Optional
+
+from sqlalchemy.orm import Session
+
+from app.core.backup import create_backup
+from app.core.money import (
+    FX_RATE_SCALE,
+    MAX_EXACT_FX_RATE,
+    MAX_NET_WORTH_MONEY_MINOR,
+    MAX_QUANTITY,
+    MAX_UNIT_PRICE,
+    MONEY_SCALE,
+    QUANTITY_SCALE,
+    UNIT_PRICE_SCALE,
+)
+from app.models.app_setting import AppSetting
+from app.models.goal import Goal
+from app.models.goal_contribution import GoalContribution
+
+SCHEMA_REVISION_KEY = "schema_revision"
+CURRENT_SCHEMA_REVISION = 22
+
+
+class SchemaMigrationError(RuntimeError):
+    """Raised when the local schema cannot be upgraded or trusted safely."""
+
+
+@dataclass(frozen=True)
+class SchemaMigration:
+    """One ordered, restart-safe compatibility revision."""
+
+    revision: int
+    name: str
+    apply: Callable[[sqlite3.Connection], None]
+    validate: Callable[[sqlite3.Connection], None]
+
+_RECURRING_PATTERN_COLUMNS = {
+    "confidence": "REAL NOT NULL DEFAULT 0",
+    "evidence_count": "INTEGER NOT NULL DEFAULT 0",
+    "interval_variability": "REAL",
+    "amount_variability": "REAL",
+    "detection_status": "TEXT NOT NULL DEFAULT 'active'",
+}
+
+_TRANSACTION_COLUMNS = {
+    "semantic_type": "TEXT NOT NULL DEFAULT 'unknown'",
+}
+
+_EXACT_MONEY_SHADOWS = {
+    "transactions": {"amount", "raw_text", "account_id"},
+    "transaction_splits": {"amount", "parent_transaction_id", "category"},
+    "transfer_matches": {
+        "amount",
+        "debit_transaction_id",
+        "credit_transaction_id",
+    },
+}
+_MAX_MONEY_MINOR = 100000000000000000
+
+# Each field definition is (minimum minor units, maximum minor units, nullable).
+# Table signatures keep the migration from acting on intentionally minimal test
+# or third-party tables that happen to share a generic column name.
+_PRODUCT_EXACT_MONEY_SHADOWS = {
+    "goals": (
+        {"id", "name", "deadline_date", "target_amount", "current_saved"},
+        {
+            "target_amount": (1, _MAX_MONEY_MINOR, False),
+            "current_saved": (0, _MAX_MONEY_MINOR, False),
+            "minimum_flexible_floor": (0, _MAX_MONEY_MINOR, False),
+        },
+    ),
+    "goal_contributions": (
+        {"id", "goal_id", "amount", "entry_type", "source_type"},
+        {"amount": (-_MAX_MONEY_MINOR, _MAX_MONEY_MINOR, False)},
+    ),
+    "goal_contribution_suggestions": (
+        {"id", "transaction_id", "amount", "deposit_type", "evidence"},
+        {"amount": (1, _MAX_MONEY_MINOR, False)},
+    ),
+    "income_sources": (
+        {"id", "source_name", "expected_amount", "frequency"},
+        {
+            "expected_amount": (1, _MAX_MONEY_MINOR, True),
+            "last_detected_amount": (1, _MAX_MONEY_MINOR, True),
+        },
+    ),
+    "subscriptions": (
+        {"id", "name", "amount", "currency", "frequency"},
+        {"amount": (1, _MAX_MONEY_MINOR, False)},
+    ),
+    "recurring_patterns": (
+        {"id", "merchant_normalized", "avg_amount", "frequency"},
+        {
+            "avg_amount": (1, _MAX_MONEY_MINOR, False),
+            "amount_stddev": (0, _MAX_MONEY_MINOR, True),
+        },
+    ),
+    "subscription_suggestions": (
+        {"id", "recurring_pattern_id", "merchant", "avg_amount", "frequency"},
+        {"avg_amount": (1, _MAX_MONEY_MINOR, False)},
+    ),
+    "monthly_aggregates": (
+        {
+            "id",
+            "month",
+            "total_spend",
+            "total_income",
+            "fixed_total",
+            "semi_flexible_total",
+            "flexible_total",
+            "transfer_total",
+            "recurring_total",
+        },
+        {
+            "total_spend": (0, _MAX_MONEY_MINOR, False),
+            "total_income": (0, _MAX_MONEY_MINOR, False),
+            "fixed_total": (0, _MAX_MONEY_MINOR, False),
+            "semi_flexible_total": (0, _MAX_MONEY_MINOR, False),
+            "flexible_total": (0, _MAX_MONEY_MINOR, False),
+            "transfer_total": (0, _MAX_MONEY_MINOR, False),
+            "recurring_total": (0, _MAX_MONEY_MINOR, False),
+        },
+    ),
+}
+
+# Each precision field is
+# (exact column, scale, minimum units, maximum units, nullable, reject sub-unit).
+# Net-worth quantities and market/rate measurements use documented half-up
+# normalization at their field scale. Currency totals reject ambiguous sub-cent
+# history, matching the ledger migration policy.
+_PRECISION_SHADOWS = {
+    "subscriptions": (
+        {
+            "id",
+            "name",
+            "amount",
+            "currency",
+            "frequency",
+            "fx_rate_to_inr",
+        },
+        {
+            "fx_rate_to_inr": (
+                "fx_rate_to_inr_units",
+                FX_RATE_SCALE,
+                1,
+                int(MAX_EXACT_FX_RATE * FX_RATE_SCALE),
+                True,
+                False,
+            ),
+        },
+    ),
+    "net_worth_items": (
+        {
+            "id",
+            "name",
+            "item_type",
+            "asset_class",
+            "valuation_mode",
+            "quantity",
+            "manual_value",
+            "exchange_rate_to_base",
+            "currency",
+        },
+        {
+            "quantity": (
+                "quantity_units",
+                QUANTITY_SCALE,
+                1,
+                int(MAX_QUANTITY * QUANTITY_SCALE),
+                False,
+                False,
+            ),
+            "manual_value": (
+                "manual_value_minor",
+                MONEY_SCALE,
+                0,
+                MAX_NET_WORTH_MONEY_MINOR,
+                True,
+                True,
+            ),
+            "exchange_rate_to_base": (
+                "exchange_rate_to_base_units",
+                FX_RATE_SCALE,
+                1,
+                int(MAX_EXACT_FX_RATE * FX_RATE_SCALE),
+                False,
+                False,
+            ),
+        },
+    ),
+    "net_worth_quotes": (
+        {
+            "id",
+            "item_id",
+            "unit_price",
+            "quote_currency",
+            "exchange_rate_to_base",
+            "total_value_base",
+            "base_currency",
+        },
+        {
+            "unit_price": (
+                "unit_price_units",
+                UNIT_PRICE_SCALE,
+                1,
+                int(MAX_UNIT_PRICE * UNIT_PRICE_SCALE),
+                False,
+                False,
+            ),
+            "exchange_rate_to_base": (
+                "exchange_rate_to_base_units",
+                FX_RATE_SCALE,
+                1,
+                int(MAX_EXACT_FX_RATE * FX_RATE_SCALE),
+                False,
+                False,
+            ),
+            "total_value_base": (
+                "total_value_base_minor",
+                MONEY_SCALE,
+                0,
+                MAX_NET_WORTH_MONEY_MINOR,
+                False,
+                True,
+            ),
+        },
+    ),
+}
+
+_INCOME_SOURCE_COLUMNS = {
+    "next_expected_date": "DATE",
+    "enforce_current_month": "BOOLEAN NOT NULL DEFAULT 0",
+}
+
+_SUBSCRIPTION_BASE_COLUMNS = {
+    "currency": "VARCHAR(3) NOT NULL DEFAULT 'INR'",
+}
+
+_SUBSCRIPTION_FX_COLUMNS = {
+    "fx_rate_to_inr": "NUMERIC",
+    "fx_rate_source": "TEXT",
+    "fx_rate_source_url": "TEXT",
+    "fx_rate_as_of": "DATE",
+    "fx_rate_fetched_at": "DATETIME",
+}
+
+_NET_WORTH_ITEM_FX_COLUMNS = {
+    "fx_source_currency": "TEXT",
+    "fx_base_currency": "TEXT",
+    "fx_rate_source": "TEXT",
+    "fx_rate_source_url": "TEXT",
+    "fx_rate_as_of": "DATE",
+    "fx_rate_fetched_at": "DATETIME",
+}
+
+_NET_WORTH_QUOTE_FX_COLUMNS = {
+    "fx_rate_source": "TEXT",
+    "fx_rate_source_url": "TEXT",
+    "fx_rate_as_of": "DATE",
+    "fx_rate_fetched_at": "DATETIME",
+}
+
+_FINANCIAL_GUARDS = {
+    "monthly_aggregates": (
+        {
+            "month",
+            "total_spend",
+            "total_income",
+            "savings_rate",
+            "fixed_total",
+            "semi_flexible_total",
+            "flexible_total",
+            "transfer_total",
+            "recurring_total",
+            "transaction_count",
+            "is_finalized",
+        },
+        "length(NEW.month) = 7 "
+        "AND NEW.month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' "
+        "AND CAST(substr(NEW.month, 1, 4) AS INTEGER) BETWEEN 2000 AND 9999 "
+        "AND CAST(substr(NEW.month, 6, 2) AS INTEGER) BETWEEN 1 AND 12 "
+        "AND typeof(NEW.total_spend) IN ('integer', 'real') "
+        "AND NEW.total_spend >= 0 AND NEW.total_spend <= 1000000000000000 "
+        "AND typeof(NEW.total_income) IN ('integer', 'real') "
+        "AND NEW.total_income >= 0 AND NEW.total_income <= 1000000000000000 "
+        "AND typeof(NEW.fixed_total) IN ('integer', 'real') "
+        "AND NEW.fixed_total >= 0 AND NEW.fixed_total <= 1000000000000000 "
+        "AND typeof(NEW.semi_flexible_total) IN ('integer', 'real') "
+        "AND NEW.semi_flexible_total >= 0 "
+        "AND NEW.semi_flexible_total <= 1000000000000000 "
+        "AND typeof(NEW.flexible_total) IN ('integer', 'real') "
+        "AND NEW.flexible_total >= 0 "
+        "AND NEW.flexible_total <= 1000000000000000 "
+        "AND typeof(NEW.transfer_total) IN ('integer', 'real') "
+        "AND NEW.transfer_total >= 0 "
+        "AND NEW.transfer_total <= 1000000000000000 "
+        "AND typeof(NEW.recurring_total) IN ('integer', 'real') "
+        "AND NEW.recurring_total >= 0 "
+        "AND NEW.recurring_total <= 1000000000000000 "
+        "AND (NEW.savings_rate IS NULL OR "
+        "(typeof(NEW.savings_rate) IN ('integer', 'real') "
+        "AND NEW.savings_rate >= -1000000 AND NEW.savings_rate <= 100)) "
+        "AND typeof(NEW.transaction_count) = 'integer' "
+        "AND NEW.transaction_count >= 0 "
+        "AND NEW.is_finalized IN (0, 1)",
+    ),
+    "recurring_patterns": (
+        {
+            "avg_amount",
+            "amount_stddev",
+            "frequency",
+            "avg_interval_days",
+            "times_detected",
+            "confidence",
+            "evidence_count",
+            "interval_variability",
+            "amount_variability",
+            "detection_status",
+            "is_active",
+        },
+        "typeof(NEW.avg_amount) IN ('integer', 'real') "
+        "AND NEW.avg_amount > 0 AND NEW.avg_amount <= 1000000000000000 "
+        "AND (NEW.amount_stddev IS NULL OR "
+        "(typeof(NEW.amount_stddev) IN ('integer', 'real') "
+        "AND NEW.amount_stddev >= 0)) "
+        "AND NEW.frequency IN ('monthly', 'quarterly', 'annual') "
+        "AND (NEW.avg_interval_days IS NULL OR "
+        "(typeof(NEW.avg_interval_days) = 'integer' "
+        "AND NEW.avg_interval_days > 0)) "
+        "AND typeof(NEW.times_detected) = 'integer' "
+        "AND NEW.times_detected >= 2 "
+        "AND typeof(NEW.confidence) IN ('integer', 'real') "
+        "AND NEW.confidence >= 0 AND NEW.confidence <= 1 "
+        "AND typeof(NEW.evidence_count) = 'integer' "
+        "AND NEW.evidence_count >= 0 "
+        "AND (NEW.interval_variability IS NULL OR "
+        "(typeof(NEW.interval_variability) IN ('integer', 'real') "
+        "AND NEW.interval_variability >= 0)) "
+        "AND (NEW.amount_variability IS NULL OR "
+        "(typeof(NEW.amount_variability) IN ('integer', 'real') "
+        "AND NEW.amount_variability >= 0)) "
+        "AND NEW.detection_status IN ('active', 'candidate', 'retired') "
+        "AND NEW.is_active IN (0, 1) "
+        "AND ((NEW.detection_status = 'active' AND NEW.is_active = 1) OR "
+        "(NEW.detection_status IN ('candidate', 'retired') "
+        "AND NEW.is_active = 0))",
+    ),
+    "subscription_suggestions": (
+        {
+            "avg_amount",
+            "frequency",
+            "status",
+            "snoozed_until",
+            "confirmed_subscription_id",
+        },
+        "typeof(NEW.avg_amount) IN ('integer', 'real') "
+        "AND NEW.avg_amount > 0 AND NEW.avg_amount <= 1000000000000000 "
+        "AND NEW.frequency IN ('monthly', 'quarterly', 'annual') "
+        "AND NEW.status IN ('pending', 'snoozed', 'ignored', 'confirmed') "
+        "AND (NEW.status != 'snoozed' OR NEW.snoozed_until IS NOT NULL)",
+    ),
+    "subscriptions": (
+        {
+            "amount",
+            "currency",
+            "frequency",
+            "fx_rate_to_inr",
+            "fx_rate_source",
+            "fx_rate_source_url",
+            "fx_rate_as_of",
+            "fx_rate_fetched_at",
+        },
+        "typeof(NEW.amount) IN ('integer', 'real') "
+        "AND NEW.amount > 0 AND NEW.amount <= 1000000000000000 "
+        "AND NEW.currency IN ('INR', 'USD', 'EUR', 'GBP') "
+        "AND NEW.frequency IN ('monthly', 'quarterly', 'annual') "
+        "AND ((NEW.fx_rate_to_inr IS NULL "
+        "AND NEW.fx_rate_source IS NULL "
+        "AND NEW.fx_rate_source_url IS NULL "
+        "AND NEW.fx_rate_as_of IS NULL "
+        "AND NEW.fx_rate_fetched_at IS NULL) OR "
+        "(typeof(NEW.fx_rate_to_inr) IN ('integer', 'real') "
+        "AND NEW.fx_rate_to_inr > 0 "
+        "AND NEW.fx_rate_to_inr <= 1000000000 "
+        "AND length(NEW.fx_rate_source) > 0 "
+        "AND length(NEW.fx_rate_source_url) > 0 "
+        "AND NEW.fx_rate_as_of IS NOT NULL "
+        "AND NEW.fx_rate_fetched_at IS NOT NULL))",
+    ),
+    "income_sources": (
+        {"expected_amount", "frequency"},
+        "(NEW.expected_amount IS NULL OR "
+        "(typeof(NEW.expected_amount) IN ('integer', 'real') "
+        "AND NEW.expected_amount > 0 "
+        "AND NEW.expected_amount <= 1000000000000000)) "
+        "AND NEW.frequency IN ('monthly', 'quarterly', 'annual', "
+        "'one_time', 'biweekly', 'irregular')",
+    ),
+    "goals": (
+        {
+            "target_amount",
+            "current_saved",
+            "annual_return_rate",
+            "minimum_flexible_floor",
+            "pressure_level",
+        },
+        "typeof(NEW.target_amount) IN ('integer', 'real') "
+        "AND NEW.target_amount > 0 "
+        "AND NEW.target_amount <= 1000000000000000 "
+        "AND typeof(NEW.current_saved) IN ('integer', 'real') "
+        "AND NEW.current_saved >= 0 "
+        "AND NEW.current_saved <= 1000000000000000 "
+        "AND typeof(NEW.annual_return_rate) IN ('integer', 'real') "
+        "AND NEW.annual_return_rate >= 0 AND NEW.annual_return_rate <= 0.5 "
+        "AND typeof(NEW.minimum_flexible_floor) IN ('integer', 'real') "
+        "AND NEW.minimum_flexible_floor >= 0 "
+        "AND NEW.minimum_flexible_floor <= 1000000000000000 "
+        "AND NEW.pressure_level IN ('minimal', 'moderate', 'aggressive')",
+    ),
+    "goal_contributions": (
+        {"amount", "entry_type"},
+        "typeof(NEW.amount) IN ('integer', 'real') "
+        "AND NEW.amount >= -1000000000000000 "
+        "AND NEW.amount <= 1000000000000000 "
+        "AND ((NEW.entry_type = 'deposit' AND NEW.amount > 0) "
+        "OR (NEW.entry_type = 'withdrawal' AND NEW.amount < 0))",
+    ),
+    "net_worth_items": (
+        {
+            "item_type",
+            "asset_class",
+            "valuation_mode",
+            "quantity",
+            "manual_value",
+            "exchange_rate_to_base",
+            "currency",
+            "fx_source_currency",
+            "fx_base_currency",
+            "fx_rate_source",
+            "fx_rate_source_url",
+            "fx_rate_as_of",
+            "fx_rate_fetched_at",
+        },
+        "NEW.item_type IN ('asset', 'liability') "
+        "AND NEW.asset_class IN ('cash', 'stock', 'etf', 'mutual_fund', "
+        "'crypto', 'bond', 'metal', 'property', 'land', 'gem', "
+        "'private_asset', 'debt', 'other') "
+        "AND NEW.valuation_mode IN ('manual', 'market') "
+        "AND typeof(NEW.quantity) IN ('integer', 'real') "
+        "AND NEW.quantity > 0 AND NEW.quantity <= 1000000000000000 "
+        "AND (NEW.manual_value IS NULL OR "
+        "(typeof(NEW.manual_value) IN ('integer', 'real') "
+        "AND NEW.manual_value >= 0 "
+        "AND NEW.manual_value <= 1000000000000000)) "
+        "AND typeof(NEW.exchange_rate_to_base) IN ('integer', 'real') "
+        "AND NEW.exchange_rate_to_base > 0 "
+        "AND NEW.exchange_rate_to_base <= 1000000000 "
+        "AND length(NEW.currency) = 3 "
+        "AND NEW.currency = upper(NEW.currency) "
+        "AND ((NEW.fx_source_currency IS NULL "
+        "AND NEW.fx_base_currency IS NULL "
+        "AND NEW.fx_rate_source IS NULL "
+        "AND NEW.fx_rate_source_url IS NULL "
+        "AND NEW.fx_rate_as_of IS NULL "
+        "AND NEW.fx_rate_fetched_at IS NULL) OR "
+        "(length(NEW.fx_source_currency) = 3 "
+        "AND NEW.fx_source_currency = upper(NEW.fx_source_currency) "
+        "AND length(NEW.fx_base_currency) = 3 "
+        "AND NEW.fx_base_currency = upper(NEW.fx_base_currency) "
+        "AND length(NEW.fx_rate_source) > 0 "
+        "AND length(NEW.fx_rate_source_url) > 0 "
+        "AND NEW.fx_rate_as_of IS NOT NULL "
+        "AND NEW.fx_rate_fetched_at IS NOT NULL))",
+    ),
+    "net_worth_quotes": (
+        {
+            "unit_price",
+            "quote_currency",
+            "exchange_rate_to_base",
+            "total_value_base",
+            "base_currency",
+            "fx_rate_source",
+            "fx_rate_source_url",
+            "fx_rate_as_of",
+            "fx_rate_fetched_at",
+        },
+        "typeof(NEW.unit_price) IN ('integer', 'real') "
+        "AND NEW.unit_price > 0 AND NEW.unit_price <= 1000000000000000 "
+        "AND typeof(NEW.exchange_rate_to_base) IN ('integer', 'real') "
+        "AND NEW.exchange_rate_to_base > 0 "
+        "AND NEW.exchange_rate_to_base <= 1000000000 "
+        "AND typeof(NEW.total_value_base) IN ('integer', 'real') "
+        "AND NEW.total_value_base >= 0 "
+        "AND NEW.total_value_base <= 1000000000000000 "
+        "AND length(NEW.quote_currency) = 3 "
+        "AND NEW.quote_currency = upper(NEW.quote_currency) "
+        "AND length(NEW.base_currency) = 3 "
+        "AND NEW.base_currency = upper(NEW.base_currency) "
+        "AND ((NEW.fx_rate_source IS NULL "
+        "AND NEW.fx_rate_source_url IS NULL "
+        "AND NEW.fx_rate_as_of IS NULL "
+        "AND NEW.fx_rate_fetched_at IS NULL) OR "
+        "(length(NEW.fx_rate_source) > 0 "
+        "AND length(NEW.fx_rate_source_url) > 0 "
+        "AND NEW.fx_rate_as_of IS NOT NULL "
+        "AND NEW.fx_rate_fetched_at IS NOT NULL))",
+    ),
+    "transactions": (
+        {"amount", "type", "confidence", "status", "semantic_type"},
+        "typeof(NEW.amount) IN ('integer', 'real') "
+        "AND NEW.amount > 0 AND NEW.amount <= 1000000000000000 "
+        "AND NEW.type IN ('debit', 'credit') "
+        "AND (NEW.confidence IS NULL OR "
+        "(typeof(NEW.confidence) IN ('integer', 'real') "
+        "AND NEW.confidence >= 0 AND NEW.confidence <= 1)) "
+        "AND NEW.status IN ('settled', 'pending', 'deleted', 'reversed', "
+        "'reversal', 'voided') "
+        "AND NEW.semantic_type IN ('unknown', 'expense', 'income', "
+        "'internal_transfer', 'refund', 'reimbursement', 'reversal', "
+        "'cashback', 'adjustment', 'excluded')",
+    ),
+}
+
+
+def _install_financial_guards(connection: sqlite3.Connection) -> None:
+    """Install restart-safe write guards for databases created by old builds."""
+    for table, (required_columns, condition) in _FINANCIAL_GUARDS.items():
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not exists:
+            continue
+        columns = {
+            row[1]
+            for row in connection.execute(f'PRAGMA table_info("{table}")').fetchall()
+        }
+        if not required_columns.issubset(columns):
+            continue
+        for operation in ("INSERT", "UPDATE"):
+            trigger_name = f"trg_{table}_financial_guard_{operation.lower()}"
+            connection.execute(
+                f'''CREATE TRIGGER IF NOT EXISTS "{trigger_name}"
+                    BEFORE {operation} ON "{table}"
+                    FOR EACH ROW
+                    WHEN NOT ({condition})
+                    BEGIN
+                        SELECT RAISE(
+                            ABORT,
+                            'GODFIN financial invariant failed: {table}'
+                        );
+                    END'''
+            )
+
+
+def _table_columns(
+    connection: sqlite3.Connection,
+    table: str,
+) -> dict[str, tuple]:
+    return {
+        row[1]: row
+        for row in connection.execute(f'PRAGMA table_info("{table}")').fetchall()
+    }
+
+
+def _add_missing_columns(
+    connection: sqlite3.Connection,
+    table: str,
+    definitions: dict[str, str],
+) -> None:
+    exists = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    if not exists:
+        return
+    existing = _table_columns(connection, table)
+    for column, definition in definitions.items():
+        if column not in existing:
+            connection.execute(
+                f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'
+            )
+
+
+def _apply_revision_11(connection: sqlite3.Connection) -> None:
+    """Consolidate every compatibility repair from pre-registry builds."""
+    for table, columns in (
+        ("income_sources", _INCOME_SOURCE_COLUMNS),
+        ("recurring_patterns", _RECURRING_PATTERN_COLUMNS),
+        ("transactions", _TRANSACTION_COLUMNS),
+        ("subscriptions", _SUBSCRIPTION_BASE_COLUMNS),
+        ("subscriptions", _SUBSCRIPTION_FX_COLUMNS),
+        ("net_worth_items", _NET_WORTH_ITEM_FX_COLUMNS),
+        ("net_worth_quotes", _NET_WORTH_QUOTE_FX_COLUMNS),
+    ):
+        _add_missing_columns(connection, table, columns)
+
+    audit_columns = _table_columns(connection, "audit_sessions")
+    if audit_columns:
+        required = {"id", "period_year", "period_month", "status", "created_at"}
+        missing = required.difference(audit_columns)
+        if missing:
+            raise SchemaMigrationError(
+                "The audit schema is incomplete and cannot be upgraded safely."
+            )
+        # Older releases could leave both the previous finalized session and
+        # its replacement draft/finalized session active. Keep only the newest
+        # row authoritative before installing the invariant.
+        active_rows = connection.execute(
+            "SELECT id, period_year, period_month "
+            "FROM audit_sessions "
+            "WHERE status IN ('draft', 'finalized', 'locked') "
+            "ORDER BY period_year, period_month, "
+            "COALESCE(created_at, '') DESC, rowid DESC"
+        ).fetchall()
+        seen_periods: set[tuple[int, int]] = set()
+        superseded_ids: list[str] = []
+        for audit_id, year, month in active_rows:
+            period = (year, month)
+            if period in seen_periods:
+                superseded_ids.append(audit_id)
+            else:
+                seen_periods.add(period)
+        for audit_id in superseded_ids:
+            connection.execute(
+                "UPDATE audit_sessions SET status='discarded' WHERE id=?",
+                (audit_id,),
+            )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_audit_sessions_active_period "
+            "ON audit_sessions(period_year, period_month) "
+            "WHERE status IN ('draft', 'finalized', 'locked')"
+        )
+
+    _install_financial_guards(connection)
+
+
+def _validate_revision_11(connection: sqlite3.Connection) -> None:
+    for table, columns in (
+        ("income_sources", _INCOME_SOURCE_COLUMNS),
+        ("recurring_patterns", _RECURRING_PATTERN_COLUMNS),
+        ("transactions", _TRANSACTION_COLUMNS),
+        ("subscriptions", _SUBSCRIPTION_BASE_COLUMNS),
+        ("subscriptions", _SUBSCRIPTION_FX_COLUMNS),
+        ("net_worth_items", _NET_WORTH_ITEM_FX_COLUMNS),
+        ("net_worth_quotes", _NET_WORTH_QUOTE_FX_COLUMNS),
+    ):
+        existing = _table_columns(connection, table)
+        if existing and not set(columns).issubset(existing):
+            raise SchemaMigrationError(
+                f"The {table} schema did not satisfy revision 11 postconditions."
+            )
+
+    audit_columns = _table_columns(connection, "audit_sessions")
+    if audit_columns:
+        index = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' "
+            "AND name='uq_audit_sessions_active_period'"
+        ).fetchone()
+        if not index:
+            raise SchemaMigrationError(
+                "The audit-period uniqueness invariant was not installed."
+            )
+
+
+def _delete_duplicate_monthly_aggregates(
+    connection: sqlite3.Connection,
+) -> None:
+    if not _table_columns(connection, "monthly_aggregates"):
+        return
+    rows = connection.execute(
+        "SELECT id, month, account_id FROM monthly_aggregates "
+        "ORDER BY month, account_id, is_finalized DESC, "
+        "COALESCE(computed_at, '') DESC, rowid DESC"
+    ).fetchall()
+    seen: set[tuple[str, Optional[str]]] = set()
+    duplicate_ids: list[str] = []
+    for aggregate_id, month, account_id in rows:
+        key = (month, account_id)
+        if key in seen:
+            duplicate_ids.append(aggregate_id)
+        else:
+            seen.add(key)
+    for aggregate_id in duplicate_ids:
+        connection.execute(
+            "DELETE FROM monthly_aggregates WHERE id=?",
+            (aggregate_id,),
+        )
+
+
+def _suggestion_priority(row: tuple) -> tuple:
+    status_priority = {
+        "confirmed": 0,
+        "pending": 1,
+        "snoozed": 2,
+        "ignored": 3,
+    }
+    return (
+        -status_priority.get(row[2], 4),
+        1 if row[3] else 0,
+        row[4] or "",
+        row[5] or "",
+        row[6],
+    )
+
+
+def _merge_recurring_pattern_suggestions(
+    connection: sqlite3.Connection,
+    keeper_id: str,
+    duplicate_ids: list[str],
+) -> None:
+    if not duplicate_ids or not _table_columns(connection, "subscription_suggestions"):
+        return
+    pattern_ids = [keeper_id, *duplicate_ids]
+    placeholders = ", ".join("?" for _ in pattern_ids)
+    suggestions = connection.execute(
+        "SELECT id, recurring_pattern_id, status, confirmed_subscription_id, "
+        "updated_at, created_at, rowid FROM subscription_suggestions "
+        f"WHERE recurring_pattern_id IN ({placeholders})",
+        pattern_ids,
+    ).fetchall()
+    if not suggestions:
+        return
+    winner = max(suggestions, key=_suggestion_priority)
+    for suggestion in suggestions:
+        if suggestion[0] != winner[0]:
+            connection.execute(
+                "DELETE FROM subscription_suggestions WHERE id=?",
+                (suggestion[0],),
+            )
+    if winner[1] != keeper_id:
+        connection.execute(
+            "UPDATE subscription_suggestions SET recurring_pattern_id=? WHERE id=?",
+            (keeper_id, winner[0]),
+        )
+
+
+def _delete_duplicate_recurring_patterns(
+    connection: sqlite3.Connection,
+) -> None:
+    if not _table_columns(connection, "recurring_patterns"):
+        return
+    rows = connection.execute(
+        "SELECT id, merchant_normalized, account_id FROM recurring_patterns "
+        "ORDER BY merchant_normalized, account_id, is_active DESC, "
+        "CASE detection_status "
+        "WHEN 'active' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END, "
+        "evidence_count DESC, COALESCE(last_occurrence, '') DESC, "
+        "COALESCE(created_at, '') DESC, rowid DESC"
+    ).fetchall()
+    grouped: dict[tuple[str, Optional[str]], list[str]] = {}
+    for pattern_id, merchant, account_id in rows:
+        grouped.setdefault((merchant, account_id), []).append(pattern_id)
+    for pattern_ids in grouped.values():
+        keeper_id, *duplicate_ids = pattern_ids
+        if not duplicate_ids:
+            continue
+        _merge_recurring_pattern_suggestions(
+            connection,
+            keeper_id,
+            duplicate_ids,
+        )
+        placeholders = ", ".join("?" for _ in duplicate_ids)
+        connection.execute(
+            f"DELETE FROM recurring_patterns WHERE id IN ({placeholders})",
+            duplicate_ids,
+        )
+
+
+def _reject_duplicate_gmail_message_ids(
+    connection: sqlite3.Connection,
+) -> None:
+    columns = _table_columns(connection, "transactions")
+    if not columns or "email_message_id" not in columns:
+        return
+    duplicate = connection.execute(
+        "SELECT email_message_id FROM transactions "
+        "WHERE email_message_id IS NOT NULL "
+        "GROUP BY email_message_id HAVING COUNT(*) > 1 LIMIT 1"
+    ).fetchone()
+    if duplicate:
+        raise SchemaMigrationError(
+            "Duplicate Gmail message identities require review before GODFIN "
+            "can enforce ingestion idempotency."
+        )
+
+
+def _apply_revision_12(connection: sqlite3.Connection) -> None:
+    """Install race-safe identities for derived and Gmail-ingested rows."""
+    _delete_duplicate_monthly_aggregates(connection)
+    _delete_duplicate_recurring_patterns(connection)
+    _reject_duplicate_gmail_message_ids(connection)
+
+    if _table_columns(connection, "monthly_aggregates"):
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_monthly_aggregates_global_month "
+            "ON monthly_aggregates(month) WHERE account_id IS NULL"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_monthly_aggregates_account_month "
+            "ON monthly_aggregates(month, account_id) "
+            "WHERE account_id IS NOT NULL"
+        )
+    if _table_columns(connection, "recurring_patterns"):
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_recurring_patterns_global_merchant "
+            "ON recurring_patterns(merchant_normalized) "
+            "WHERE account_id IS NULL"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_recurring_patterns_account_merchant "
+            "ON recurring_patterns(merchant_normalized, account_id) "
+            "WHERE account_id IS NOT NULL"
+        )
+    transaction_columns = _table_columns(connection, "transactions")
+    if "email_message_id" in transaction_columns:
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_transactions_email_message_id "
+            "ON transactions(email_message_id) "
+            "WHERE email_message_id IS NOT NULL"
+        )
+    _install_financial_guards(connection)
+
+
+def _validate_revision_12(connection: sqlite3.Connection) -> None:
+    expected_indexes = {
+        "monthly_aggregates": {
+            "uq_monthly_aggregates_global_month",
+            "uq_monthly_aggregates_account_month",
+        },
+        "recurring_patterns": {
+            "uq_recurring_patterns_global_merchant",
+            "uq_recurring_patterns_account_merchant",
+        },
+    }
+    transaction_columns = _table_columns(connection, "transactions")
+    if "email_message_id" in transaction_columns:
+        expected_indexes["transactions"] = {
+            "uq_transactions_email_message_id"
+        }
+    for table, names in expected_indexes.items():
+        if not _table_columns(connection, table):
+            continue
+        installed = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name=?",
+                (table,),
+            ).fetchall()
+        }
+        missing = names.difference(installed)
+        if missing:
+            raise SchemaMigrationError(
+                f"The {table} identity indexes were not installed: "
+                f"{', '.join(sorted(missing))}."
+            )
+
+    _reject_duplicate_gmail_message_ids(connection)
+    for table in (
+        "monthly_aggregates",
+        "recurring_patterns",
+        "subscription_suggestions",
+    ):
+        if not _table_columns(connection, table):
+            continue
+        for operation in ("insert", "update"):
+            trigger_name = f"trg_{table}_financial_guard_{operation}"
+            trigger = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger_name,),
+            ).fetchone()
+            if not trigger:
+                raise SchemaMigrationError(
+                    f"The {table} write guard was not installed."
+                )
+
+
+def _exact_money_table_is_supported(
+    connection: sqlite3.Connection,
+    table: str,
+    required_columns: set[str],
+) -> bool:
+    columns = _table_columns(connection, table)
+    return bool(columns) and required_columns.issubset(columns)
+
+
+def _install_exact_money_guard(
+    connection: sqlite3.Connection,
+    table: str,
+) -> None:
+    invalid = (
+        "NEW.amount_minor IS NULL "
+        "OR typeof(NEW.amount_minor) <> 'integer' "
+        "OR NEW.amount_minor <= 0 "
+        f"OR NEW.amount_minor > {_MAX_MONEY_MINOR} "
+        "OR CAST(ROUND(NEW.amount * 100, 0) AS INTEGER) "
+        "<> NEW.amount_minor"
+    )
+    for operation in ("insert", "update"):
+        trigger = f"trg_{table}_exact_money_{operation}"
+        connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        connection.execute(
+            f"CREATE TRIGGER {trigger} "
+            f"BEFORE {operation.upper()} ON {table} "
+            f"FOR EACH ROW WHEN {invalid} BEGIN "
+            f"SELECT RAISE(ABORT, 'GODFIN exact-money invariant failed: {table}'); "
+            "END"
+        )
+
+
+def _apply_revision_13(connection: sqlite3.Connection) -> None:
+    for table, required_columns in _EXACT_MONEY_SHADOWS.items():
+        if not _exact_money_table_is_supported(
+            connection,
+            table,
+            required_columns,
+        ):
+            continue
+        columns = _table_columns(connection, table)
+        invalid = connection.execute(
+            f"SELECT COUNT(*) FROM {table} "
+            "WHERE amount IS NULL "
+            "OR typeof(amount) NOT IN ('integer', 'real') "
+            "OR amount <= 0 OR amount > 1000000000000000 "
+            "OR ABS(amount * 100 - ROUND(amount * 100, 0)) > 0.000001"
+        ).fetchone()[0]
+        if invalid:
+            raise SchemaMigrationError(
+                f"The {table} table contains {invalid} amount value(s) "
+                "that cannot be converted to exact minor units safely."
+            )
+        if "amount_minor" not in columns:
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN amount_minor INTEGER"
+            )
+        connection.execute(
+            f"UPDATE {table} SET amount_minor = "
+            "CAST(ROUND(amount * 100, 0) AS INTEGER) "
+            "WHERE amount_minor IS NULL"
+        )
+        _install_exact_money_guard(connection, table)
+
+
+def _validate_revision_13(connection: sqlite3.Connection) -> None:
+    for table, required_columns in _EXACT_MONEY_SHADOWS.items():
+        if not _exact_money_table_is_supported(
+            connection,
+            table,
+            required_columns,
+        ):
+            continue
+        if "amount_minor" not in _table_columns(connection, table):
+            raise SchemaMigrationError(
+                f"The {table} exact-money column was not installed."
+            )
+        invalid = connection.execute(
+            f"SELECT COUNT(*) FROM {table} "
+            "WHERE amount_minor IS NULL "
+            "OR typeof(amount_minor) <> 'integer' "
+            "OR amount_minor <= 0 "
+            f"OR amount_minor > {_MAX_MONEY_MINOR} "
+            "OR CAST(ROUND(amount * 100, 0) AS INTEGER) <> amount_minor"
+        ).fetchone()[0]
+        if invalid:
+            raise SchemaMigrationError(
+                f"The {table} table contains {invalid} invalid exact-money row(s)."
+            )
+        for operation in ("insert", "update"):
+            trigger = f"trg_{table}_exact_money_{operation}"
+            installed = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
+            ).fetchone()
+            if not installed:
+                raise SchemaMigrationError(
+                    f"The {table} exact-money guard was not installed."
+                )
+
+
+def _product_exact_money_table_is_supported(
+    connection: sqlite3.Connection,
+    table: str,
+    signature: set[str],
+    fields: dict[str, tuple[int, int, bool]],
+) -> bool:
+    columns = _table_columns(connection, table)
+    required = signature.union(fields)
+    return bool(columns) and required.issubset(columns)
+
+
+def _legacy_money_invalid_sql(
+    field: str,
+    minimum_minor: int,
+    maximum_minor: int,
+    nullable: bool,
+    *,
+    prefix: str = "",
+) -> str:
+    legacy = f'{prefix}"{field}"'
+    invalid_value = (
+        f"typeof({legacy}) NOT IN ('integer', 'real') "
+        f"OR ({legacy} * 100) < {minimum_minor} "
+        f"OR ({legacy} * 100) > {maximum_minor} "
+        f"OR ABS(({legacy} * 100) - ROUND({legacy} * 100, 0)) > 0.000001"
+    )
+    if nullable:
+        return f"({legacy} IS NOT NULL AND ({invalid_value}))"
+    return f"({legacy} IS NULL OR {invalid_value})"
+
+
+def _exact_money_invalid_sql(
+    field: str,
+    minimum_minor: int,
+    maximum_minor: int,
+    nullable: bool,
+    *,
+    prefix: str = "",
+) -> str:
+    legacy = f'{prefix}"{field}"'
+    exact = f'{prefix}"{field}_minor"'
+    populated_invalid = (
+        f"{_legacy_money_invalid_sql(field, minimum_minor, maximum_minor, False, prefix=prefix)} "
+        f"OR {exact} IS NULL "
+        f"OR typeof({exact}) <> 'integer' "
+        f"OR {exact} < {minimum_minor} "
+        f"OR {exact} > {maximum_minor} "
+        f"OR CAST(ROUND({legacy} * 100, 0) AS INTEGER) <> {exact}"
+    )
+    if nullable:
+        return (
+            f"(({legacy} IS NULL AND {exact} IS NOT NULL) OR "
+            f"({legacy} IS NOT NULL AND ({populated_invalid})))"
+        )
+    return f"({populated_invalid})"
+
+
+def _install_product_exact_money_guard(
+    connection: sqlite3.Connection,
+    table: str,
+    fields: dict[str, tuple[int, int, bool]],
+) -> None:
+    invalid_conditions = [
+        _exact_money_invalid_sql(
+            field,
+            minimum_minor,
+            maximum_minor,
+            nullable,
+            prefix="NEW.",
+        )
+        for field, (minimum_minor, maximum_minor, nullable) in fields.items()
+    ]
+    if table == "goal_contributions":
+        invalid_conditions.append(
+            "((NEW.entry_type = 'deposit' AND NEW.amount_minor <= 0) OR "
+            "(NEW.entry_type = 'withdrawal' AND NEW.amount_minor >= 0))"
+        )
+    invalid = " OR ".join(invalid_conditions)
+    for operation in ("insert", "update"):
+        trigger = f"trg_{table}_product_exact_money_{operation}"
+        connection.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')
+        connection.execute(
+            f'CREATE TRIGGER "{trigger}" '
+            f'BEFORE {operation.upper()} ON "{table}" '
+            f"FOR EACH ROW WHEN {invalid} BEGIN "
+            f"SELECT RAISE(ABORT, "
+            f"'GODFIN exact-money invariant failed: {table}'); "
+            "END"
+        )
+
+
+def _apply_revision_14(connection: sqlite3.Connection) -> None:
+    """Extend authoritative minor-unit storage to remaining product totals."""
+    supported: list[tuple[str, dict[str, tuple[int, int, bool]]]] = []
+    for table, (signature, fields) in _PRODUCT_EXACT_MONEY_SHADOWS.items():
+        if not _product_exact_money_table_is_supported(
+            connection,
+            table,
+            signature,
+            fields,
+        ):
+            continue
+        supported.append((table, fields))
+        for field, (minimum_minor, maximum_minor, nullable) in fields.items():
+            invalid = connection.execute(
+                f'SELECT COUNT(*) FROM "{table}" WHERE '
+                f"{_legacy_money_invalid_sql(field, minimum_minor, maximum_minor, nullable)}"
+            ).fetchone()[0]
+            if invalid:
+                raise SchemaMigrationError(
+                    f"The {table}.{field} field contains {invalid} value(s) "
+                    "that cannot be converted to exact minor units safely."
+                )
+
+    for table, fields in supported:
+        columns = _table_columns(connection, table)
+        for field, (minimum_minor, maximum_minor, nullable) in fields.items():
+            exact = f"{field}_minor"
+            if exact in columns:
+                existing_invalid = connection.execute(
+                    f'SELECT COUNT(*) FROM "{table}" WHERE "{exact}" IS NOT NULL '
+                    f"AND ({_exact_money_invalid_sql(field, minimum_minor, maximum_minor, nullable)})"
+                ).fetchone()[0]
+                if existing_invalid:
+                    raise SchemaMigrationError(
+                        f"The {table}.{exact} field contains {existing_invalid} "
+                        "invalid exact-money value(s)."
+                    )
+            else:
+                connection.execute(
+                    f'ALTER TABLE "{table}" ADD COLUMN "{exact}" INTEGER'
+                )
+            connection.execute(
+                f'UPDATE "{table}" SET "{exact}" = '
+                f'CAST(ROUND("{field}" * 100, 0) AS INTEGER) '
+                f'WHERE "{field}" IS NOT NULL AND "{exact}" IS NULL'
+            )
+        _install_product_exact_money_guard(connection, table, fields)
+
+
+def _validate_revision_14(connection: sqlite3.Connection) -> None:
+    for table, (signature, fields) in _PRODUCT_EXACT_MONEY_SHADOWS.items():
+        if not _product_exact_money_table_is_supported(
+            connection,
+            table,
+            signature,
+            fields,
+        ):
+            continue
+        columns = _table_columns(connection, table)
+        for field, (minimum_minor, maximum_minor, nullable) in fields.items():
+            exact = f"{field}_minor"
+            if exact not in columns:
+                raise SchemaMigrationError(
+                    f"The {table}.{exact} exact-money column was not installed."
+                )
+            invalid = connection.execute(
+                f'SELECT COUNT(*) FROM "{table}" WHERE '
+                f"{_exact_money_invalid_sql(field, minimum_minor, maximum_minor, nullable)}"
+            ).fetchone()[0]
+            if invalid:
+                raise SchemaMigrationError(
+                    f"The {table}.{field} field contains {invalid} invalid "
+                    "exact-money row(s)."
+                )
+        for operation in ("insert", "update"):
+            trigger = f"trg_{table}_product_exact_money_{operation}"
+            installed = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
+            ).fetchone()
+            if not installed:
+                raise SchemaMigrationError(
+                    f"The {table} product exact-money guard was not installed."
+                )
+
+
+def _precision_table_is_supported(
+    connection: sqlite3.Connection,
+    table: str,
+    signature: set[str],
+    fields: dict[str, tuple[str, int, int, int, bool, bool]],
+) -> bool:
+    columns = _table_columns(connection, table)
+    return bool(columns) and signature.union(fields).issubset(columns)
+
+
+def _legacy_precision_units(
+    value,
+    *,
+    scale: int,
+    minimum_units: int,
+    maximum_units: int,
+    nullable: bool,
+    reject_subunit: bool,
+) -> int | None:
+    if value is None:
+        if nullable:
+            return None
+        raise ValueError("required value is missing")
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("value is not numeric") from exc
+    if not amount.is_finite():
+        raise ValueError("value is not finite")
+    scaled = amount * Decimal(scale)
+    integral = scaled.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    if reject_subunit and scaled != integral:
+        raise ValueError("value has unsupported sub-unit precision")
+    units = int(integral)
+    if units < minimum_units or units > maximum_units:
+        raise ValueError("value is outside the supported range")
+    return units
+
+
+def _precision_invalid_sql(
+    field: str,
+    exact: str,
+    scale: int,
+    minimum_units: int,
+    maximum_units: int,
+    nullable: bool,
+    *,
+    prefix: str = "",
+) -> str:
+    legacy_column = f'{prefix}"{field}"'
+    exact_column = f'{prefix}"{exact}"'
+    populated_invalid = (
+        f"typeof({legacy_column}) NOT IN ('integer', 'real') "
+        f"OR {legacy_column} != {legacy_column} "
+        f"OR {exact_column} IS NULL "
+        f"OR typeof({exact_column}) <> 'integer' "
+        f"OR {exact_column} < {minimum_units} "
+        f"OR {exact_column} > {maximum_units} "
+        f"OR CAST(ROUND({legacy_column} * {scale}, 0) AS INTEGER) "
+        f"<> {exact_column}"
+    )
+    if nullable:
+        return (
+            f"(({legacy_column} IS NULL AND {exact_column} IS NOT NULL) OR "
+            f"({legacy_column} IS NOT NULL AND ({populated_invalid})))"
+        )
+    return f"({legacy_column} IS NULL OR {populated_invalid})"
+
+
+def _install_precision_guard(
+    connection: sqlite3.Connection,
+    table: str,
+    fields: dict[str, tuple[str, int, int, int, bool, bool]],
+) -> None:
+    invalid = " OR ".join(
+        _precision_invalid_sql(
+            field,
+            exact,
+            scale,
+            minimum_units,
+            maximum_units,
+            nullable,
+            prefix="NEW.",
+        )
+        for field, (
+            exact,
+            scale,
+            minimum_units,
+            maximum_units,
+            nullable,
+            _reject_subunit,
+        ) in fields.items()
+    )
+    for operation in ("insert", "update"):
+        trigger = f"trg_{table}_precision_guard_{operation}"
+        connection.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')
+        connection.execute(
+            f'CREATE TRIGGER "{trigger}" '
+            f'BEFORE {operation.upper()} ON "{table}" '
+            f"FOR EACH ROW WHEN {invalid} BEGIN "
+            f"SELECT RAISE(ABORT, "
+            f"'GODFIN precision invariant failed: {table}'); "
+            "END"
+        )
+
+
+def _apply_revision_15(connection: sqlite3.Connection) -> None:
+    """Add exact field-specific storage for net-worth and FX measurements."""
+    prepared: dict[str, tuple[dict, list[tuple[object, dict[str, int | None]]]]] = {}
+    for table, (signature, fields) in _PRECISION_SHADOWS.items():
+        if not _precision_table_is_supported(connection, table, signature, fields):
+            continue
+        field_names = list(fields)
+        selected = ", ".join(['"id"', *[f'"{field}"' for field in field_names]])
+        rows = connection.execute(f'SELECT {selected} FROM "{table}"').fetchall()
+        converted: list[tuple[object, dict[str, int | None]]] = []
+        invalid = 0
+        for row in rows:
+            row_values: dict[str, int | None] = {}
+            for index, field in enumerate(field_names, start=1):
+                (
+                    _exact,
+                    scale,
+                    minimum_units,
+                    maximum_units,
+                    nullable,
+                    reject_subunit,
+                ) = fields[field]
+                try:
+                    row_values[field] = _legacy_precision_units(
+                        row[index],
+                        scale=scale,
+                        minimum_units=minimum_units,
+                        maximum_units=maximum_units,
+                        nullable=nullable,
+                        reject_subunit=reject_subunit,
+                    )
+                except ValueError:
+                    invalid += 1
+            converted.append((row[0], row_values))
+        if invalid:
+            raise SchemaMigrationError(
+                f"The {table} table contains {invalid} precision value(s) "
+                "that cannot be converted safely."
+            )
+
+        columns = _table_columns(connection, table)
+        for field, (
+            exact,
+            _scale,
+            _minimum_units,
+            _maximum_units,
+            _nullable,
+            _reject_subunit,
+        ) in fields.items():
+            if exact not in columns:
+                continue
+            existing = {
+                row[0]: (row[1], row[2])
+                for row in connection.execute(
+                    f'SELECT "id", "{exact}", typeof("{exact}") FROM "{table}"'
+                ).fetchall()
+            }
+            for row_id, row_values in converted:
+                stored, stored_type = existing[row_id]
+                expected = row_values[field]
+                if stored is None and expected is None:
+                    continue
+                if stored_type != "integer" or stored != expected:
+                    raise SchemaMigrationError(
+                        f"The {table}.{exact} field contains an invalid "
+                        "exact precision value."
+                    )
+        prepared[table] = (fields, converted)
+
+    for table, (fields, converted) in prepared.items():
+        columns = _table_columns(connection, table)
+        for (
+            field,
+            (
+                exact,
+                _scale,
+                _minimum_units,
+                _maximum_units,
+                _nullable,
+                _reject_subunit,
+            ),
+        ) in fields.items():
+            if exact not in columns:
+                connection.execute(
+                    f'ALTER TABLE "{table}" ADD COLUMN "{exact}" INTEGER'
+                )
+            connection.executemany(
+                f'UPDATE "{table}" SET "{exact}" = ? '
+                f'WHERE "id" = ? AND "{exact}" IS NULL',
+                [(row_values[field], row_id) for row_id, row_values in converted],
+            )
+        _install_precision_guard(connection, table, fields)
+
+
+def _validate_revision_15(connection: sqlite3.Connection) -> None:
+    for table, (signature, fields) in _PRECISION_SHADOWS.items():
+        if not _precision_table_is_supported(connection, table, signature, fields):
+            continue
+        columns = _table_columns(connection, table)
+        for field, (
+            exact,
+            scale,
+            minimum_units,
+            maximum_units,
+            nullable,
+            _reject_subunit,
+        ) in fields.items():
+            if exact not in columns:
+                raise SchemaMigrationError(
+                    f"The {table}.{exact} precision column was not installed."
+                )
+            invalid = connection.execute(
+                f'SELECT COUNT(*) FROM "{table}" WHERE '
+                f"{_precision_invalid_sql(field, exact, scale, minimum_units, maximum_units, nullable)}"
+            ).fetchone()[0]
+            if invalid:
+                raise SchemaMigrationError(
+                    f"The {table}.{field} field contains {invalid} invalid "
+                    "precision row(s)."
+                )
+        for operation in ("insert", "update"):
+            trigger = f"trg_{table}_precision_guard_{operation}"
+            installed = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
+            ).fetchone()
+            if not installed:
+                raise SchemaMigrationError(
+                    f"The {table} precision guard was not installed."
+                )
+
+
+def _recurring_provenance_is_supported(
+    connection: sqlite3.Connection,
+) -> bool:
+    columns = _table_columns(connection, "recurring_patterns")
+    return bool(columns) and {
+        "id",
+        "merchant_normalized",
+        "frequency",
+        "evidence_count",
+    }.issubset(columns)
+
+
+def _recurring_provenance_invalid_sql(*, prefix: str = "") -> str:
+    evidence = f'{prefix}"evidence_transaction_ids_json"'
+    version = f'{prefix}"detection_version"'
+    return (
+        f"{evidence} IS NULL OR json_valid({evidence}) = 0 OR "
+        f"json_type({evidence}) <> 'array' OR "
+        f"{version} IS NULL OR length(trim({version})) NOT BETWEEN 1 AND 20"
+    )
+
+
+def _install_recurring_provenance_guards(
+    connection: sqlite3.Connection,
+) -> None:
+    invalid = _recurring_provenance_invalid_sql(prefix="NEW.")
+    for operation in ("insert", "update"):
+        trigger = f"trg_recurring_patterns_provenance_{operation}"
+        connection.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')
+        connection.execute(
+            f'CREATE TRIGGER "{trigger}" '
+            f'BEFORE {operation.upper()} ON "recurring_patterns" '
+            f"FOR EACH ROW WHEN {invalid} BEGIN "
+            "SELECT RAISE(ABORT, "
+            "'GODFIN recurring evidence invariant failed'); "
+            "END"
+        )
+
+
+def _apply_revision_16(connection: sqlite3.Connection) -> None:
+    """Add durable recurring-detection provenance and algorithm versioning."""
+    if not _recurring_provenance_is_supported(connection):
+        return
+    columns = _table_columns(connection, "recurring_patterns")
+    if "evidence_transaction_ids_json" not in columns:
+        connection.execute(
+            "ALTER TABLE recurring_patterns ADD COLUMN "
+            "evidence_transaction_ids_json TEXT NOT NULL DEFAULT '[]'"
+        )
+    if "detection_version" not in columns:
+        connection.execute(
+            "ALTER TABLE recurring_patterns ADD COLUMN "
+            "detection_version TEXT NOT NULL DEFAULT '2.0'"
+        )
+    _install_recurring_provenance_guards(connection)
+
+
+def _validate_revision_16(connection: sqlite3.Connection) -> None:
+    if not _recurring_provenance_is_supported(connection):
+        return
+    columns = _table_columns(connection, "recurring_patterns")
+    required = {"evidence_transaction_ids_json", "detection_version"}
+    missing = required.difference(columns)
+    if missing:
+        raise SchemaMigrationError(
+            "The recurring-pattern provenance columns were not installed."
+        )
+    invalid = connection.execute(
+        "SELECT COUNT(*) FROM recurring_patterns WHERE "
+        f"{_recurring_provenance_invalid_sql()}"
+    ).fetchone()[0]
+    if invalid:
+        raise SchemaMigrationError(
+            f"The recurring-pattern table contains {invalid} invalid "
+            "provenance row(s)."
+        )
+    for operation in ("insert", "update"):
+        trigger = f"trg_recurring_patterns_provenance_{operation}"
+        installed = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()
+        if not installed:
+            raise SchemaMigrationError(
+                "The recurring-pattern provenance guard was not installed."
+            )
+
+
+def _apply_revision_17(connection: sqlite3.Connection) -> None:
+    """Install the durable, lease-based local background-job ledger."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS background_jobs (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            kind VARCHAR(80) NOT NULL,
+            active_key VARCHAR(160),
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            status VARCHAR(24) NOT NULL DEFAULT 'queued',
+            progress INTEGER NOT NULL DEFAULT 0,
+            total INTEGER NOT NULL DEFAULT 0,
+            result_json TEXT,
+            public_message VARCHAR(500),
+            failure_code VARCHAR(80),
+            attempt INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 3,
+            available_at DATETIME NOT NULL,
+            lease_owner VARCHAR(64),
+            lease_expires_at DATETIME,
+            cancel_requested BOOLEAN NOT NULL DEFAULT 0,
+            correlation_id VARCHAR(32),
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            started_at DATETIME,
+            heartbeat_at DATETIME,
+            finished_at DATETIME,
+            CONSTRAINT ck_background_jobs_status CHECK (
+                status IN (
+                    'queued','running','retry_wait','cancel_requested',
+                    'completed','failed','cancelled','poisoned'
+                )
+            ),
+            CONSTRAINT ck_background_jobs_progress CHECK (
+                progress >= 0 AND progress <= 100
+            ),
+            CONSTRAINT ck_background_jobs_total CHECK (total >= 0),
+            CONSTRAINT ck_background_jobs_attempts CHECK (
+                attempt >= 0 AND max_attempts >= 1 AND attempt <= max_attempts
+            )
+        )
+        """
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "ix_background_jobs_active_key ON background_jobs(active_key)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_background_jobs_ready "
+        "ON background_jobs(status, available_at)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_background_jobs_kind_created "
+        "ON background_jobs(kind, created_at)"
+    )
+
+
+def _validate_revision_17(connection: sqlite3.Connection) -> None:
+    required_columns = {
+        "id",
+        "kind",
+        "active_key",
+        "payload_json",
+        "status",
+        "progress",
+        "total",
+        "result_json",
+        "public_message",
+        "failure_code",
+        "attempt",
+        "max_attempts",
+        "available_at",
+        "lease_owner",
+        "lease_expires_at",
+        "cancel_requested",
+        "correlation_id",
+        "created_at",
+        "updated_at",
+        "started_at",
+        "heartbeat_at",
+        "finished_at",
+    }
+    columns = _table_columns(connection, "background_jobs")
+    if required_columns.difference(columns):
+        raise SchemaMigrationError(
+            "The durable background-job ledger is incomplete."
+        )
+    indexes = {
+        row[1]: bool(row[2])
+        for row in connection.execute("PRAGMA index_list(background_jobs)")
+    }
+    if not indexes.get("ix_background_jobs_active_key"):
+        raise SchemaMigrationError(
+            "The background-job single-flight boundary is missing."
+        )
+    for name in (
+        "ix_background_jobs_ready",
+        "ix_background_jobs_kind_created",
+    ):
+        if name not in indexes:
+            raise SchemaMigrationError(
+                "A required background-job scheduling index is missing."
+            )
+    invalid = connection.execute(
+        "SELECT COUNT(*) FROM background_jobs WHERE "
+        "status NOT IN ("
+        "'queued','running','retry_wait','cancel_requested',"
+        "'completed','failed','cancelled','poisoned'"
+        ") OR progress < 0 OR progress > 100 OR total < 0 "
+        "OR attempt < 0 OR max_attempts < 1 OR attempt > max_attempts"
+    ).fetchone()[0]
+    if invalid:
+        raise SchemaMigrationError(
+            f"The background-job ledger contains {invalid} invalid row(s)."
+        )
+
+
+def _apply_revision_18(connection: sqlite3.Connection) -> None:
+    """Add recoverable soft-deletion markers for ordinary user records."""
+    for table in ("subscriptions", "net_worth_items"):
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not exists:
+            continue
+        columns = _table_columns(connection, table)
+        if "deleted_at" not in columns:
+            connection.execute(
+                f'ALTER TABLE "{table}" ADD COLUMN deleted_at DATETIME'
+            )
+        connection.execute(
+            f'CREATE INDEX IF NOT EXISTS "ix_{table}_deleted_at" '
+            f'ON "{table}"(deleted_at)'
+        )
+
+
+def _validate_revision_18(connection: sqlite3.Connection) -> None:
+    for table in ("subscriptions", "net_worth_items"):
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not exists:
+            continue
+        if "deleted_at" not in _table_columns(connection, table):
+            raise SchemaMigrationError(
+                f"The {table} recovery marker was not installed."
+            )
+        indexes = {
+            row[1] for row in connection.execute(f'PRAGMA index_list("{table}")')
+        }
+        if f"ix_{table}_deleted_at" not in indexes:
+            raise SchemaMigrationError(
+                f"The {table} recovery index was not installed."
+            )
+
+
+_LEGACY_FK_ACTION_TRIGGERS = {
+    "trg_accounts_delete_derived_rows": (
+        "accounts",
+        {"id"},
+        (
+            ("monthly_aggregates", {"account_id"}),
+            ("recurring_patterns", {"account_id"}),
+        ),
+        """
+        DELETE FROM monthly_aggregates WHERE account_id = OLD.id;
+        DELETE FROM recurring_patterns WHERE account_id = OLD.id;
+        """,
+    ),
+    "trg_audit_sessions_delete_optional_links": (
+        "audit_sessions",
+        {"id"},
+        (
+            ("transactions", {"audit_session_id"}),
+            ("monthly_aggregates", {"audit_session_id"}),
+        ),
+        """
+        UPDATE transactions SET audit_session_id = NULL
+        WHERE audit_session_id = OLD.id;
+        UPDATE monthly_aggregates SET audit_session_id = NULL
+        WHERE audit_session_id = OLD.id;
+        """,
+    ),
+    "trg_goals_delete_owned_rows": (
+        "goals",
+        {"id"},
+        (
+            ("goal_contributions", {"goal_id"}),
+            ("goal_contribution_suggestions", {"goal_id"}),
+        ),
+        """
+        DELETE FROM goal_contributions WHERE goal_id = OLD.id;
+        UPDATE goal_contribution_suggestions SET goal_id = NULL
+        WHERE goal_id = OLD.id;
+        """,
+    ),
+    "trg_net_worth_items_delete_quotes": (
+        "net_worth_items",
+        {"id"},
+        (("net_worth_quotes", {"item_id"}),),
+        "DELETE FROM net_worth_quotes WHERE item_id = OLD.id;",
+    ),
+    "trg_recurring_patterns_delete_suggestions": (
+        "recurring_patterns",
+        {"id"},
+        (("subscription_suggestions", {"recurring_pattern_id"}),),
+        """
+        DELETE FROM subscription_suggestions
+        WHERE recurring_pattern_id = OLD.id;
+        """,
+    ),
+    "trg_subscriptions_delete_suggestion_links": (
+        "subscriptions",
+        {"id"},
+        (("subscription_suggestions", {"confirmed_subscription_id"}),),
+        """
+        UPDATE subscription_suggestions SET confirmed_subscription_id = NULL
+        WHERE confirmed_subscription_id = OLD.id;
+        """,
+    ),
+    "trg_transactions_delete_dependents": (
+        "transactions",
+        {"id"},
+        (
+            ("audit_log", {"transaction_id"}),
+            ("classification_corrections", {"transaction_id"}),
+            ("goal_contributions", {"source_transaction_id"}),
+            ("goal_contribution_suggestions", {"transaction_id"}),
+            ("transaction_splits", {"parent_transaction_id"}),
+            (
+                "transfer_matches",
+                {"debit_transaction_id", "credit_transaction_id"},
+            ),
+        ),
+        """
+        UPDATE audit_log SET transaction_id = NULL
+        WHERE transaction_id = OLD.id;
+        DELETE FROM classification_corrections
+        WHERE transaction_id = OLD.id;
+        UPDATE goal_contributions SET source_transaction_id = NULL
+        WHERE source_transaction_id = OLD.id;
+        DELETE FROM goal_contribution_suggestions
+        WHERE transaction_id = OLD.id;
+        DELETE FROM transaction_splits
+        WHERE parent_transaction_id = OLD.id;
+        DELETE FROM transfer_matches
+        WHERE debit_transaction_id = OLD.id OR credit_transaction_id = OLD.id;
+        """,
+    ),
+}
+
+
+def _legacy_fk_trigger_is_supported(
+    connection: sqlite3.Connection,
+    parent_table: str,
+    parent_columns: set[str],
+    child_tables: tuple[tuple[str, set[str]], ...],
+) -> bool:
+    if not parent_columns.issubset(_table_columns(connection, parent_table)):
+        return False
+    return all(
+        columns.issubset(_table_columns(connection, table))
+        for table, columns in child_tables
+    )
+
+
+def _apply_revision_19(connection: sqlite3.Connection) -> None:
+    """Apply reviewed FK delete actions to databases created by old builds.
+
+    SQLite cannot add or replace a foreign-key action without rebuilding the
+    table. Equivalent parent-delete triggers preserve the existing financial
+    rows while giving historical databases the same behavior as fresh ones.
+    """
+    for name, (
+        parent_table,
+        parent_columns,
+        child_tables,
+        statements,
+    ) in _LEGACY_FK_ACTION_TRIGGERS.items():
+        if not _legacy_fk_trigger_is_supported(
+            connection,
+            parent_table,
+            parent_columns,
+            child_tables,
+        ):
+            continue
+        connection.execute(
+            f'CREATE TRIGGER IF NOT EXISTS "{name}" '
+            f'AFTER DELETE ON "{parent_table}" FOR EACH ROW BEGIN '
+            f"{statements} END"
+        )
+
+
+def _validate_revision_19(connection: sqlite3.Connection) -> None:
+    for name, (
+        parent_table,
+        parent_columns,
+        child_tables,
+        _statements,
+    ) in _LEGACY_FK_ACTION_TRIGGERS.items():
+        if not _legacy_fk_trigger_is_supported(
+            connection,
+            parent_table,
+            parent_columns,
+            child_tables,
+        ):
+            continue
+        installed = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+            (name,),
+        ).fetchone()
+        if not installed:
+            raise SchemaMigrationError(
+                f"The legacy relationship action {name} was not installed."
+            )
+
+
+def _apply_revision_20(connection: sqlite3.Connection) -> None:
+    """Add exact balance anchors and verified statement-coverage intervals."""
+    connection.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS account_balance_anchors (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            account_id VARCHAR(36) NOT NULL,
+            as_of_date DATE NOT NULL,
+            boundary_date DATE NOT NULL,
+            balance_minor INTEGER NOT NULL,
+            currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+            anchor_type VARCHAR(32) NOT NULL,
+            source_fingerprint VARCHAR(64) NOT NULL,
+            parser_profile VARCHAR(80) NOT NULL,
+            parser_version VARCHAR(32) NOT NULL,
+            statement_period_start DATE NOT NULL,
+            statement_period_end DATE NOT NULL,
+            verified BOOLEAN NOT NULL DEFAULT 1,
+            conflict BOOLEAN NOT NULL DEFAULT 0,
+            verification_method VARCHAR(100) NOT NULL,
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_account_balance_anchor_source UNIQUE (
+                account_id, source_fingerprint, anchor_type, boundary_date
+            ),
+            CONSTRAINT ck_account_balance_anchor_amount CHECK (
+                balance_minor BETWEEN {-_MAX_MONEY_MINOR} AND {_MAX_MONEY_MINOR}
+            ),
+            CONSTRAINT ck_account_balance_anchor_type CHECK (
+                anchor_type IN (
+                    'statement_opening','statement_closing','manual_verified'
+                )
+            ),
+            CONSTRAINT ck_account_balance_anchor_currency CHECK (
+                length(currency) = 3 AND currency = upper(currency)
+            ),
+            CONSTRAINT ck_account_balance_anchor_trust CHECK (
+                NOT (verified = 1 AND conflict = 1)
+            ),
+            FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS "
+        "ix_account_balance_anchors_account_boundary "
+        "ON account_balance_anchors(account_id, boundary_date)"
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS account_statement_coverages (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            account_id VARCHAR(36) NOT NULL,
+            source_fingerprint VARCHAR(64) NOT NULL,
+            period_start DATE NOT NULL,
+            period_end DATE NOT NULL,
+            parser_profile VARCHAR(80) NOT NULL,
+            parser_version VARCHAR(32) NOT NULL,
+            verified_controls BOOLEAN NOT NULL DEFAULT 1,
+            contains_running_balance BOOLEAN NOT NULL DEFAULT 0,
+            transaction_count INTEGER NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'verified',
+            opening_anchor_id VARCHAR(36),
+            closing_anchor_id VARCHAR(36),
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_account_statement_coverage_source UNIQUE (
+                account_id, source_fingerprint
+            ),
+            CONSTRAINT ck_account_statement_coverage_period CHECK (
+                period_end >= period_start
+            ),
+            CONSTRAINT ck_account_statement_coverage_status CHECK (
+                status IN ('verified','conflict')
+            ),
+            CONSTRAINT ck_account_statement_coverage_transaction_count CHECK (
+                transaction_count >= 0
+            ),
+            FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+            FOREIGN KEY(opening_anchor_id) REFERENCES account_balance_anchors(id)
+                ON DELETE SET NULL,
+            FOREIGN KEY(closing_anchor_id) REFERENCES account_balance_anchors(id)
+                ON DELETE SET NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS "
+        "ix_account_statement_coverages_account_period "
+        "ON account_statement_coverages(account_id, period_start, period_end)"
+    )
+
+
+def _validate_revision_20(connection: sqlite3.Connection) -> None:
+    required = {
+        "account_balance_anchors": {
+            "id",
+            "account_id",
+            "as_of_date",
+            "boundary_date",
+            "balance_minor",
+            "currency",
+            "anchor_type",
+            "source_fingerprint",
+            "parser_profile",
+            "parser_version",
+            "statement_period_start",
+            "statement_period_end",
+            "verified",
+            "conflict",
+            "verification_method",
+            "created_at",
+        },
+        "account_statement_coverages": {
+            "id",
+            "account_id",
+            "source_fingerprint",
+            "period_start",
+            "period_end",
+            "parser_profile",
+            "parser_version",
+            "verified_controls",
+            "contains_running_balance",
+            "transaction_count",
+            "status",
+            "opening_anchor_id",
+            "closing_anchor_id",
+            "created_at",
+        },
+    }
+    for table, columns in required.items():
+        if columns.difference(_table_columns(connection, table)):
+            raise SchemaMigrationError(
+                f"The {table} balance-provenance table is incomplete."
+            )
+
+    index_names = {
+        row[1]
+        for table in required
+        for row in connection.execute(f'PRAGMA index_list("{table}")')
+    }
+    expected_indexes = {
+        "ix_account_balance_anchors_account_boundary",
+        "ix_account_statement_coverages_account_period",
+    }
+    if expected_indexes.difference(index_names):
+        raise SchemaMigrationError(
+            "A required balance-provenance lookup index is missing."
+        )
+
+    invalid_anchors = connection.execute(
+        "SELECT COUNT(*) FROM account_balance_anchors WHERE "
+        f"balance_minor NOT BETWEEN {-_MAX_MONEY_MINOR} AND {_MAX_MONEY_MINOR} "
+        "OR anchor_type NOT IN ("
+        "'statement_opening','statement_closing','manual_verified') "
+        "OR length(currency) <> 3 OR currency <> upper(currency) "
+        "OR (verified = 1 AND conflict = 1)"
+    ).fetchone()[0]
+    invalid_coverages = connection.execute(
+        "SELECT COUNT(*) FROM account_statement_coverages WHERE "
+        "period_end < period_start OR transaction_count < 0 "
+        "OR status NOT IN ('verified','conflict')"
+    ).fetchone()[0]
+    if invalid_anchors or invalid_coverages:
+        raise SchemaMigrationError(
+            "The balance-provenance tables contain invalid rows."
+        )
+
+
+def _apply_revision_21(connection: sqlite3.Connection) -> None:
+    """Add time-aware income sources and reviewable historical matches."""
+    _add_missing_columns(
+        connection,
+        "income_sources",
+        {
+            "effective_from": "DATE",
+            "effective_to": "DATE",
+            "amount_tolerance": "REAL NOT NULL DEFAULT 0.2",
+            "confirmed_merchant_alias": "VARCHAR(255)",
+            "account_id": "VARCHAR(36)",
+            "payment_rail": "VARCHAR(32)",
+        },
+    )
+    source_columns = _table_columns(connection, "income_sources")
+    if source_columns:
+        fallback = "DATE(created_at)" if "created_at" in source_columns else "DATE('now')"
+        connection.execute(
+            "UPDATE income_sources SET effective_from = "
+            f"COALESCE(effective_from, {fallback}, DATE('now'))"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_income_sources_effective_period "
+            "ON income_sources(effective_from, effective_to)"
+        )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS income_match_suggestions (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            income_source_id VARCHAR(36) NOT NULL,
+            transaction_id VARCHAR(36) NOT NULL,
+            confidence REAL NOT NULL,
+            strength VARCHAR(16) NOT NULL,
+            evidence_json TEXT NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'pending',
+            decided_at DATETIME,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            CONSTRAINT uq_income_match_source_transaction UNIQUE (
+                income_source_id, transaction_id
+            ),
+            CONSTRAINT ck_income_match_suggestions_confidence CHECK (
+                confidence >= 0 AND confidence <= 1
+            ),
+            CONSTRAINT ck_income_match_suggestions_strength CHECK (
+                strength IN ('strong', 'uncertain')
+            ),
+            CONSTRAINT ck_income_match_suggestions_status CHECK (
+                status IN ('pending', 'confirmed', 'dismissed', 'stale')
+            ),
+            FOREIGN KEY(income_source_id) REFERENCES income_sources(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(transaction_id) REFERENCES transactions(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_income_match_suggestions_source_status "
+        "ON income_match_suggestions(income_source_id, status)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_income_match_suggestions_source_id "
+        "ON income_match_suggestions(income_source_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_income_match_suggestions_transaction_id "
+        "ON income_match_suggestions(transaction_id)"
+    )
+
+
+def _validate_revision_21(connection: sqlite3.Connection) -> None:
+    source_columns = _table_columns(connection, "income_sources")
+    required_source_columns = {
+        "effective_from",
+        "effective_to",
+        "amount_tolerance",
+        "confirmed_merchant_alias",
+        "account_id",
+        "payment_rail",
+    }
+    if source_columns and required_source_columns.difference(source_columns):
+        raise SchemaMigrationError("The time-aware income source schema is incomplete.")
+
+    suggestion_columns = _table_columns(connection, "income_match_suggestions")
+    required_suggestion_columns = {
+        "id",
+        "income_source_id",
+        "transaction_id",
+        "confidence",
+        "strength",
+        "evidence_json",
+        "status",
+        "decided_at",
+        "created_at",
+        "updated_at",
+    }
+    if required_suggestion_columns.difference(suggestion_columns):
+        raise SchemaMigrationError("The historical income review schema is incomplete.")
+
+    if source_columns:
+        invalid_sources = connection.execute(
+            "SELECT COUNT(*) FROM income_sources WHERE effective_from IS NULL "
+            "OR (effective_to IS NOT NULL AND effective_to < effective_from) "
+            "OR amount_tolerance < 0 OR amount_tolerance > 1"
+        ).fetchone()[0]
+        if invalid_sources:
+            raise SchemaMigrationError("Income source dates or tolerances are invalid.")
+    invalid_suggestions = connection.execute(
+        "SELECT COUNT(*) FROM income_match_suggestions WHERE "
+        "confidence < 0 OR confidence > 1 "
+        "OR strength NOT IN ('strong','uncertain') "
+        "OR status NOT IN ('pending','confirmed','dismissed','stale')"
+    ).fetchone()[0]
+    if invalid_suggestions:
+        raise SchemaMigrationError("Historical income suggestions are invalid.")
+
+
+def _apply_revision_22(connection: sqlite3.Connection) -> None:
+    """Add source-preserving enrichment, merchant provenance and relationships."""
+    _add_missing_columns(
+        connection,
+        "transactions",
+        {
+            "semantic_detail": "VARCHAR(32) NOT NULL DEFAULT 'unknown'",
+            "source_bank": "VARCHAR(64)",
+            "source_format_version": "VARCHAR(64)",
+            "value_date": "DATE",
+            "currency": "VARCHAR(3) NOT NULL DEFAULT 'INR'",
+            "running_balance_minor": "BIGINT",
+            "payment_rail": "VARCHAR(32)",
+            "processor_candidate": "VARCHAR(100)",
+            "counterparty_candidate": "VARCHAR(255)",
+            "reference_number": "VARCHAR(64)",
+            "parser_version": "VARCHAR(64)",
+            "extraction_evidence": "TEXT",
+            "vpa_role": "VARCHAR(16)",
+            "review_required": "BOOLEAN NOT NULL DEFAULT 1",
+        },
+    )
+    transaction_columns = _table_columns(connection, "transactions")
+    if transaction_columns:
+        connection.execute(
+            "UPDATE transactions SET currency = 'INR' "
+            "WHERE currency IS NULL OR length(trim(currency)) <> 3"
+        )
+        connection.execute(
+            "UPDATE transactions SET semantic_detail = 'unknown' "
+            "WHERE semantic_detail IS NULL OR trim(semantic_detail) = ''"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_transactions_semantic_detail "
+            "ON transactions(semantic_detail)"
+        )
+        review_index_columns = (
+            "review_required, date" if "date" in transaction_columns else "review_required"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_transactions_review_required "
+            f"ON transactions({review_index_columns})"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_transactions_reference_number "
+            "ON transactions(reference_number)"
+        )
+
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS source_provenance (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            source_type VARCHAR(32) NOT NULL,
+            source_uri VARCHAR(500),
+            source_label VARCHAR(255) NOT NULL,
+            license_note VARCHAR(255),
+            reviewed_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS merchant_entities (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            canonical_name VARCHAR(255) NOT NULL UNIQUE,
+            entity_type VARCHAR(24) NOT NULL DEFAULT 'merchant',
+            category VARCHAR(50),
+            subcategory VARCHAR(50),
+            provenance_id VARCHAR(36),
+            is_verified BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            CONSTRAINT ck_merchant_entities_type CHECK (
+                entity_type IN ('merchant','processor','government','financial')
+            ),
+            FOREIGN KEY(provenance_id) REFERENCES source_provenance(id)
+                ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_merchant_entities_category
+            ON merchant_entities(category);
+
+        CREATE TABLE IF NOT EXISTS merchant_aliases (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            entity_id VARCHAR(36) NOT NULL,
+            normalized_alias VARCHAR(255) NOT NULL,
+            source_bank VARCHAR(64) NOT NULL DEFAULT '',
+            alias_kind VARCHAR(24) NOT NULL DEFAULT 'descriptor',
+            provenance_id VARCHAR(36),
+            is_verified BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_merchant_alias_bank UNIQUE (
+                normalized_alias, source_bank
+            ),
+            CONSTRAINT ck_merchant_aliases_kind CHECK (
+                alias_kind IN ('canonical','descriptor','vpa_name','domain')
+            ),
+            FOREIGN KEY(entity_id) REFERENCES merchant_entities(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(provenance_id) REFERENCES source_provenance(id)
+                ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_merchant_aliases_entity
+            ON merchant_aliases(entity_id);
+
+        CREATE TABLE IF NOT EXISTS merchant_identifiers (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            entity_id VARCHAR(36) NOT NULL,
+            identifier_type VARCHAR(32) NOT NULL,
+            normalized_value VARCHAR(255) NOT NULL,
+            source_bank VARCHAR(64) NOT NULL DEFAULT '',
+            provenance_id VARCHAR(36),
+            is_person BOOLEAN NOT NULL DEFAULT 0,
+            is_verified BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_merchant_identifier_bank UNIQUE (
+                identifier_type, normalized_value, source_bank
+            ),
+            CONSTRAINT ck_merchant_identifiers_type CHECK (
+                identifier_type IN ('vpa','domain','mcc','processor_account')
+            ),
+            FOREIGN KEY(entity_id) REFERENCES merchant_entities(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(provenance_id) REFERENCES source_provenance(id)
+                ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_merchant_identifiers_entity
+            ON merchant_identifiers(entity_id);
+
+        CREATE TABLE IF NOT EXISTS processor_patterns (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            processor_name VARCHAR(100) NOT NULL,
+            pattern_type VARCHAR(24) NOT NULL,
+            pattern VARCHAR(255) NOT NULL,
+            source_bank VARCHAR(64) NOT NULL DEFAULT '',
+            priority INTEGER NOT NULL DEFAULT 100,
+            provenance_id VARCHAR(36),
+            is_enabled BOOLEAN NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_processor_pattern_bank UNIQUE (
+                processor_name, pattern_type, pattern, source_bank
+            ),
+            CONSTRAINT ck_processor_patterns_type CHECK (
+                pattern_type IN ('exact_prefix','contains','regex')
+            ),
+            FOREIGN KEY(provenance_id) REFERENCES source_provenance(id)
+                ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_processor_patterns_enabled_priority
+            ON processor_patterns(is_enabled, priority);
+
+        CREATE TABLE IF NOT EXISTS transaction_relationships (
+            id VARCHAR(36) NOT NULL PRIMARY KEY,
+            from_transaction_id VARCHAR(36) NOT NULL,
+            to_transaction_id VARCHAR(36) NOT NULL,
+            relationship_type VARCHAR(40) NOT NULL,
+            confidence REAL NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            date_gap_days INTEGER NOT NULL,
+            reference_match BOOLEAN NOT NULL DEFAULT 0,
+            evidence_json TEXT NOT NULL DEFAULT '[]',
+            detector_version VARCHAR(32) NOT NULL DEFAULT '1.0',
+            decided_at DATETIME,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            CONSTRAINT uq_transaction_relationship_type UNIQUE (
+                from_transaction_id, to_transaction_id, relationship_type
+            ),
+            CONSTRAINT ck_transaction_relationship_not_self CHECK (
+                from_transaction_id <> to_transaction_id
+            ),
+            CONSTRAINT ck_transaction_relationship_type CHECK (
+                relationship_type IN (
+                    'refund_of','reversal_of','internal_transfer_pair',
+                    'credit_card_payment_pair','wallet_topup_pair','duplicate_of'
+                )
+            ),
+            CONSTRAINT ck_transaction_relationship_status CHECK (
+                status IN ('pending','confirmed','dismissed','voided')
+            ),
+            CONSTRAINT ck_transaction_relationship_confidence CHECK (
+                confidence >= 0 AND confidence <= 1
+            ),
+            FOREIGN KEY(from_transaction_id) REFERENCES transactions(id)
+                ON DELETE CASCADE,
+            FOREIGN KEY(to_transaction_id) REFERENCES transactions(id)
+                ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS ix_transaction_relationships_status
+            ON transaction_relationships(status);
+        CREATE INDEX IF NOT EXISTS ix_transaction_relationships_from
+            ON transaction_relationships(from_transaction_id);
+        CREATE INDEX IF NOT EXISTS ix_transaction_relationships_to
+            ON transaction_relationships(to_transaction_id);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS merchant_alias_fts USING fts5(
+            alias_id UNINDEXED,
+            normalized_alias,
+            tokenize='unicode61 remove_diacritics 2'
+        );
+        CREATE TRIGGER IF NOT EXISTS trg_merchant_alias_fts_insert
+        AFTER INSERT ON merchant_aliases BEGIN
+            INSERT INTO merchant_alias_fts(alias_id, normalized_alias)
+            VALUES (new.id, new.normalized_alias);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_merchant_alias_fts_update
+        AFTER UPDATE OF normalized_alias ON merchant_aliases BEGIN
+            DELETE FROM merchant_alias_fts WHERE alias_id = old.id;
+            INSERT INTO merchant_alias_fts(alias_id, normalized_alias)
+            VALUES (new.id, new.normalized_alias);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_merchant_alias_fts_delete
+        AFTER DELETE ON merchant_aliases BEGIN
+            DELETE FROM merchant_alias_fts WHERE alias_id = old.id;
+        END;
+        INSERT INTO merchant_alias_fts(alias_id, normalized_alias)
+        SELECT a.id, a.normalized_alias
+        FROM merchant_aliases a
+        WHERE NOT EXISTS (
+            SELECT 1 FROM merchant_alias_fts f WHERE f.alias_id = a.id
+        );
+        """
+    )
+
+
+def _validate_revision_22(connection: sqlite3.Connection) -> None:
+    transaction_columns = _table_columns(connection, "transactions")
+    required_transaction_columns = {
+        "semantic_detail",
+        "source_bank",
+        "source_format_version",
+        "value_date",
+        "currency",
+        "running_balance_minor",
+        "payment_rail",
+        "processor_candidate",
+        "counterparty_candidate",
+        "reference_number",
+        "parser_version",
+        "extraction_evidence",
+        "vpa_role",
+        "review_required",
+    }
+    if transaction_columns and required_transaction_columns.difference(
+        transaction_columns
+    ):
+        raise SchemaMigrationError("The transaction enrichment schema is incomplete.")
+
+    required_tables = {
+        "source_provenance",
+        "merchant_entities",
+        "merchant_aliases",
+        "merchant_identifiers",
+        "processor_patterns",
+        "transaction_relationships",
+        "merchant_alias_fts",
+    }
+    existing_tables = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+        ).fetchall()
+    }
+    if required_tables.difference(existing_tables):
+        raise SchemaMigrationError("The merchant enrichment tables are incomplete.")
+
+    if transaction_columns:
+        invalid = connection.execute(
+            "SELECT COUNT(*) FROM transactions WHERE "
+            "currency IS NULL OR length(currency) <> 3 OR currency <> UPPER(currency) "
+            "OR semantic_detail IS NULL "
+            "OR vpa_role NOT IN ('person','merchant','unknown') "
+            "OR running_balance_minor < ? OR running_balance_minor > ?",
+            (-_MAX_MONEY_MINOR, _MAX_MONEY_MINOR),
+        ).fetchone()[0]
+        if invalid:
+            raise SchemaMigrationError("Transaction enrichment values are invalid.")
+
+    invalid_relationships = connection.execute(
+        "SELECT COUNT(*) FROM transaction_relationships WHERE "
+        "from_transaction_id = to_transaction_id OR confidence < 0 OR confidence > 1 "
+        "OR status NOT IN ('pending','confirmed','dismissed','voided')"
+    ).fetchone()[0]
+    if invalid_relationships:
+        raise SchemaMigrationError("Transaction relationships are invalid.")
+
+    try:
+        connection.execute(
+            "SELECT alias_id FROM merchant_alias_fts WHERE merchant_alias_fts MATCH ? LIMIT 1",
+            ("godfin",),
+        ).fetchall()
+    except sqlite3.DatabaseError as exc:
+        raise SchemaMigrationError("SQLite merchant search is unavailable.") from exc
+
+
+MIGRATION_REGISTRY = (
+    SchemaMigration(
+        revision=11,
+        name="consolidate_pre_registry_compatibility_repairs",
+        apply=_apply_revision_11,
+        validate=_validate_revision_11,
+    ),
+    SchemaMigration(
+        revision=12,
+        name="enforce_derived_and_ingestion_identities",
+        apply=_apply_revision_12,
+        validate=_validate_revision_12,
+    ),
+    SchemaMigration(
+        revision=13,
+        name="introduce_exact_ledger_minor_units",
+        apply=_apply_revision_13,
+        validate=_validate_revision_13,
+    ),
+    SchemaMigration(
+        revision=14,
+        name="extend_exact_product_minor_units",
+        apply=_apply_revision_14,
+        validate=_validate_revision_14,
+    ),
+    SchemaMigration(
+        revision=15,
+        name="add_exact_net_worth_and_fx_precision",
+        apply=_apply_revision_15,
+        validate=_validate_revision_15,
+    ),
+    SchemaMigration(
+        revision=16,
+        name="add_recurring_detection_provenance",
+        apply=_apply_revision_16,
+        validate=_validate_revision_16,
+    ),
+    SchemaMigration(
+        revision=17,
+        name="add_durable_background_job_leases",
+        apply=_apply_revision_17,
+        validate=_validate_revision_17,
+    ),
+    SchemaMigration(
+        revision=18,
+        name="add_recoverable_record_deletion",
+        apply=_apply_revision_18,
+        validate=_validate_revision_18,
+    ),
+    SchemaMigration(
+        revision=19,
+        name="apply_legacy_foreign_key_delete_actions",
+        apply=_apply_revision_19,
+        validate=_validate_revision_19,
+    ),
+    SchemaMigration(
+        revision=20,
+        name="add_verified_balance_anchors_and_statement_coverage",
+        apply=_apply_revision_20,
+        validate=_validate_revision_20,
+    ),
+    SchemaMigration(
+        revision=21,
+        name="add_time_aware_income_matching",
+        apply=_apply_revision_21,
+        validate=_validate_revision_21,
+    ),
+    SchemaMigration(
+        revision=22,
+        name="add_transaction_enrichment_and_merchant_entities",
+        apply=_apply_revision_22,
+        validate=_validate_revision_22,
+    ),
+)
+
+
+def read_schema_revision(db_path: str) -> int:
+    path = Path(db_path).expanduser()
+    if not path.exists() or path.stat().st_size == 0:
+        return 0
+
+    try:
+        connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+        try:
+            has_settings = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_settings'"
+            ).fetchone()
+            if not has_settings:
+                return 0
+            row = connection.execute(
+                "SELECT value FROM app_settings WHERE key=?",
+                (SCHEMA_REVISION_KEY,),
+            ).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        raise SchemaMigrationError(
+            "The local database schema revision could not be read safely."
+        ) from exc
+
+    if not row:
+        return 0
+    try:
+        revision = int(row[0])
+    except (TypeError, ValueError) as exc:
+        raise SchemaMigrationError(
+            "The local database contains an invalid schema revision."
+        ) from exc
+    if revision < 0:
+        raise SchemaMigrationError(
+            "The local database contains an invalid schema revision."
+        )
+    return revision
+
+
+def backup_before_schema_update(db_path: str, backup_dir: str) -> Optional[str]:
+    path = Path(db_path).expanduser()
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    revision = read_schema_revision(str(path))
+    if revision > CURRENT_SCHEMA_REVISION:
+        raise SchemaMigrationError(
+            "This database was created by a newer GODFIN version. "
+            "Install that version instead of opening it here."
+        )
+    if revision == CURRENT_SCHEMA_REVISION:
+        return None
+    return create_backup(str(path), backup_dir)
+
+
+def apply_additive_schema_updates(db_path: str) -> None:
+    """Apply the ordered compatibility registry in one SQLite transaction."""
+    path = Path(db_path).expanduser()
+    if not path.exists() or path.stat().st_size == 0:
+        return
+
+    revision = read_schema_revision(str(path))
+    if revision > CURRENT_SCHEMA_REVISION:
+        raise SchemaMigrationError(
+            "This database was created by a newer GODFIN version. "
+            "Install that version instead of opening it here."
+        )
+
+    connection = sqlite3.connect(path, timeout=1.0)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("BEGIN IMMEDIATE")
+        for migration in MIGRATION_REGISTRY:
+            if revision < migration.revision:
+                migration.apply(connection)
+            migration.validate(connection)
+
+        quick_check = connection.execute("PRAGMA quick_check").fetchone()
+        if quick_check != ("ok",):
+            raise SchemaMigrationError(
+                "The local database failed its migration integrity check."
+            )
+        foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchone()
+        if foreign_key_errors is not None:
+            raise SchemaMigrationError(
+                "The local database contains broken relationships after migration."
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def validate_schema_postconditions(db_path: str) -> None:
+    """Verify the recorded revision and database integrity after startup."""
+    revision = read_schema_revision(db_path)
+    if revision != CURRENT_SCHEMA_REVISION:
+        raise SchemaMigrationError(
+            "GODFIN did not finish updating the local database schema."
+        )
+    connection = sqlite3.connect(
+        f"file:{Path(db_path).expanduser().resolve()}?mode=ro",
+        uri=True,
+    )
+    try:
+        for migration in MIGRATION_REGISTRY:
+            migration.validate(connection)
+        if connection.execute("PRAGMA quick_check").fetchone() != ("ok",):
+            raise SchemaMigrationError(
+                "The local database failed its post-migration integrity check."
+            )
+        if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise SchemaMigrationError(
+                "The local database contains broken relationships."
+            )
+    finally:
+        connection.close()
+
+
+def run_post_create_migrations(db: Session) -> None:
+    """Backfill transaction semantics and auditable opening balances."""
+    from app.core.transaction_semantics import backfill_transaction_semantics
+
+    backfill_transaction_semantics(db)
+    goals = db.query(Goal).filter(Goal.current_saved > 0).all()
+    for goal in goals:
+        existing = (
+            db.query(GoalContribution.id)
+            .filter(GoalContribution.goal_id == goal.id)
+            .first()
+        )
+        if existing:
+            continue
+        db.add(
+            GoalContribution(
+                goal_id=goal.id,
+                amount=round(float(goal.current_saved), 2),
+                contribution_date=goal.created_at.date(),
+                entry_type="deposit",
+                source_type="opening_balance",
+                idempotency_key=f"opening:{goal.id}",
+                note="Opening balance migrated from the existing goal total.",
+            )
+        )
+    db.commit()
+
+
+def record_schema_revision(db: Session) -> None:
+    setting = db.query(AppSetting).filter_by(key=SCHEMA_REVISION_KEY).first()
+    if setting is not None:
+        try:
+            existing_revision = int(setting.value)
+        except (TypeError, ValueError) as exc:
+            raise SchemaMigrationError(
+                "The local database contains an invalid schema revision."
+            ) from exc
+        if existing_revision > CURRENT_SCHEMA_REVISION:
+            raise SchemaMigrationError(
+                "This database was created by a newer GODFIN version."
+            )
+    value = str(CURRENT_SCHEMA_REVISION)
+    if setting is None:
+        db.add(AppSetting(key=SCHEMA_REVISION_KEY, value=value))
+    else:
+        setting.value = value
+    db.commit()

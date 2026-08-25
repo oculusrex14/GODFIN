@@ -1,67 +1,86 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-export default function PinInput({ length = 4, onComplete }) {
-  const [digits, setDigits] = useState(Array(length).fill(''));
-  const inputsRef = useRef([]);
+export default function PinInput({
+  minLength = 4,
+  maxLength = 4,
+  displayLength = null,
+  value,
+  onChange,
+  onComplete,
+  autoSubmit = true,
+  disabled = false,
+  label = 'PIN',
+}) {
+  const [internalValue, setInternalValue] = useState('');
+  const [focused, setFocused] = useState(false);
+  const [selection, setSelection] = useState(0);
+  const inputRef = useRef(null);
+  const pin = value ?? internalValue;
+  const slotCount = displayLength ?? maxLength;
 
   useEffect(() => {
-    inputsRef.current[0]?.focus();
+    inputRef.current?.focus();
   }, []);
 
-  function handleChange(index, value) {
-    if (!/^\d?$/.test(value)) return;
-    const next = [...digits];
-    next[index] = value;
-    setDigits(next);
-
-    if (value && index < length - 1) {
-      inputsRef.current[index + 1]?.focus();
+  function updatePin(nextValue) {
+    const next = nextValue.replace(/\D/g, '').slice(0, maxLength);
+    if (value === undefined) {
+      setInternalValue(next);
     }
-
-    if (value && index === length - 1) {
-      const pin = next.join('');
-      if (pin.length === length) onComplete(pin);
-    }
-  }
-
-  function handleKeyDown(index, e) {
-    if (e.key === 'Backspace' && !digits[index] && index > 0) {
-      inputsRef.current[index - 1]?.focus();
-    }
-  }
-
-  function handlePaste(e) {
-    e.preventDefault();
-    const text = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, length);
-    if (!text) return;
-    const next = Array(length).fill('');
-    text.split('').forEach((ch, i) => { next[i] = ch; });
-    setDigits(next);
-    if (text.length === length) {
-      onComplete(text);
-    } else {
-      inputsRef.current[text.length]?.focus();
+    onChange?.(next);
+    if (autoSubmit && next.length === maxLength) {
+      onComplete?.(next);
     }
   }
 
   return (
-    <div className="flex gap-3 justify-center" onPaste={handlePaste}>
-      {digits.map((d, i) => (
-        <input
-          key={i}
-          ref={(el) => (inputsRef.current[i] = el)}
-          type="password"
-          inputMode="numeric"
-          enterKeyHint={i === length - 1 ? 'done' : 'next'}
-          aria-label={`PIN digit ${i + 1}`}
-          maxLength={1}
-          value={d}
-          onChange={(e) => handleChange(i, e.target.value)}
-          onKeyDown={(e) => handleKeyDown(i, e)}
-          className="w-14 h-14 touch-manipulation text-center text-[1.2rem] bg-white/[0.06] backdrop-blur-[12px] border border-white/[0.15] rounded-[16px] text-white/90 focus:outline-none focus:border-cyan-400/40 transition-all shadow-[inset_0_2px_4px_rgba(0,0,0,0.1)]"
-          autoComplete="off"
-        />
-      ))}
+    <div
+      className={`relative flex min-h-14 items-center justify-center gap-2.5 sm:gap-3 transition-opacity ${
+        disabled ? 'opacity-50' : ''
+      }`}
+      data-pin-slots={slotCount}
+    >
+      <input
+        ref={inputRef}
+        type="password"
+        inputMode="numeric"
+        enterKeyHint="done"
+        aria-label={label}
+        aria-describedby="pin-length-hint"
+        minLength={minLength}
+        maxLength={maxLength}
+        pattern={`[0-9]{${minLength},${maxLength}}`}
+        value={pin}
+        disabled={disabled}
+        onChange={(event) => {
+          updatePin(event.target.value);
+          setSelection(event.target.selectionStart ?? event.target.value.length);
+        }}
+        onFocus={(event) => {
+          setFocused(true);
+          setSelection(event.target.selectionStart ?? pin.length);
+        }}
+        onBlur={() => setFocused(false)}
+        onSelect={(event) => setSelection(event.currentTarget.selectionStart ?? pin.length)}
+        autoComplete="off"
+        className="absolute inset-0 z-10 h-full w-full cursor-text touch-manipulation opacity-[0.01]"
+      />
+      {Array.from({ length: slotCount }, (_, index) => {
+        const active = focused && Math.min(selection, slotCount - 1) === index;
+        return (
+          <span
+            key={index}
+            aria-hidden="true"
+            className={`grid h-14 w-12 sm:w-14 place-items-center rounded-[16px] border bg-white/[0.08] text-xl text-ink-primary shadow-[inset_0_2px_4px_rgba(0,0,0,0.1)] transition-all ${
+              active
+                ? 'border-cyan-300/45 ring-2 ring-cyan-300/15'
+                : 'border-white/[0.18]'
+            }`}
+          >
+            {index < pin.length ? '•' : ''}
+          </span>
+        );
+      })}
     </div>
   );
 }

@@ -1,15 +1,47 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
+import multiprocessing
+import os
+import re
+import secrets
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import conditional_entitlement, enforce_feature
 from app.core.auth import get_current_user
+from app.core.account_balances import (
+    balance_at_date,
+    record_verified_statement_controls,
+)
+from app.core.api_errors import APIErrorResponse
+from app.core.audit import FinalizedPeriodError
 from app.core.classifier import classify_transaction
 from app.core.database import get_db
+from app.core.errors import LocalOperationError, StateConflictError
 from app.core.merchant_memory_service import upsert_merchant_memory
+from app.core.manual_income import link_exact_statement_manual_income_matches
+from app.core.import_postprocessing import postprocess_imported_transactions
+from app.core.mapped_import import (
+    GENERIC_MAPPING_VERSION,
+    MappedImportError,
+    inspect_mapped_sheet,
+    mapping_fingerprint,
+    parse_mapped_sheet,
+    sample_rows,
+    suggested_mapping,
+)
 from app.core.parsers import account_requirements, parse_registered_statement
 from app.core.reconciliation import (
     ReconciliationService,
@@ -17,10 +49,29 @@ from app.core.reconciliation import (
     reconcile_statement,
 )
 from app.core.statement_parser import ParsedStatement
+from app.core.statement_file_safety import UnsafeStatementFile, validate_statement_file
+from app.core.transaction_semantics import (
+    TransactionSemantic,
+    apply_category_semantic,
+)
+from app.core.transaction_enrichment import refresh_transaction_enrichment
 from app.models.account import Account
 from app.models.income_source import IncomeSource
 from app.models.transaction import Transaction
-from app.schemas.statement import IncomeSourceCreate, IncomeSourceUpdate
+from app.schemas.statement import (
+    IncomeSourceCreate,
+    IncomeSourceCreatedResponse,
+    IncomeSourceResponse,
+    IncomeSourceUpdate,
+    IncomeSourceUpdatedResponse,
+    MappedImportMapping,
+    MappedImportResponse,
+    MappedInspectResponse,
+    MappedPreviewResponse,
+    StatementImportResponse,
+    StatementPreviewResponse,
+    StatementReconcileResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,36 +80,377 @@ router = APIRouter()
 
 # --- Helpers ---
 
-def _resolve_account_id(db: Session, statement_type: str, account_id: str = None) -> str:
-    """Resolve account_id from statement type if not provided."""
+def _resolve_account_id(db: Session, parse_result, account_id: str = None) -> str:
+    """Resolve one active account and prove it matches the parsed statement."""
+    bank, account_type = account_requirements(parse_result.statement_type)
     if account_id:
         acct = db.query(Account).filter_by(id=account_id, is_active=True).first()
         if not acct:
             raise HTTPException(status_code=400, detail="Invalid account_id")
-        if acct.bank.upper() != "HDFC":
-            from app.api.v1.endpoints.license import enforce_feature
-
-            enforce_feature(db, "multi_bank")
+        if bank and acct.bank.upper() != bank.upper():
+            raise HTTPException(
+                status_code=409,
+                detail="The selected account bank does not match this statement.",
+            )
+        if account_type and acct.account_type != account_type:
+            raise HTTPException(
+                status_code=409,
+                detail="The selected account type does not match this statement.",
+            )
+        parsed_last4 = getattr(parse_result, "account_last4", None)
+        if parsed_last4 and acct.last_4_digits != parsed_last4:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The selected account's last four digits do not match this statement."
+                ),
+            )
         return account_id
 
-    bank, account_type = account_requirements(statement_type)
     query = db.query(Account).filter_by(is_active=True)
     if bank:
         query = query.filter(Account.bank == bank)
     if account_type:
         query = query.filter(Account.account_type == account_type)
-    acct = query.order_by(Account.created_at.asc()).first()
+    parsed_last4 = getattr(parse_result, "account_last4", None)
+    if parsed_last4:
+        query = query.filter(Account.last_4_digits == parsed_last4)
+    accounts = query.order_by(Account.created_at.asc()).all()
 
-    if not acct:
-        raise HTTPException(status_code=400, detail="No matching account found. Please specify account_id.")
-    if acct.bank.upper() != "HDFC":
-        from app.api.v1.endpoints.license import enforce_feature
+    if not accounts:
+        raise HTTPException(
+            status_code=400,
+            detail="No active account matches the bank statement. Add or select the account.",
+        )
+    if len(accounts) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="More than one account matches this statement. Select the correct account.",
+        )
+    return accounts[0].id
 
-        enforce_feature(db, "multi_bank")
-    return acct.id
+
+def _statement_balance_snapshot(
+    db: Session,
+    account_id: str,
+    parse_result,
+) -> dict[str, object]:
+    statement_balance = parse_result.closing_balance
+    if parse_result.period_end is None:
+        return {
+            "statement_closing_balance": statement_balance,
+            "computed_balance": None,
+            "balance_discrepancy": None,
+            "balance_status": "unverified_no_anchor",
+            "coverage_complete": False,
+            "missing_ranges": [],
+        }
+    result = balance_at_date(db, account_id, parse_result.period_end)
+    computed = float(result.balance) if result.balance is not None else None
+    discrepancy = (
+        round(float(statement_balance) - computed, 2)
+        if statement_balance is not None and computed is not None
+        else None
+    )
+    return {
+        "statement_closing_balance": statement_balance,
+        "computed_balance": computed,
+        "balance_discrepancy": discrepancy,
+        "balance_status": result.status,
+        "coverage_complete": result.coverage_complete,
+        "missing_ranges": list(result.missing_ranges),
+    }
+
+
+async def _read_mapped_sheet(file: UploadFile):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    if not file.filename.lower().endswith((".csv", ".xlsx")):
+        raise HTTPException(
+            status_code=400,
+            detail="Guided mapping supports CSV and XLSX files.",
+        )
+    contents_buffer = bytearray()
+    while True:
+        chunk = await file.read(STATEMENT_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        contents_buffer.extend(chunk)
+        if len(contents_buffer) > MAX_STATEMENT_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+    try:
+        return inspect_mapped_sheet(bytes(contents_buffer), file.filename)
+    except MappedImportError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "GODFIN could not safely read this spreadsheet. Check that it "
+                "is a single-sheet UTF-8 CSV or XLSX within the stated limits."
+            ),
+        ) from exc
+
+
+def _mapped_mapping(mapping_json: str) -> MappedImportMapping:
+    try:
+        return MappedImportMapping.model_validate_json(mapping_json)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected spreadsheet columns are incomplete or invalid.",
+        ) from exc
+
+
+def _mapped_account(db: Session, account_id: str) -> Account:
+    enforce_feature(db, "generic_mapped_import")
+    account = (
+        db.query(Account)
+        .filter_by(id=account_id, is_active=True)
+        .first()
+    )
+    if not account:
+        raise HTTPException(status_code=400, detail="Select an active account.")
+    return account
+
+
+def _validate_mapped_account_identity(
+    account: Account,
+    identifiers: tuple[str, ...],
+) -> None:
+    for identifier in identifiers:
+        digits = re.sub(r"\D", "", identifier)
+        if len(digits) >= 4 and digits[-4:] != account.last_4_digits:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The mapped account identifier does not match the selected "
+                    "account's last four digits."
+                ),
+            )
+
+
+def _mapped_preview_rows(statement, limit: int = 100) -> list[dict[str, object]]:
+    return [
+        {
+            "date": str(transaction.date),
+            "description": transaction.description,
+            "amount": transaction.amount,
+            "type": transaction.txn_type,
+            "reference": transaction.ref_number,
+            "instrument": transaction.instrument,
+            "is_transfer": transaction.is_transfer,
+            "is_income": transaction.is_income,
+            "semantic_type": transaction.semantic_type,
+            "merchant_name": transaction.merchant_name,
+        }
+        for transaction in statement.transactions[:limit]
+    ]
 
 
 SUPPORTED_EXTENSIONS = ('.pdf', '.xls', '.xlsx')
+MAX_STATEMENT_BYTES = 10 * 1024 * 1024
+STATEMENT_READ_CHUNK_BYTES = 1024 * 1024
+MAX_PARSED_TRANSACTIONS = 10_000
+PARSER_TIMEOUT_SECONDS = 45.0
+PARSER_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024
+PARSER_CPU_LIMIT_SECONDS = 40
+_PARSER_SLOTS = threading.BoundedSemaphore(value=2)
+
+
+class StatementParserTimeout(RuntimeError):
+    """A statement parser worker exceeded its interactive safety budget."""
+
+
+class StatementParserWorkerError(RuntimeError):
+    """A statement parser worker crashed or returned an invalid result."""
+
+
+class StatementParserSandboxError(RuntimeError):
+    """The worker could not establish its required local safety controls."""
+
+
+def _apply_parser_resource_limits() -> None:
+    """Apply every supported OS process limit and fail closed on Linux."""
+    try:
+        import resource
+    except ImportError:
+        if sys.platform.startswith("linux"):
+            raise StatementParserSandboxError(
+                "Parser resource controls are unavailable."
+            )
+        return
+    limits = (
+        (resource.RLIMIT_CPU, PARSER_CPU_LIMIT_SECONDS),
+        (resource.RLIMIT_FSIZE, 1024 * 1024),
+        (resource.RLIMIT_NOFILE, 64),
+        (resource.RLIMIT_CORE, 0),
+    )
+    try:
+        for kind, ceiling in limits:
+            resource.setrlimit(kind, (ceiling, ceiling))
+        if sys.platform.startswith("linux"):
+            resource.setrlimit(
+                resource.RLIMIT_AS,
+                (PARSER_MEMORY_LIMIT_BYTES, PARSER_MEMORY_LIMIT_BYTES),
+            )
+    except (OSError, ValueError) as exc:
+        if sys.platform.startswith("linux"):
+            raise StatementParserSandboxError(
+                "Parser resource controls could not be applied."
+            ) from exc
+
+
+def _deny_parser_network_and_subprocesses() -> None:
+    """Remove capabilities that financial document parsers never require."""
+
+    def blocked(*_args, **_kwargs):
+        raise PermissionError("This parser worker has no network or subprocess access.")
+
+    socket.socket = blocked
+    socket.create_connection = blocked
+    subprocess.Popen = blocked
+    subprocess.run = blocked
+    subprocess.call = blocked
+    subprocess.check_call = blocked
+    subprocess.check_output = blocked
+    os.system = blocked
+
+
+def _statement_parser_worker(
+    send_connection,
+    contents: bytes,
+    file_format: str,
+    password: Optional[str],
+    account_last4: Optional[str],
+) -> None:
+    """Parse one untrusted statement in a disposable child process."""
+    try:
+        _apply_parser_resource_limits()
+        validate_statement_file(contents, file_format)
+        _deny_parser_network_and_subprocesses()
+        original_directory = os.getcwd()
+        with tempfile.TemporaryDirectory(prefix="godfin-parser-") as work_directory:
+            os.chmod(work_directory, 0o700)
+            os.chdir(work_directory)
+            try:
+                result = parse_registered_statement(
+                    contents,
+                    file_format,
+                    password,
+                    account_last4,
+                )
+            finally:
+                os.chdir(original_directory)
+        if len(result.transactions) > MAX_PARSED_TRANSACTIONS:
+            result.transactions.clear()
+            result.reconciliation_status = "failed"
+            result.errors.append(
+                f"Statement exceeds the {MAX_PARSED_TRANSACTIONS:,}-row review limit"
+            )
+        send_connection.send(("ok", result))
+    except BaseException:
+        # Deliberately do not send exception text or a traceback across the
+        # trust boundary; parser/library errors may contain private file data.
+        try:
+            send_connection.send(("error", None))
+        except (BrokenPipeError, EOFError, OSError):
+            pass
+    finally:
+        send_connection.close()
+
+
+def _terminate_parser_process(process: multiprocessing.Process) -> None:
+    if not process.is_alive():
+        process.join(timeout=0.2)
+        return
+    process.terminate()
+    process.join(timeout=2.0)
+    if process.is_alive() and hasattr(process, "kill"):
+        process.kill()
+        process.join(timeout=1.0)
+
+
+def _run_parser_process(
+    contents: bytes,
+    file_format: str,
+    password: Optional[str],
+    cancel_event: threading.Event,
+    account_last4: Optional[str] = None,
+    *,
+    timeout_seconds: float = PARSER_TIMEOUT_SECONDS,
+):
+    """Run and supervise one parser process with timeout and cancellation."""
+    context = multiprocessing.get_context("spawn")
+    receive_connection, send_connection = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_statement_parser_worker,
+        args=(send_connection, contents, file_format, password, account_last4),
+        daemon=True,
+        name="godfin-statement-parser",
+    )
+    started_at = time.monotonic()
+    process_started = False
+    try:
+        process.start()
+        process_started = True
+        send_connection.close()
+        while True:
+            if cancel_event.is_set():
+                raise asyncio.CancelledError
+            if receive_connection.poll(0.05):
+                try:
+                    status, payload = receive_connection.recv()
+                except EOFError as exc:
+                    raise StatementParserWorkerError(
+                        "The statement parser stopped unexpectedly."
+                    ) from exc
+                process.join(timeout=1.0)
+                if status != "ok" or payload is None:
+                    raise StatementParserWorkerError(
+                        "The statement parser could not inspect this file safely."
+                    )
+                return payload
+            if not process.is_alive():
+                process.join(timeout=0.2)
+                raise StatementParserWorkerError(
+                    "The statement parser stopped unexpectedly."
+                )
+            if time.monotonic() - started_at >= timeout_seconds:
+                raise StatementParserTimeout(
+                    "Statement inspection exceeded the safe time limit."
+                )
+    finally:
+        receive_connection.close()
+        send_connection.close()
+        if process_started:
+            _terminate_parser_process(process)
+
+
+async def _parse_in_isolated_process(
+    contents: bytes,
+    file_format: str,
+    password: Optional[str],
+    account_last4: Optional[str] = None,
+):
+    cancel_event = threading.Event()
+    task = asyncio.create_task(
+        asyncio.to_thread(
+            _run_parser_process,
+            contents,
+            file_format,
+            password,
+            cancel_event,
+            account_last4,
+        )
+    )
+    try:
+        return await task
+    except asyncio.CancelledError:
+        cancel_event.set()
+        try:
+            await asyncio.shield(task)
+        except (asyncio.CancelledError, StatementParserTimeout, StatementParserWorkerError):
+            pass
+        raise
 
 
 def _detect_file_format(filename: str, contents: bytes) -> str:
@@ -80,7 +472,11 @@ def _detect_file_format(filename: str, contents: bytes) -> str:
     return 'unknown'
 
 
-async def _read_and_parse(file: UploadFile, password: Optional[str]):
+async def _read_and_parse(
+    file: UploadFile,
+    password: Optional[str],
+    account_last4: Optional[str] = None,
+):
     """Read file and parse PDF or XLS, returning the parse result."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
@@ -89,16 +485,62 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
     if not any(lower_name.endswith(ext) for ext in SUPPORTED_EXTENSIONS):
         raise HTTPException(status_code=400, detail="Supported formats: PDF, XLS, XLSX")
 
-    contents = await file.read()
-
-    if len(contents) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+    contents_buffer = bytearray()
+    while True:
+        chunk = await file.read(STATEMENT_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        contents_buffer.extend(chunk)
+        if len(contents_buffer) > MAX_STATEMENT_BYTES:
+            raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+    contents = bytes(contents_buffer)
 
     fmt = _detect_file_format(file.filename, contents)
 
     if fmt not in {"pdf", "xls", "xlsx"}:
         raise HTTPException(status_code=400, detail="Unrecognized file format")
-    parse_result = parse_registered_statement(contents, fmt, password=password)
+    try:
+        validate_statement_file(contents, fmt)
+    except UnsafeStatementFile as exc:
+        logger.info("Statement safety preflight rejected an upload", exc_info=exc)
+        raise HTTPException(
+            status_code=400,
+            detail="This statement file failed the safety check and was not opened.",
+        ) from exc
+    if not _PARSER_SLOTS.acquire(blocking=False):
+        raise HTTPException(
+            status_code=429,
+            detail="Two statements are already being inspected. Try again shortly.",
+            headers={"Retry-After": "3"},
+        )
+    try:
+        try:
+            if account_last4:
+                parse_result = await _parse_in_isolated_process(
+                    contents,
+                    fmt,
+                    password,
+                    account_last4,
+                )
+            else:
+                parse_result = await _parse_in_isolated_process(
+                    contents,
+                    fmt,
+                    password,
+                )
+        except StatementParserTimeout as exc:
+            raise HTTPException(
+                status_code=408,
+                detail="Statement inspection timed out. Try a smaller statement.",
+            ) from exc
+        except StatementParserWorkerError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="The statement could not be inspected safely.",
+            ) from exc
+    finally:
+        _PARSER_SLOTS.release()
+    parse_result.source_digest = hashlib.sha256(contents).hexdigest()
 
     if parse_result.errors:
         raise HTTPException(
@@ -112,28 +554,291 @@ async def _read_and_parse(file: UploadFile, password: Optional[str]):
             detail="No transactions found in statement",
         )
 
+    if not parse_result.recognized or parse_result.reconciliation_status != "passed":
+        raise HTTPException(
+            status_code=400,
+            detail="Statement type or financial controls could not be verified",
+        )
+
     return parse_result
+
+
+# --- Guided CSV/XLSX mapping ---
+
+@router.post(
+    "/ingest/mapped/inspect",
+    response_model=MappedInspectResponse,
+)
+@conditional_entitlement("generic_mapped_import")
+async def inspect_mapped_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    enforce_feature(db, "generic_mapped_import")
+    sheet = await _read_mapped_sheet(file)
+    data_rows = sum(
+        1
+        for row in sheet.rows[sheet.header_row + 1 :]
+        if any(str(value or "").strip() for value in row)
+    )
+    return {
+        "file_format": sheet.file_format,
+        "source_fingerprint": sheet.source_fingerprint,
+        "header_signature": sheet.header_signature,
+        "header_row": sheet.header_row + 1,
+        "row_count": data_rows,
+        "columns": [
+            {"index": index, "label": label}
+            for index, label in enumerate(sheet.headers)
+        ],
+        "sample_rows": sample_rows(sheet),
+        "suggested_mapping": suggested_mapping(sheet.headers),
+    }
+
+
+@router.post(
+    "/ingest/mapped/preview",
+    response_model=MappedPreviewResponse,
+)
+@conditional_entitlement("generic_mapped_import")
+async def preview_mapped_import(
+    file: UploadFile = File(...),
+    account_id: str = Form(..., min_length=1, max_length=36),
+    mapping_json: str = Form(..., min_length=2, max_length=2_000),
+    date_format: str = Form(
+        "dd/mm/yyyy",
+        pattern=r"^(auto|dd/mm/yyyy|dd-mm-yyyy|yyyy-mm-dd|mm/dd/yyyy)$",
+    ),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    account = _mapped_account(db, account_id)
+    sheet = await _read_mapped_sheet(file)
+    mapping = _mapped_mapping(mapping_json)
+    try:
+        parsed = parse_mapped_sheet(sheet, mapping, date_format=date_format)
+    except MappedImportError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The selected columns or date style cannot be used safely. "
+                "Review the mapping and try again."
+            ),
+        ) from exc
+    _validate_mapped_account_identity(account, parsed.identifiers)
+
+    reconciliation = None
+    if not parsed.errors:
+        reconciliation = ReconciliationService.reconcile(
+            db,
+            ParsedStatement.from_statement_result(parsed.statement),
+            account.id,
+        )
+    mapped_fingerprint = mapping_fingerprint(sheet, mapping, date_format)
+    return {
+        "account_id": account.id,
+        "source_fingerprint": sheet.source_fingerprint,
+        "mapping_fingerprint": mapped_fingerprint,
+        "header_signature": sheet.header_signature,
+        "parser_profile": "generic_mapped",
+        "mapping_version": GENERIC_MAPPING_VERSION,
+        "total_rows": len(parsed.statement.transactions) + len(parsed.errors),
+        "matched_count": (
+            len(reconciliation.duplicate_transactions) if reconciliation else 0
+        ),
+        "possible_count": (
+            len(reconciliation.potential_duplicates) if reconciliation else 0
+        ),
+        "new_count": reconciliation.total_new if reconciliation else 0,
+        "preview_rows": _mapped_preview_rows(parsed.statement),
+        "preview_truncated": len(parsed.statement.transactions) > 100,
+        "total_debits": parsed.statement.total_debits or 0,
+        "total_credits": parsed.statement.total_credits or 0,
+        "running_balance_mapped": mapping.running_balance_column is not None,
+        "balance_controls_verified": (
+            parsed.statement.reconciliation_status == "passed"
+        ),
+        "opening_balance": parsed.statement.opening_balance,
+        "closing_balance": parsed.statement.closing_balance,
+        "status": "needs_review" if parsed.errors else "ready",
+        "errors": [error.to_dict() for error in parsed.errors],
+        "account_identifiers": [
+            f"••••{re.sub(r'\D', '', value)[-4:]}"
+            if len(re.sub(r"\D", "", value)) >= 4
+            else "Present"
+            for value in parsed.identifiers
+        ],
+    }
+
+
+@router.post(
+    "/ingest/mapped/import",
+    response_model=MappedImportResponse,
+)
+@conditional_entitlement("generic_mapped_import")
+async def import_mapped_spreadsheet(
+    file: UploadFile = File(...),
+    account_id: str = Form(..., min_length=1, max_length=36),
+    mapping_json: str = Form(..., min_length=2, max_length=2_000),
+    date_format: str = Form(
+        "dd/mm/yyyy",
+        pattern=r"^(auto|dd/mm/yyyy|dd-mm-yyyy|yyyy-mm-dd|mm/dd/yyyy)$",
+    ),
+    confirm_mapping: bool = Form(False),
+    accepted_fingerprint: str = Form(..., min_length=64, max_length=64),
+    accepted_mapping_fingerprint: str = Form(..., min_length=64, max_length=64),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    try:
+        if not confirm_mapping:
+            raise HTTPException(
+                status_code=400,
+                detail="Review the mapped rows and explicitly confirm before importing.",
+            )
+        account = _mapped_account(db, account_id)
+        sheet = await _read_mapped_sheet(file)
+        mapping = _mapped_mapping(mapping_json)
+        mapped_fingerprint = mapping_fingerprint(sheet, mapping, date_format)
+        if not secrets.compare_digest(
+            accepted_fingerprint.lower(), sheet.source_fingerprint
+        ) or not secrets.compare_digest(
+            accepted_mapping_fingerprint.lower(), mapped_fingerprint
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The file or its column mapping changed after review. "
+                    "Preview it again before importing."
+                ),
+            )
+        parsed = parse_mapped_sheet(sheet, mapping, date_format=date_format)
+        _validate_mapped_account_identity(account, parsed.identifiers)
+        if parsed.errors:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Fix every highlighted spreadsheet row before importing. "
+                    "No rows were saved."
+                ),
+            )
+
+        statement = ParsedStatement.from_statement_result(parsed.statement)
+        reconciliation = ReconciliationService.reconcile(
+            db, statement, account.id
+        )
+        imported = import_new_transactions(
+            db,
+            reconciliation.new_transactions,
+            account.id,
+            source="mapped_import",
+        )
+        postprocess = postprocess_imported_transactions(
+            db,
+            imported,
+            reconciliation.new_transactions,
+        )
+        controls_verified = parsed.statement.reconciliation_status == "passed"
+        if controls_verified and not reconciliation.potential_duplicates:
+            record_verified_statement_controls(db, account.id, parsed.statement)
+        db.commit()
+        balance_snapshot = _statement_balance_snapshot(
+            db, account.id, parsed.statement
+        )
+        return {
+            "source_fingerprint": sheet.source_fingerprint,
+            "mapping_fingerprint": mapped_fingerprint,
+            "total_parsed": reconciliation.total_parsed,
+            "imported": len(imported),
+            "skipped_duplicate": len(reconciliation.duplicate_transactions),
+            "possible_duplicate": len(reconciliation.potential_duplicates),
+            "classified": postprocess.classified,
+            "review_queue": postprocess.review_queue,
+            "balance_controls_verified": controls_verified,
+            "balance_status": balance_snapshot["balance_status"],
+            "coverage_complete": bool(balance_snapshot["coverage_complete"]),
+            "errors": [],
+        }
+    except FinalizedPeriodError as exc:
+        db.rollback()
+        raise StateConflictError(
+            code="FINALIZED_PERIOD_READ_ONLY",
+            message=(
+                "This spreadsheet includes a finalized month that is read-only. "
+                "Reopen the month before importing."
+            ),
+            hint="Reopen that month before importing these transactions.",
+        ) from exc
+    except HTTPException:
+        db.rollback()
+        raise
+    except MappedImportError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The reviewed spreadsheet mapping is no longer valid. "
+                "Preview the file again before importing."
+            ),
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        raise LocalOperationError(
+            code="MAPPED_IMPORT_FAILED",
+            message="GODFIN could not complete this spreadsheet import.",
+            hint="No partial import was kept. Review the mapping and try again.",
+            status_code=503,
+        ) from exc
 
 
 # --- Statement Upload (3-step flow) ---
 
-@router.post("/ingest/upload/preview")
+@router.post(
+    "/ingest/upload/preview",
+    response_model=StatementPreviewResponse,
+)
 async def preview_statement(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
+    account_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Step 1: Parse PDF and return transaction preview. No database writes."""
-    parse_result = await _read_and_parse(file, password)
+    selected_account = (
+        db.query(Account).filter_by(id=account_id, is_active=True).first()
+        if account_id
+        else None
+    )
+    if account_id and selected_account is None:
+        raise HTTPException(status_code=400, detail="Invalid account_id")
+    parse_result = (
+        await _read_and_parse(file, password, selected_account.last_4_digits)
+        if selected_account
+        else await _read_and_parse(file, password)
+    )
+    if selected_account:
+        _resolve_account_id(db, parse_result, selected_account.id)
 
     # Convert to ParsedStatement for consistent output
     parsed = ParsedStatement.from_statement_result(parse_result)
 
     return {
         "statement_type": parse_result.statement_type,
+        "parser_profile": parse_result.parser_profile,
+        "recognized": parse_result.recognized,
+        "reconciliation_status": parse_result.reconciliation_status,
+        "reconciliation_method": parse_result.reconciliation_method,
+        "parse_fingerprint": parse_result.source_digest,
         "period_start": str(parse_result.period_start) if parse_result.period_start else None,
         "period_end": str(parse_result.period_end) if parse_result.period_end else None,
+        "control_totals": {
+            "opening_balance": parse_result.opening_balance,
+            "closing_balance": parse_result.closing_balance,
+            "total_debits": parse_result.total_debits,
+            "total_credits": parse_result.total_credits,
+        },
         "total_transactions": len(parsed.transactions),
         "transactions": [
             {
@@ -145,6 +850,7 @@ async def preview_statement(
                 "instrument": t.instrument,
                 "is_transfer": t.is_transfer,
                 "is_income": t.is_income,
+                "semantic_type": t.semantic_type,
                 "merchant_name": t.merchant_name,
             }
             for t in parsed.transactions
@@ -152,7 +858,10 @@ async def preview_statement(
     }
 
 
-@router.post("/ingest/upload/reconcile")
+@router.post(
+    "/ingest/upload/reconcile",
+    response_model=StatementReconcileResponse,
+)
 async def reconcile_statement_preview(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
@@ -161,60 +870,48 @@ async def reconcile_statement_preview(
     _user: bool = Depends(get_current_user),
 ):
     """Step 2: Parse + reconcile against existing transactions. No imports."""
-    parse_result = await _read_and_parse(file, password)
+    selected_account = (
+        db.query(Account).filter_by(id=account_id, is_active=True).first()
+        if account_id
+        else None
+    )
+    if account_id and selected_account is None:
+        raise HTTPException(status_code=400, detail="Invalid account_id")
+    parse_result = (
+        await _read_and_parse(file, password, selected_account.last_4_digits)
+        if selected_account
+        else await _read_and_parse(file, password)
+    )
     parsed = ParsedStatement.from_statement_result(parse_result)
 
-    resolved_account_id = _resolve_account_id(db, parse_result.statement_type, account_id)
+    resolved_account_id = _resolve_account_id(db, parse_result, account_id)
 
     recon_result = ReconciliationService.reconcile(db, parsed, resolved_account_id)
     income_txns = ReconciliationService.detect_income_sources(db, parsed)
 
-    # Balance reconciliation
-    statement_closing_balance = None
-    computed_balance = None
-    balance_discrepancy = None
-
-    # Get closing balance from the last transaction in sorted order
-    sorted_txns = sorted(parsed.transactions, key=lambda t: t.date)
-    if sorted_txns and sorted_txns[-1].balance is not None:
-        statement_closing_balance = sorted_txns[-1].balance
-
-        # Compute system balance for this account up to statement period end
-        from sqlalchemy import func as sa_func
-
-        period_end = parse_result.period_end
-        if not period_end and sorted_txns:
-            from datetime import timedelta
-            period_end = sorted_txns[-1].date + timedelta(days=1)
-
-        if period_end:
-            bal_query = db.query(Transaction).filter(
-                Transaction.account_id == resolved_account_id,
-                Transaction.date < period_end,
-                Transaction.status != 'deleted',
-            )
-            credit_sum = bal_query.filter(
-                (Transaction.is_income == True) | (Transaction.type == 'credit'),
-            ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
-
-            debit_sum = bal_query.filter(
-                Transaction.type == 'debit',
-            ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
-
-            computed_balance = round(float(credit_sum) - float(debit_sum), 2)
-            balance_discrepancy = round(statement_closing_balance - computed_balance, 2)
+    balance_snapshot = _statement_balance_snapshot(
+        db, resolved_account_id, parse_result
+    )
 
     return {
         "account_id": resolved_account_id,
         "statement_type": parse_result.statement_type,
+        "parser_profile": parse_result.parser_profile,
+        "reconciliation_status": parse_result.reconciliation_status,
+        "reconciliation_method": parse_result.reconciliation_method,
+        "parse_fingerprint": parse_result.source_digest,
+        "control_totals": {
+            "opening_balance": parse_result.opening_balance,
+            "closing_balance": parse_result.closing_balance,
+            "total_debits": parse_result.total_debits,
+            "total_credits": parse_result.total_credits,
+        },
         "total_parsed": recon_result.total_parsed,
         "matched_count": len(recon_result.duplicate_transactions),
         "possible_count": len(recon_result.potential_duplicates),
         "new_count": recon_result.total_new,
         "income_count": len(income_txns),
-        "statement_closing_balance": statement_closing_balance,
-        "computed_balance": computed_balance,
-        "balance_discrepancy": balance_discrepancy,
+        **balance_snapshot,
         "new_transactions": [
             {
                 "date": str(t.date),
@@ -251,28 +948,67 @@ async def reconcile_statement_preview(
     }
 
 
-@router.post("/ingest/upload/import")
+@router.post(
+    "/ingest/upload/import",
+    response_model=StatementImportResponse,
+)
 async def import_statement(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
     account_id: Optional[str] = Form(None),
     import_new: bool = Form(True),
     detect_income: bool = Form(True),
+    confirm_reconciled: bool = Form(False),
+    accepted_fingerprint: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Step 3: Parse + reconcile + import new transactions with classification."""
     try:
-        parse_result = await _read_and_parse(file, password)
+        selected_account = (
+            db.query(Account).filter_by(id=account_id, is_active=True).first()
+            if account_id
+            else None
+        )
+        if account_id and selected_account is None:
+            raise HTTPException(status_code=400, detail="Invalid account_id")
+        parse_result = (
+            await _read_and_parse(file, password, selected_account.last_4_digits)
+            if selected_account
+            else await _read_and_parse(file, password)
+        )
+        if not confirm_reconciled:
+            raise HTTPException(
+                status_code=400,
+                detail="Review the reconciled preview and explicitly confirm before importing",
+            )
+        if (
+            not accepted_fingerprint
+            or len(accepted_fingerprint) != 64
+            or not secrets.compare_digest(
+                accepted_fingerprint.lower(),
+                parse_result.source_digest,
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The selected file changed after review; preview it again before importing",
+            )
         parsed = ParsedStatement.from_statement_result(parse_result)
 
-        resolved_account_id = _resolve_account_id(db, parse_result.statement_type, account_id)
+        resolved_account_id = _resolve_account_id(db, parse_result, account_id)
 
         recon_result = ReconciliationService.reconcile(db, parsed, resolved_account_id)
+        link_exact_statement_manual_income_matches(
+            db,
+            getattr(recon_result, "matches", ()),
+            statement_fingerprint=parse_result.source_digest,
+        )
 
         imported_count = 0
         classified_count = 0
         review_queue_count = 0
+        imported_txns = []
 
         if import_new and recon_result.new_transactions:
             imported_txns = import_new_transactions(
@@ -298,9 +1034,11 @@ async def import_statement(
                         txn.subcategory = classification.subcategory
                         txn.confidence = classification.confidence
                         txn.classification_source = classification.source
-                        # Sync is_income with INCOME category
-                        if classification.category == 'INCOME':
-                            txn.is_income = True
+                        apply_category_semantic(
+                            txn,
+                            explicitly_classified=classification.source
+                            in {"exact_match", "confirmed_pattern", "rule"},
+                        )
                         classified_count += 1
 
                         # Update merchant memory for future classifications
@@ -317,12 +1055,41 @@ async def import_statement(
                         txn.subcategory = getattr(parsed_txn, 'subcategory_hint', None)
                         txn.confidence = 0.65
                         txn.classification_source = 'narration_hint'
+                        apply_category_semantic(
+                            txn,
+                            explicitly_classified=(
+                                getattr(parsed_txn, 'semantic_type', None)
+                                == TransactionSemantic.INCOME.value
+                            ),
+                        )
                         classified_count += 1
-                    else:
+                    refresh_transaction_enrichment(txn)
+                    if txn.review_required:
                         review_queue_count += 1
                 except Exception as e:
                     logger.warning(f"Classification failed for {txn.merchant_raw}: {e}")
+                    txn.review_required = True
                     review_queue_count += 1
+
+            merchant_keys = {
+                (txn.merchant_normalized, txn.account_id)
+                for txn in imported_txns
+                if txn.merchant_normalized
+            }
+            if merchant_keys:
+                from app.core.goal_contributions import (
+                    detect_goal_contribution_suggestions,
+                )
+                from app.core.license import has_feature
+                from app.core.product_depth import sync_subscription_suggestions
+                from app.core.recurring import detect_recurring_patterns
+
+                detect_recurring_patterns(db, merchant_keys=merchant_keys)
+                sync_subscription_suggestions(db, run_detection=False)
+                if has_feature(db, "fd_rd_goal_detection"):
+                    detect_goal_contribution_suggestions(
+                        db, transactions=imported_txns
+                    )
 
         # Detect income
         income_items = []
@@ -337,40 +1104,17 @@ async def import_statement(
                 for t in income_txns
             ]
 
+        if import_new and not recon_result.potential_duplicates:
+            record_verified_statement_controls(
+                db,
+                resolved_account_id,
+                parse_result,
+            )
+
         db.commit()
-
-        # Balance reconciliation
-        statement_closing_balance = None
-        computed_balance = None
-        balance_discrepancy = None
-
-        sorted_txns = sorted(parsed.transactions, key=lambda t: t.date)
-        if sorted_txns and sorted_txns[-1].balance is not None:
-            statement_closing_balance = sorted_txns[-1].balance
-
-            from sqlalchemy import func as sa_func
-
-            period_end = parse_result.period_end
-            if not period_end and sorted_txns:
-                from datetime import timedelta
-                period_end = sorted_txns[-1].date + timedelta(days=1)
-
-            if period_end:
-                bal_query = db.query(Transaction).filter(
-                    Transaction.account_id == resolved_account_id,
-                    Transaction.date < period_end,
-                    Transaction.status != 'deleted',
-                )
-                credit_sum = bal_query.filter(
-                    (Transaction.is_income == True) | (Transaction.type == 'credit'),
-                ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
-
-                debit_sum = bal_query.filter(
-                    Transaction.type == 'debit',
-                ).with_entities(sa_func.coalesce(sa_func.sum(Transaction.amount), 0)).scalar()
-
-                computed_balance = round(float(credit_sum) - float(debit_sum), 2)
-                balance_discrepancy = round(statement_closing_balance - computed_balance, 2)
+        balance_snapshot = _statement_balance_snapshot(
+            db, resolved_account_id, parse_result
+        )
 
         return {
             "statement_type": parse_result.statement_type,
@@ -385,57 +1129,51 @@ async def import_statement(
             "errors": [],
             "income_detected": len(income_items),
             "income_items": income_items,
-            "statement_closing_balance": statement_closing_balance,
-            "computed_balance": computed_balance,
-            "balance_discrepancy": balance_discrepancy,
+            **balance_snapshot,
         }
+    except FinalizedPeriodError as exc:
+        db.rollback()
+        raise StateConflictError(
+            code="FINALIZED_PERIOD_READ_ONLY",
+            message=(
+                "This statement includes a finalized month that is read-only. "
+                "Reopen the month before importing."
+            ),
+            hint="Reopen that month before importing these transactions.",
+        ) from exc
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as exc:
         db.rollback()
-        logger.error(f"Statement import failed: {e}")
-        return {
-            "statement_type": None,
-            "total_parsed": 0,
-            "matched": 0,
-            "skipped_dup": 0,
-            "possible": 0,
-            "new_imported": 0,
-            "imported": 0,
-            "classified": 0,
-            "review_queue": 0,
-            "income_detected": 0,
-            "income_items": [],
-            "statement_closing_balance": None,
-            "computed_balance": None,
-            "balance_discrepancy": None,
-            "errors": [f"Import could not be completed: {str(e)}"],
-        }
+        raise LocalOperationError(
+            code="STATEMENT_IMPORT_FAILED",
+            message="GODFIN could not complete this statement import.",
+            hint="No partial import was kept. Review the file and try again.",
+            status_code=503,
+        ) from exc
 
 
-# Keep legacy endpoint for backward compatibility
-@router.post("/ingest/upload")
+@router.post(
+    "/ingest/upload",
+    status_code=410,
+    response_model=APIErrorResponse,
+)
 async def upload_statement_legacy(
     file: UploadFile = File(...),
     password: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Legacy single-step upload. Delegates to the import endpoint."""
-    return await import_statement(
-        file=file,
-        password=password,
-        account_id=None,
-        import_new=True,
-        detect_income=True,
-        db=db,
-        _user=_user,
+    """Retired because one-step imports bypass explicit reconciliation review."""
+    raise HTTPException(
+        status_code=410,
+        detail="One-step import was retired. Use preview, reconcile, then confirmed import.",
     )
 
 
 # --- Income Sources ---
 
-@router.get("/income-sources")
+@router.get("/income-sources", response_model=list[IncomeSourceResponse])
 def list_income_sources(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -455,7 +1193,11 @@ def list_income_sources(
     ]
 
 
-@router.post("/income-sources", status_code=201)
+@router.post(
+    "/income-sources",
+    response_model=IncomeSourceCreatedResponse,
+    status_code=201,
+)
 def create_income_source(
     body: IncomeSourceCreate,
     db: Session = Depends(get_db),
@@ -477,7 +1219,10 @@ def create_income_source(
     }
 
 
-@router.put("/income-sources/{source_id}")
+@router.put(
+    "/income-sources/{source_id}",
+    response_model=IncomeSourceUpdatedResponse,
+)
 def update_income_source(
     source_id: str,
     body: IncomeSourceUpdate,

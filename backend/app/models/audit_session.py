@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Integer, String, Text, CheckConstraint
+from sqlalchemy import CheckConstraint, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -34,5 +34,14 @@ class AuditSession(Base):
         CheckConstraint(
             "status IN ('draft', 'finalized', 'locked', 'discarded')",
             name="valid_audit_status",
+        ),
+        Index(
+            "uq_audit_sessions_active_period",
+            "period_year",
+            "period_month",
+            unique=True,
+            sqlite_where=text(
+                "status IN ('draft', 'finalized', 'locked')"
+            ),
         ),
     )

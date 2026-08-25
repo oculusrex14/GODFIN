@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "registry_version": "2026-08-02.1",
+  "issued_at": "2026-08-01T00:00:00Z",
+  "expires_at": "2027-08-02T00:00:00Z",
+  "models": {
+    "qwen3:1.7b": {
+      "label": "Qwen 3 1.7B",
+      "family": "qwen",
+      "size_gb": 1.4,
+      "memory_gb": 4,
+      "minimum_ram_gb": 8,
+      "official": true,
+      "validated": true,
+      "expected_digest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7"
+    },
+    "qwen3:4b": {
+      "label": "Qwen 3 4B",
+      "family": "qwen",
+      "size_gb": 2.6,
+      "memory_gb": 7,
+      "minimum_ram_gb": 12,
+      "official": true,
+      "validated": true,
+      "expected_digest": "sha256:359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7"
+    },
+    "qwen3:8b": {
+      "label": "Qwen 3 8B",
+      "family": "qwen",
+      "size_gb": 5.2,
+      "memory_gb": 12,
+      "minimum_ram_gb": 24,
+      "official": true,
+      "validated": true,
+      "expected_digest": "sha256:500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
+    },
+    "qwen3.6:27b": {
+      "label": "Qwen 3.6 27B",
+      "family": "qwen3.6",
+      "size_gb": 17,
+      "memory_gb": 24,
+      "minimum_ram_gb": 32,
+      "official": true,
+      "validated": true,
+      "expected_digest": "sha256:a50eda8ed977ab48a12431878896b27ffd5cef552c17af3317d9623b939a7f1e"
+    },
+    "qwen3.6:35b-a3b": {
+      "label": "Qwen 3.6 35B A3B",
+      "family": "qwen3.6",
+      "size_gb": 24,
+      "memory_gb": 32,
+      "minimum_ram_gb": 48,
+      "official": true,
+      "validated": true,
+      "expected_digest": "sha256:07d35212591fc27746f0a317c975a6d68754fb38e9053d82e25f06057af28522"
+    }
+  }
+}

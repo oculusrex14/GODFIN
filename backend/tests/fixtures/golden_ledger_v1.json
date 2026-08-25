@@ -1,0 +1,58 @@
+{
+  "schema_version": "golden-ledger-v1",
+  "description": "Synthetic, non-personal financial acceptance ledger. Amounts are INR unless an explicit currency is present.",
+  "month": "2026-07",
+  "financial_year_start": 2026,
+  "transactions": [
+    {"id": "salary-2026-01", "date": "2026-01-31", "amount": "34000.00", "direction": "credit", "role": "verified_income", "merchant": "SYNTHETIC SALARY", "category": "INCOME", "subcategory": "Salary", "source": "manual", "account": "savings"},
+    {"id": "salary-2026-02", "date": "2026-02-28", "amount": "34000.00", "direction": "credit", "role": "verified_income", "merchant": "SYNTHETIC SALARY", "category": "INCOME", "subcategory": "Salary", "source": "manual", "account": "savings"},
+    {"id": "salary-2026-03", "date": "2026-03-31", "amount": "34000.00", "direction": "credit", "role": "verified_income", "merchant": "SYNTHETIC SALARY", "category": "INCOME", "subcategory": "Salary", "source": "manual", "account": "savings"},
+    {"id": "salary-2026-04", "date": "2026-04-30", "amount": "34000.00", "direction": "credit", "role": "verified_income", "merchant": "SYNTHETIC SALARY", "category": "INCOME", "subcategory": "Salary", "source": "manual", "account": "savings"},
+    {"id": "salary-2026-05", "date": "2026-05-31", "amount": "34000.00", "direction": "credit", "role": "verified_income", "merchant": "SYNTHETIC SALARY", "category": "INCOME", "subcategory": "Salary", "source": "manual", "account": "savings"},
+    {"id": "salary-2026-06", "date": "2026-06-30", "amount": "34000.00", "direction": "credit", "role": "verified_income", "merchant": "SYNTHETIC SALARY", "category": "INCOME", "subcategory": "Salary", "source": "manual", "account": "savings", "reference": "MANUAL-SALARY-2026-06"},
+    {"id": "salary-2026-07", "date": "2026-07-31", "amount": "34000.00", "direction": "credit", "role": "verified_income", "merchant": "SYNTHETIC SALARY", "category": "INCOME", "subcategory": "Salary", "source": "statement_upload", "account": "savings", "reference": "STATEMENT-SALARY-2026-07"},
+    {"id": "freelance-2026-07", "date": "2026-07-15", "amount": "10000.00", "direction": "credit", "role": "verified_income", "merchant": "SYNTHETIC FREELANCE", "category": "INCOME", "subcategory": "Freelance", "source": "statement_upload", "account": "savings"},
+    {"id": "generic-credit-2026-07", "date": "2026-07-14", "amount": "7000.00", "direction": "credit", "role": "non_income_credit", "merchant": "SYNTHETIC GENERIC CREDIT", "category": "MISCELLANEOUS", "subcategory": "Other", "source": "statement_upload", "account": "savings"},
+    {"id": "refund-2026-07", "date": "2026-07-13", "amount": "1200.00", "direction": "credit", "role": "refund", "merchant": "SYNTHETIC REFUND", "category": "INCOME", "subcategory": "Refund", "source": "statement_upload", "account": "savings"},
+    {"id": "cashback-2026-07", "date": "2026-07-12", "amount": "100.00", "direction": "credit", "role": "cashback", "merchant": "SYNTHETIC CASHBACK", "category": "INCOME", "subcategory": "Cashback", "source": "statement_upload", "account": "savings"},
+    {"id": "reimbursement-2026-07", "date": "2026-07-11", "amount": "300.00", "direction": "credit", "role": "reimbursement", "merchant": "SYNTHETIC REIMBURSEMENT", "category": "MISCELLANEOUS", "subcategory": "Other", "source": "statement_upload", "account": "savings"},
+    {"id": "reversal-2026-07", "date": "2026-07-10", "amount": "500.00", "direction": "credit", "role": "excluded", "merchant": "SYNTHETIC REVERSAL", "category": "MISCELLANEOUS", "subcategory": "Other", "source": "statement_upload", "account": "savings", "status": "reversal"},
+    {"id": "groceries-2026-07", "date": "2026-07-09", "amount": "8000.00", "direction": "debit", "role": "spend", "merchant": "SYNTHETIC GROCERIES", "category": "FOOD & DINING", "subcategory": "Groceries", "source": "statement_upload", "account": "savings"},
+    {"id": "dining-2026-07", "date": "2026-07-08", "amount": "2000.00", "direction": "debit", "role": "spend", "merchant": "SYNTHETIC DINING", "category": "FOOD & DINING", "subcategory": "Restaurants", "source": "statement_upload", "account": "savings"},
+    {"id": "subscription-ledger-2026-07", "date": "2026-07-07", "amount": "1000.00", "direction": "debit", "role": "spend", "merchant": "SYNTHETIC STREAM", "category": "ENTERTAINMENT", "subcategory": "Subscriptions", "source": "statement_upload", "account": "savings", "recurring": true},
+    {"id": "transfer-out-2026-07", "date": "2026-07-06", "amount": "5000.00", "direction": "debit", "role": "transfer", "merchant": "SYNTHETIC OWN TRANSFER", "category": "TRANSFERS", "subcategory": "Own Account Transfer", "source": "statement_upload", "account": "savings"},
+    {"id": "transfer-in-2026-07", "date": "2026-07-06", "amount": "5000.00", "direction": "credit", "role": "transfer", "merchant": "SYNTHETIC OWN TRANSFER", "category": "TRANSFERS", "subcategory": "Own Account Transfer", "source": "statement_upload", "account": "card"},
+    {"id": "card-payment-2026-07", "date": "2026-07-05", "amount": "3000.00", "direction": "debit", "role": "transfer", "merchant": "SYNTHETIC CARD PAYMENT", "category": "TRANSFERS", "subcategory": "Credit Card Payment", "source": "statement_upload", "account": "savings"}
+  ],
+  "income_sources": [
+    {"id": "salary-rate-34000", "name": "Synthetic salary at 34000", "amount": "34000.00", "frequency": "monthly", "effective_from": "2026-01-01", "effective_to": "2026-07-31"},
+    {"id": "salary-rate-40000", "name": "Synthetic salary at 40000", "amount": "40000.00", "frequency": "monthly", "effective_from": "2026-08-01", "effective_to": null},
+    {"id": "freelance-july", "name": "Synthetic July freelance", "amount": "10000.00", "frequency": "one_time", "effective_from": "2026-07-15", "effective_to": "2026-07-15", "next_expected_date": "2026-07-15"}
+  ],
+  "subscriptions": [
+    {"id": "subscription-inr", "name": "Synthetic INR subscription", "amount": "1000.00", "currency": "INR", "frequency": "monthly", "fx_to_inr": "1.00", "category": "Entertainment"},
+    {"id": "subscription-usd", "name": "Synthetic USD subscription", "amount": "10.00", "currency": "USD", "frequency": "monthly", "fx_to_inr": "83.00", "category": "Productivity"}
+  ],
+  "goal": {
+    "name": "Synthetic emergency fund",
+    "target": "50000.00",
+    "entries": [
+      {"type": "deposit", "amount": "10000.00"},
+      {"type": "withdrawal", "amount": "-2000.00"}
+    ]
+  },
+  "net_worth": [
+    {"id": "cash-asset", "name": "Synthetic cash asset", "item_type": "asset", "valuation_mode": "manual", "native_value": "100000.00", "currency": "INR", "fx_to_base": "1.00"},
+    {"id": "debt-liability", "name": "Synthetic liability", "item_type": "liability", "valuation_mode": "manual", "native_value": "20000.00", "currency": "INR", "fx_to_base": "1.00"},
+    {"id": "usd-quoted-asset", "name": "Synthetic quoted USD asset", "item_type": "asset", "valuation_mode": "market", "quantity": "1.00", "unit_price": "100.00", "currency": "USD", "fx_to_base": "83.00"}
+  ],
+  "expected": {
+    "month": {"income": "44000.00", "spend": "11000.00", "net": "33000.00", "savings_rate": "75.0", "spending_count": 3, "listed_transaction_count": 13, "active_transaction_count": 12},
+    "financial_year": {"income": "146000.00", "spend": "11000.00", "transaction_count": 16},
+    "income_sources": {"july_expected": "44000.00", "august_expected": "40000.00", "source_count": 3},
+    "subscriptions": {"monthly": "1830.00", "annual": "21960.00", "active_count": 2},
+    "goal": {"balance": "8000.00", "entry_count": 2},
+    "net_worth": {"assets": "108300.00", "liabilities": "20000.00", "net": "88300.00", "item_count": 3},
+    "audit": {"period": "2026-07", "status": "finalized", "locked_transaction_count": 13}
+  }
+}

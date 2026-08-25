@@ -213,7 +213,7 @@ def test_create_goal(db_session):
 
     result = db_session.query(Goal).first()
     assert result.pressure_level == "moderate"
-    assert result.annual_return_rate == 0.035
+    assert result.annual_return_rate == 0.0
 
 
 def test_create_income_source(db_session):

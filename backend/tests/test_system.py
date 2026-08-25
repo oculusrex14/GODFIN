@@ -1,6 +1,40 @@
 from __future__ import annotations
 
 from app.models.app_setting import AppSetting
+from tests.license_helpers import install_test_license
+
+
+def test_system_status_exposes_support_safe_build_identity(
+    auth_client,
+    monkeypatch,
+):
+    monkeypatch.setenv("GODFIN_BUILD_SHA", "a" * 40)
+    monkeypatch.setenv("GODFIN_BUILD_CHANNEL", "private-rc")
+    monkeypatch.setenv("GODFIN_BUILD_TIMESTAMP", "2026-08-23T12:00:00Z")
+    from app.core.build_identity import build_identity
+
+    build_identity.cache_clear()
+    try:
+        response = auth_client.get("/api/v1/system/status")
+        diagnostics_response = auth_client.get("/api/v1/system/diagnostics")
+    finally:
+        build_identity.cache_clear()
+
+    assert response.status_code == 200
+    assert diagnostics_response.status_code == 200
+    build = response.json()["build"]
+    assert build["version"] == "0.1.0"
+    assert build["full_sha"] == "a" * 40
+    assert build["short_sha"] == "a" * 12
+    assert build["channel"] == "private-rc"
+    assert build["built_at_utc"] == "2026-08-23T12:00:00Z"
+    assert build["schema_revision"] >= 19
+    assert build["entitlement_manifest_version"] >= 1
+    assert build["parser_registry_version"]
+    assert build["license_api_host"] == "godfin.dev"
+    assert "installation" not in str(build).lower()
+    assert "/Users/" not in str(build)
+    assert diagnostics_response.json()["application"]["build"] == build
 
 
 def test_embeddings_disabled_by_default(auth_client):
@@ -17,17 +51,7 @@ def test_embeddings_disabled_by_default(auth_client):
 
 
 def test_enable_embeddings_starts_on_demand(auth_client, db_session, monkeypatch):
-    from datetime import UTC, datetime
-
-    from app.models.app_setting import AppSetting
-
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
-    db_session.commit()
+    install_test_license(db_session, "max")
 
     monkeypatch.setattr(
         "app.core.embedding_service.start_embedding_setup",
@@ -44,7 +68,10 @@ def test_enable_embeddings_starts_on_demand(auth_client, db_session, monkeypatch
         },
     )
 
-    response = auth_client.post("/api/v1/system/embeddings/enable")
+    response = auth_client.post(
+        "/api/v1/system/embeddings/enable",
+        json={"confirmed": True, "current_pin": "4826"},
+    )
     assert response.status_code == 202
     assert response.json()["started"] is True
     assert response.json()["status"] == "queued"
@@ -52,3 +79,280 @@ def test_enable_embeddings_starts_on_demand(auth_client, db_session, monkeypatch
     setting = db_session.query(AppSetting).filter_by(key="enable_embeddings").one()
     db_session.refresh(setting)
     assert setting.value == "true"
+
+
+def _activate_max(db_session):
+    install_test_license(db_session, "max")
+
+
+def test_embedding_setup_requires_explicit_approval_and_current_pin(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    _activate_max(db_session)
+    started = []
+    monkeypatch.setattr(
+        "app.core.embedding_service.start_embedding_setup",
+        lambda: started.append(True) or True,
+    )
+
+    missing_approval = auth_client.post(
+        "/api/v1/system/embeddings/enable",
+        json={"current_pin": "4826"},
+    )
+    missing_pin = auth_client.post(
+        "/api/v1/system/embeddings/enable",
+        json={"confirmed": True},
+    )
+    wrong_pin = auth_client.post(
+        "/api/v1/system/embeddings/enable",
+        json={"confirmed": True, "current_pin": "0000"},
+    )
+
+    assert missing_approval.status_code == 422
+    assert missing_pin.status_code == 403
+    assert wrong_pin.status_code == 403
+    assert started == []
+
+
+def test_embedding_enable_is_single_flight_and_disable_cancels(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    _activate_max(db_session)
+    monkeypatch.setattr(
+        "app.core.embedding_service.start_embedding_setup",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.core.embedding_service.get_embedding_setup_status",
+        lambda: {
+            "status": "indexing",
+            "progress": 40,
+            "message": "Indexing merchant memory locally…",
+            "updated": 4,
+            "total": 10,
+        },
+    )
+    monkeypatch.setattr(
+        "app.core.embedding_service.cancel_embedding_setup",
+        lambda: True,
+    )
+
+    repeated = auth_client.post(
+        "/api/v1/system/embeddings/enable",
+        json={"confirmed": True, "current_pin": "4826"},
+    )
+    disabled = auth_client.post(
+        "/api/v1/system/embeddings/disable",
+        json={"confirmed": True, "current_pin": "4826"},
+    )
+
+    assert repeated.status_code == 202
+    assert repeated.json()["started"] is False
+    assert repeated.json()["status"] == "indexing"
+    assert disabled.status_code == 200
+    assert disabled.json()["cancel_requested"] is True
+    setting = db_session.query(AppSetting).filter_by(key="enable_embeddings").one()
+    db_session.refresh(setting)
+    assert setting.value == "false"
+
+
+def test_unsafe_script_and_unbounded_maintenance_routes_are_not_exposed(auth_client):
+    from pathlib import Path
+
+    for route in (
+        "/api/v1/system/restart",
+        "/api/v1/system/backfill-embeddings",
+        "/api/v1/system/apply-confidence-decay",
+    ):
+        response = auth_client.post(route)
+        assert response.status_code == 404
+    assert not (Path(__file__).parents[1] / "restart.sh").exists()
+
+
+def test_local_ai_actions_require_current_pin(auth_client, monkeypatch):
+    pull_calls = []
+    benchmark_calls = []
+    monkeypatch.setattr(
+        "app.core.local_ai.start_model_pull",
+        lambda model, confirmed: pull_calls.append((model, confirmed)),
+    )
+    monkeypatch.setattr(
+        "app.core.local_ai.benchmark_model",
+        lambda model: benchmark_calls.append(model),
+    )
+
+    download = auth_client.post(
+        "/api/v1/system/local-ai/download",
+        json={"model": "qwen3:4b", "confirmed": True},
+    )
+    benchmark = auth_client.post(
+        "/api/v1/system/local-ai/benchmark",
+        json={"model": "qwen3:4b", "confirmed": True},
+    )
+
+    assert download.status_code == 403
+    assert benchmark.status_code == 403
+    assert pull_calls == []
+    assert benchmark_calls == []
+
+
+def test_embedding_setup_cancel_is_idempotent_and_work_is_bounded():
+    from app.core import embedding_service
+
+    original = embedding_service.get_embedding_setup_status()
+    try:
+        embedding_service._setup_cancel.clear()
+        embedding_service._set_setup_status(
+            status="indexing",
+            progress=50,
+            message="Indexing merchant memory locally…",
+            updated=5,
+            total=10,
+        )
+        assert embedding_service.cancel_embedding_setup() is True
+        assert embedding_service.get_embedding_setup_status()["status"] == "cancelling"
+        assert embedding_service.cancel_embedding_setup() is False
+        assert embedding_service.MAX_SETUP_MERCHANTS == 5_000
+    finally:
+        embedding_service._setup_cancel.clear()
+        embedding_service._set_setup_status(**original)
+
+
+def test_embedding_setup_does_not_return_raw_worker_errors(
+    monkeypatch,
+    db_engine,
+):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core import background_jobs, database as database_module
+    from app.core import embedding_service
+
+    session_factory = sessionmaker(bind=db_engine, expire_on_commit=False)
+    monkeypatch.setattr(database_module, "SessionLocal", session_factory)
+    original = embedding_service.get_embedding_setup_status()
+    background_jobs.stop_background_job_worker(timeout=0)
+    with background_jobs._handlers_lock:
+        saved_handlers = dict(background_jobs._handlers)
+        background_jobs._handlers.clear()
+    try:
+        background_jobs._worker_stop.clear()
+        background_jobs._worker_id = "embedding-test-worker"
+        background_jobs.register_job_handler(
+            "embedding_setup",
+            embedding_service.run_embedding_setup_job,
+        )
+        embedding_service._set_setup_status(status="idle")
+
+        def fail_model_load():
+            raise RuntimeError("/Users/private/financial/model-cache")
+
+        monkeypatch.setattr(embedding_service, "_get_model", fail_model_load)
+        assert embedding_service.start_embedding_setup() is True
+        claimed = background_jobs._claim_next_job()
+        assert claimed is not None
+        background_jobs._execute_job(claimed)
+        status = embedding_service.get_embedding_setup_status()
+
+        assert status["message"] == "Work will retry safely."
+        assert "/Users/" not in status["message"]
+    finally:
+        background_jobs.stop_background_job_worker(timeout=0)
+        with background_jobs._handlers_lock:
+            background_jobs._handlers.clear()
+            background_jobs._handlers.update(saved_handlers)
+        background_jobs._worker_stop.clear()
+        embedding_service._setup_cancel.clear()
+        embedding_service._set_setup_status(**original)
+
+
+def test_support_diagnostics_include_backup_health_without_sensitive_state(
+    auth_client,
+    db_session,
+):
+    values = {
+        "backup_scheduler_status": "operational",
+        "backup_job_status": "degraded",
+        "backup_last_success_at": "2026-08-10T18:29:00+00:00",
+        "backup_job_last_failure_at": "2026-08-11T01:00:00+00:00",
+        "backup_job_next_retry_at": "2026-08-11T01:01:00+00:00",
+        "backup_job_failure_code": "automatic_backup_failed",
+        "backup_job_failure_count": "2",
+        "backup_last_filename": "godfin_backup_private_name.db",
+        "backup_directory": "/Users/private/financial/backups",
+        "gmail_access_token": "must-never-appear",
+    }
+    for key, value in values.items():
+        db_session.merge(AppSetting(key=key, value=value))
+    db_session.commit()
+
+    response = auth_client.get("/api/v1/system/diagnostics")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-disposition"].endswith(
+        "godfin-support-diagnostics.json"
+    )
+    diagnostics = response.json()
+    assert diagnostics["schema_version"] == 2
+    assert diagnostics["application"]["api_status"] == "operational"
+    assert diagnostics["application"]["build"]["schema_revision"] >= 19
+    assert diagnostics["application"]["build"]["license_api_host"] == "godfin.dev"
+    assert diagnostics["gmail"]["status"] in {
+        "connected",
+        "not_connected",
+        "not_configured",
+    }
+    assert "access_token" not in str(diagnostics["gmail"]).lower()
+    assert "refresh_token" not in str(diagnostics["gmail"]).lower()
+    assert "client_id" not in str(diagnostics["gmail"]).lower()
+    assert diagnostics["backup_protection"] == {
+        "status": "degraded",
+        "scheduler_status": "operational",
+        "job_status": "degraded",
+        "last_success_at": "2026-08-10T18:29:00+00:00",
+        "last_failure_at": "2026-08-11T01:00:00+00:00",
+        "next_retry_at": "2026-08-11T01:01:00+00:00",
+        "failure_code": "automatic_backup_failed",
+        "failure_count": 2,
+    }
+    assert diagnostics["readiness"]["ready"] is False
+    assert diagnostics["readiness"]["dependencies"]["schema"] == "unknown"
+    assert diagnostics["background_jobs"]["active"] == 0
+    assert diagnostics["background_jobs"]["capacity"] > 0
+    assert diagnostics["request_metrics"]["remote_telemetry"] is False
+    serialized = response.text
+    assert "/Users/private/financial/backups" not in serialized
+    assert "godfin_backup_private_name.db" not in serialized
+    assert "must-never-appear" not in serialized
+
+
+def test_support_diagnostics_include_safe_gmail_disconnect_recovery_state(
+    auth_client,
+    db_session,
+):
+    values = {
+        "gmail_disconnect_operation_state": "data_cleared_credentials_pending",
+        "gmail_disconnect_deleted_transactions": "3",
+        "gmail_disconnect_remote_revocation_pending": "false",
+        "gmail_disconnect_updated_at": "2026-08-24T04:00:00+00:00",
+        "gmail_disconnect_backup_filename": "private-backup-name.db",
+    }
+    for key, value in values.items():
+        db_session.merge(AppSetting(key=key, value=value))
+    db_session.commit()
+
+    response = auth_client.get("/api/v1/system/diagnostics")
+
+    assert response.status_code == 200
+    operation = response.json()["gmail"]["disconnect_operation"]
+    assert operation == {
+        "state": "data_cleared_credentials_pending",
+        "deleted_transactions": 3,
+        "remote_revocation_pending": False,
+        "updated_at": "2026-08-24T04:00:00+00:00",
+    }
+    assert "private-backup-name.db" not in response.text

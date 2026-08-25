@@ -1,219 +1,420 @@
 from __future__ import annotations
 
 import logging
-import os
+import json
+from datetime import UTC, date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
-from sqlalchemy import text
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user
+from app.api.v1.entitlements import require_entitlement
+from app.core.auth import get_current_user, hash_token
+from app.core.background_jobs import (
+    JobQueueFull,
+    enqueue_job,
+    latest_job,
+    request_job_cancel,
+)
+from app.core.backup import create_backup
+from app.core.config import settings as app_config
+from app.core.data_deletion import delete_transactions_with_dependents
 from app.core.database import get_db
+from app.core.errors import IntegrationUnavailableError, StateConflictError
 from app.core.gmail_service import (
-    gmail_service, disconnect_gmail, is_connected, handle_manual_oauth_code,
-    CLIENT_SECRETS_FILE
+    GmailConfigurationError,
+    GmailDisconnectOutcome,
+    GmailError,
+    GmailOAuthStateError,
+    OAUTH_REDIRECT_URI,
+    gmail_service,
+    is_connected,
+    client_config_available,
 )
 from app.core.ingestion import (
-    get_ingestion_history, run_ingestion, run_ingestion_with_dates,
-    run_ingestion_with_dates_background,
-    run_initial_sync, run_initial_sync_background,
+    get_ingestion_history, gmail_coverage_summary, run_ingestion, run_ingestion_with_dates,
+    run_initial_sync,
 )
-from app.core.scheduler import _set_manual_ingestion_running
+from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+GMAIL_SYNC_ENTITLEMENT = require_entitlement("gmail_sync")
 
 
-def get_backend_url(request: Request) -> str:
-    """Get the backend URL based on the request's host."""
-    host = request.headers.get("host", "localhost:5100")
-    return f"http://{host}"
+class GmailAuthURLResponse(BaseModel):
+    auth_url: str
+    flow: str
+    expires_in_seconds: int
 
 
-def get_frontend_url(request: Request) -> str:
-    """Get the frontend URL based on the request's origin."""
-    origin = request.headers.get("origin") or request.headers.get("referer")
-    if origin and origin.startswith("http"):
-        parts = origin.split("/")
-        if len(parts) >= 3:
-            return f"{parts[0]}//{parts[2]}"
-    return "http://localhost:5200"
+class GmailStatusResponse(BaseModel):
+    connected: bool
+    email: str | None = None
+    digest_email_supported: bool
+    status: str
+    message: str
+    retryable: bool
+    action_required: str | None
+    credentials_present: bool
+    token_expiry: str | None
+    last_refresh_success_at: str | None
+    last_refresh_failure_at: str | None
+    client_config_match: bool | None
+    safe_reason_code: str
+
+
+class IngestionResultResponse(BaseModel):
+    processed: int
+    eligible_financial_messages: int = 0
+    created: int
+    skipped_blacklist: int
+    skipped_no_match: int
+    skipped_duplicate: int
+    skipped_finalized_period: int
+    errors: int
+    error_details: list[str]
+    source_status: str
+    retryable: bool
+    full_resync: bool
+    parse_review_count: int = 0
+    skip_reasons: dict[str, int] = Field(default_factory=dict)
+    requested_start: str | None = None
+    requested_end: str | None = None
+    coverage_advanced: bool = False
+    last_successful_coverage_end: str | None = None
+    cursor_advanced: bool = False
+
+
+class GmailCoverageRangeResponse(BaseModel):
+    start: str
+    end: str
+
+
+class GmailCoverageResponse(BaseModel):
+    coverage_ranges: list[GmailCoverageRangeResponse]
+    missing_ranges: list[GmailCoverageRangeResponse]
+    coverage_window_start: str
+    coverage_window_end: str
+    last_successful_coverage_start: str | None
+    last_successful_coverage_end: str | None
+    next_sync_start: str
+    next_sync_end: str
+
+
+class IngestionHistoryResponse(BaseModel):
+    last_ingestion_run: str | None
+    last_manual_ingestion_date: str | None
+    last_manual_ingestion_range: str | None
+    initial_sync_date_range: str | None
+    initial_sync_completed: str | None
+    coverage_ranges: list[GmailCoverageRangeResponse] = Field(default_factory=list)
+    missing_ranges: list[GmailCoverageRangeResponse] = Field(default_factory=list)
+    coverage_window_start: str | None = None
+    coverage_window_end: str | None = None
+    last_successful_coverage_start: str | None = None
+    last_successful_coverage_end: str | None = None
+    next_sync_start: str | None = None
+    next_sync_end: str | None = None
+    last_result: IngestionResultResponse | None = None
+
+
+class IngestionStatusResponse(BaseModel):
+    gmail_connected: bool
+    last_run: str | None
+    history_id: str | None
+    history: IngestionHistoryResponse
+
+
+class GmailDisconnectResponse(BaseModel):
+    success: bool
+    message: str
+    deleted_transactions: int
+    backup_filename: str | None
+    operation_state: str = "completed"
+    credentials_removed: bool = True
+    remote_revocation_pending: bool = False
+
+
+class InitialSyncResponse(BaseModel):
+    success: bool
+    result: IngestionResultResponse | None = None
+    message: str
+    already_completed: bool | None = None
+
+
+class BackgroundIngestionStartResponse(BaseModel):
+    success: bool
+    message: str
+    job_id: str | None = None
+    started: bool | None = None
+    already_running: bool | None = None
+    already_completed: bool | None = None
+    requested_start: str | None = None
+    requested_end: str | None = None
+
+
+class IngestionProgressResponse(BaseModel):
+    status: str
+    processed: int
+    total: int
+    percent: float
+    result: IngestionResultResponse | None
+    error: str | None
+    job_id: str | None = None
+    attempt: int | None = None
+    retry_at: str | None = None
+    requested_start: str | None = None
+    requested_end: str | None = None
+    last_successful_coverage_end: str | None = None
+    public_message: str | None = None
+
+
+class RangeIngestionProgressResponse(IngestionProgressResponse):
+    batch_current: int
+    batch_total: int
+
+
+class BackgroundCancelResponse(BaseModel):
+    cancel_requested: bool
+    job_id: str | None
+
+
+class DateRangeIngestionResponse(BaseModel):
+    success: bool
+    result: IngestionResultResponse
+    date_range: str
+    message: str
+
+
+class SchedulerStatusResponse(BaseModel):
+    gmail_connected: bool
+    history: IngestionHistoryResponse
+
+
+class LastAutoIngestionResponse(BaseModel):
+    timestamp: str
+    status: str | None
+    new_transactions: int
+    error: str | None
+
+
+class IngestSettingsResponse(BaseModel):
+    auto_ingestion_enabled: bool
+    frequency_minutes: int
+    last_auto_ingestion: LastAutoIngestionResponse | None
+    next_auto_ingestion: str | None
+    monthly_transaction_count: int
+
+
+class IngestSettingsUpdateResponse(BaseModel):
+    success: bool
+    auto_ingestion_enabled: bool
+    frequency_minutes: int
+    rescheduled: bool
+    message: str
 
 
 # --- Gmail OAuth ---
 
-@router.get("/auth/gmail/url")
+@router.get(
+    "/auth/gmail/url",
+    response_model=GmailAuthURLResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def get_gmail_auth_url(
     request: Request,
-    use_oob: bool = Query(False),
+    db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Get Gmail OAuth authorization URL.
-
-    Args:
-        use_oob: If True, use out-of-band flow (manual code entry).
-                 Use this for mobile/network access where Google doesn't
-                 allow private IP redirect URIs.
-    """
+    """Create a short-lived installed-app OAuth attempt for this session."""
     try:
-        from app.core.gmail_service import CLIENT_SECRETS_FILE
-
-        logger.info(f"Gmail auth URL requested, use_oob={use_oob}")
-
-        if not CLIENT_SECRETS_FILE.exists():
+        if not client_config_available():
             raise HTTPException(
-                status_code=400,
-                detail="Gmail client_secret.json not found in data/ directory",
+                status_code=503,
+                detail=(
+                    "Gmail connection is not configured for this GODFIN build yet. "
+                    "The app owner must add the dedicated desktop Google connection."
+                ),
             )
 
-        # Check if ngrok is running
-        ngrok_url = os.environ.get('NGROK_URL', None)
-        frontend_url = get_frontend_url(request)
-
-        logger.info(f"Frontend URL: {frontend_url}, ngrok_url: {ngrok_url}")
-
-        # For network access, use ngrok URL if available
-        if use_oob and ngrok_url:
-            # Use ngrok URL for redirect
-            redirect_uri = f"{ngrok_url}/api/v1/auth/gmail/callback"
-            auth_url = gmail_service.get_auth_url(redirect_uri=redirect_uri)
-            logger.info(f"Using ngrok redirect_uri: {redirect_uri}")
-            return {"auth_url": auth_url, "flow": "redirect"}
-        elif use_oob:
-            # Fallback to OOB flow
-            auth_url = gmail_service.get_auth_url(use_oob=True)
-            return {
-                "auth_url": auth_url,
-                "flow": "manual",
-                "instructions": "Open this URL in a browser, authorize, and enter the code shown."
-            }
-        else:
-            # Standard redirect flow (for localhost)
-            backend_url = get_backend_url(request)
-            redirect_uri = f"{backend_url}/api/v1/auth/gmail/callback"
-            auth_url = gmail_service.get_auth_url(redirect_uri=redirect_uri)
-            logger.info(f"Using standard redirect flow: {redirect_uri}")
-
-            # Append frontend_url for callback redirect
-            if auth_url:
-                if "?" in auth_url:
-                    auth_url = f"{auth_url}&frontend_url={frontend_url}"
-                else:
-                    auth_url = f"{auth_url}?frontend_url={frontend_url}"
-
-            return {"auth_url": auth_url, "flow": "redirect"}
+        authorization = request.headers.get("authorization", "")
+        session_token = authorization[7:] if authorization.startswith("Bearer ") else ""
+        auth_url = gmail_service.get_auth_url(
+            db,
+            session_token_hash=hash_token(session_token),
+            redirect_uri=OAUTH_REDIRECT_URI,
+        )
+        return {
+            "auth_url": auth_url,
+            "flow": "loopback",
+            "expires_in_seconds": 600,
+        }
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Failed to generate auth URL: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate auth URL: {str(e)}")
+    except GmailConfigurationError as exc:
+        raise IntegrationUnavailableError(
+            code="GMAIL_CONFIGURATION_REQUIRED",
+            message="Gmail connection is not configured for this GODFIN build yet.",
+            hint="Add the dedicated desktop Google connection, then try again.",
+            status_code=503,
+            retriable=False,
+        ) from exc
+    except Exception as exc:
+        logger.exception("Failed to start Gmail authorization")
+        raise HTTPException(
+            status_code=500,
+            detail="Gmail connection could not be started. Try again.",
+        ) from exc
 
 
-@router.get("/auth/gmail/callback")
+@router.get(
+    "/auth/gmail/callback",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Browser-safe Gmail connection result.",
+            "content": {"text/html": {"schema": {"type": "string"}}},
+        }
+    },
+)
 def gmail_oauth_callback(
-    request: Request,
-    code: str = Query(None),
-    error: str = Query(None),
-    frontend_url: str = Query("http://localhost:5200"),
+    code: str | None = Query(default=None, min_length=1, max_length=4096),
+    state: str | None = Query(default=None, min_length=16, max_length=512),
+    error: str | None = Query(default=None, min_length=1, max_length=200),
+    db: Session = Depends(get_db),
 ):
-    """
-    Handle OAuth callback from Google.
-
-    This endpoint is called by Google after user authorizes access.
-    """
-    # Validate frontend_url to prevent open redirect attacks
-    # Only allow redirects to localhost or the configured frontend
-    allowed_hosts = [
-        'http://localhost:5200',
-        'http://localhost:5173',
-        'http://127.0.0.1:5200',
-        'http://127.0.0.1:5173',
-    ]
-    # Also check for dynamic localhost variants
-    is_localhost = (
-        frontend_url.startswith('http://localhost') or
-        frontend_url.startswith('http://127.0.0.1') or
-        frontend_url.startswith('http://0.0.0.0')
-    )
-    # For production, you'd want to add your actual domain here
-    if not is_localhost and frontend_url not in allowed_hosts:
-        logger.warning(f"Blocked redirect to untrusted URL: {frontend_url}")
-        frontend_url = "http://localhost:5200"
-
-    if not frontend_url:
-        frontend_url = "http://localhost:5200"
+    """Validate one-time state and complete the fixed loopback callback."""
 
     if error:
-        return RedirectResponse(
-            url=f"{frontend_url}/settings?gmail_error={error}",
-            status_code=302,
+        try:
+            gmail_service.cancel_auth(
+                db,
+                state=state or "",
+                redirect_uri=OAUTH_REDIRECT_URI,
+            )
+        except GmailOAuthStateError:
+            pass
+        return HTMLResponse(
+            content=(
+                "<!doctype html><title>GODFIN Gmail connection</title>"
+                "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
+                "<h1>Gmail was not connected</h1>"
+                "<p>Return to GODFIN and try again when you are ready. "
+                "No email was imported.</p></main>"
+            ),
+            status_code=400,
         )
 
     if not code:
-        raise HTTPException(status_code=400, detail="No authorization code provided")
+        return HTMLResponse(
+            content=(
+                "<!doctype html><title>GODFIN Gmail connection</title>"
+                "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
+                "<h1>Gmail could not be connected</h1>"
+                "<p>The approval response was incomplete. Return to GODFIN and start again.</p>"
+                "</main>"
+            ),
+            status_code=400,
+        )
 
     try:
-        # Get the redirect URI that was used for the auth request
-        backend_url = get_backend_url(request)
-        redirect_uri = f"{backend_url}/api/v1/auth/gmail/callback"
-
-        logger.info(f"Completing auth with redirect_uri: {redirect_uri}")
-        success = gmail_service.complete_auth(code, redirect_uri=redirect_uri)
+        success = gmail_service.complete_auth(
+            db,
+            authorization_code=code,
+            state=state or "",
+            redirect_uri=OAUTH_REDIRECT_URI,
+        )
 
         if success:
-            return RedirectResponse(
-                url=f"{frontend_url}/settings?gmail_connected=true",
-                status_code=302,
+            return HTMLResponse(
+                content=(
+                    "<!doctype html><title>GODFIN Gmail connected</title>"
+                    "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
+                    "<h1>Gmail is connected</h1>"
+                    "<p>You can close this tab and return to GODFIN. "
+                    "The app will notice the connection automatically.</p>"
+                    "<script>setTimeout(function(){window.close()},1500)</script></main>"
+                )
             )
-        else:
-            return RedirectResponse(
-                url=f"{frontend_url}/settings?gmail_error=auth_failed",
-                status_code=302,
-            )
-    except Exception as e:
-        logger.error(f"OAuth callback error: {e}")
-        return RedirectResponse(
-            url=f"{frontend_url}/settings?gmail_error={str(e)}",
-            status_code=302,
+        return HTMLResponse(
+            content=(
+                "<!doctype html><title>GODFIN Gmail connection</title>"
+                "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
+                "<h1>Gmail could not be connected</h1>"
+                "<p>Return to GODFIN and try again. No email was imported.</p></main>"
+            ),
+            status_code=400,
+        )
+    except GmailError as exc:
+        logger.warning("Gmail OAuth callback rejected: %s", exc.code)
+        stale_attempt = exc.code in {
+            "expired_state",
+            "initiating_session_expired",
+            "invalid_state",
+            "missing_state",
+            "replayed_state",
+        }
+        heading = (
+            "This Gmail approval link cannot be used"
+            if stale_attempt
+            else "Gmail could not be connected"
+        )
+        explanation = (
+            "Approval links work once and expire after ten minutes. Close this "
+            "tab, unlock GODFIN, then open Settings, expand Gmail Integration, "
+            "and choose Connect Gmail to start a fresh approval."
+            if stale_attempt
+            else "Close this tab, return to GODFIN, and start a fresh Gmail "
+            "connection. No email was imported by this attempt."
+        )
+        return HTMLResponse(
+            content=(
+                "<!doctype html><title>GODFIN Gmail connection</title>"
+                "<main style='font:16px system-ui;padding:48px;max-width:620px'>"
+                f"<h1>{heading}</h1>"
+                f"<p>{explanation}</p></main>"
+            ),
+            status_code=400,
         )
 
 
-class GmailStatusResponse:
-    pass
-
-
-@router.get("/auth/gmail/status")
+@router.get(
+    "/auth/gmail/status",
+    response_model=GmailStatusResponse,
+    response_model_exclude_unset=True,
+)
 def get_gmail_status(
     _user: bool = Depends(get_current_user),
 ):
     """Check if Gmail is connected."""
-    if gmail_service.is_connected:
+    health = gmail_service.connection_health()
+    if health.connected:
         email = gmail_service.get_user_email()
         return {
             "connected": True,
             "email": email,
             "digest_email_supported": gmail_service.can_send,
+            **health.to_dict(),
         }
-
-    # Try to load credentials
-    if gmail_service.load_credentials():
-        email = gmail_service.get_user_email()
-        return {
-            "connected": True,
-            "email": email,
-            "digest_email_supported": gmail_service.can_send,
-        }
-
-    return {"connected": False, "digest_email_supported": False}
+    return {
+        "connected": False,
+        "digest_email_supported": False,
+        **health.to_dict(),
+    }
 
 
 # --- Ingestion ---
 
-@router.post("/ingest/gmail")
+@router.post(
+    "/ingest/gmail",
+    response_model=IngestionResultResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def trigger_ingestion(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -235,7 +436,125 @@ def trigger_ingestion(
         _set_manual_ingestion_running(db, False)
 
 
-@router.get("/ingest/status")
+@router.get(
+    "/ingest/gmail/coverage",
+    response_model=GmailCoverageResponse,
+)
+def get_gmail_coverage(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Return support-safe, durable Gmail date coverage and missing ranges."""
+    return gmail_coverage_summary(db)
+
+
+@router.post(
+    "/ingest/gmail/sync-now/start",
+    response_model=BackgroundIngestionStartResponse,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
+def start_incremental_sync_background(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Start a durable cursor/gap-aware Gmail sync and disclose its date bounds."""
+    if not is_connected():
+        raise HTTPException(status_code=400, detail="Gmail not connected")
+    coverage = gmail_coverage_summary(db)
+    try:
+        queued = enqueue_job(
+            "gmail_scheduled",
+            active_key="gmail-ingestion",
+            max_attempts=3,
+            public_message="Checking Gmail from the last safe sync point…",
+        )
+    except JobQueueFull as exc:
+        raise StateConflictError(
+            code="BACKGROUND_QUEUE_FULL",
+            message="GODFIN is already handling too much background work.",
+            hint="Wait for the current work to finish, then try again.",
+        ) from exc
+    return {
+        "success": True,
+        "message": (
+            "Gmail sync started"
+            if queued.created
+            else "A Gmail import is already in progress"
+        ),
+        "job_id": queued.job_id,
+        "started": queued.created,
+        "already_running": not queued.created,
+        "requested_start": coverage["next_sync_start"],
+        "requested_end": coverage["next_sync_end"],
+    }
+
+
+@router.get(
+    "/ingest/gmail/sync-now/status",
+    response_model=IngestionProgressResponse,
+    response_model_exclude_unset=True,
+)
+def get_incremental_sync_status(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Return durable progress/result for the most recent explicit Sync now job."""
+    coverage = gmail_coverage_summary(db)
+    try:
+        job = latest_job(kind="gmail_scheduled", active_key="gmail-ingestion")
+    except Exception:
+        job = None
+    if not job:
+        return {
+            "status": "idle",
+            "processed": 0,
+            "total": 0,
+            "percent": 0,
+            "result": None,
+            "error": None,
+            "requested_start": coverage["next_sync_start"],
+            "requested_end": coverage["next_sync_end"],
+            "last_successful_coverage_end": coverage[
+                "last_successful_coverage_end"
+            ],
+        }
+
+    status_map = {
+        "queued": "running",
+        "running": "running",
+        "retry_wait": "running",
+        "cancel_requested": "running",
+        "completed": "completed",
+        "failed": "error",
+        "poisoned": "error",
+        "cancelled": "cancelled",
+    }
+    result = job.get("result") if job["status"] == "completed" else None
+    return {
+        "status": status_map.get(job["status"], "idle"),
+        "processed": int((result or {}).get("processed") or 0),
+        "total": int(job.get("total") or 0),
+        "percent": 100 if job["status"] == "completed" else job["progress"],
+        "result": result,
+        "error": job.get("message") if job["status"] in {"failed", "poisoned"} else None,
+        "job_id": job["id"],
+        "attempt": job["attempt"],
+        "retry_at": job["retry_at"],
+        "requested_start": (result or {}).get(
+            "requested_start", coverage["next_sync_start"]
+        ),
+        "requested_end": (result or {}).get(
+            "requested_end", coverage["next_sync_end"]
+        ),
+        "last_successful_coverage_end": coverage[
+            "last_successful_coverage_end"
+        ],
+        "public_message": job.get("message"),
+    }
+
+
+@router.get("/ingest/status", response_model=IngestionStatusResponse)
 def ingestion_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -253,61 +572,161 @@ def ingestion_status(
 
 # --- Gmail Disconnect ---
 
-@router.post("/auth/gmail/disconnect")
+
+class GmailDisconnectRequest(BaseModel):
+    clear_data: bool = False
+    pin: Optional[str] = Field(default=None, min_length=4, max_length=8)
+    confirmation: Optional[str] = Field(default=None, max_length=50)
+
+
+GMAIL_DISCONNECT_STATE_KEY = "gmail_disconnect_operation_state"
+GMAIL_DISCONNECT_DELETED_KEY = "gmail_disconnect_deleted_transactions"
+GMAIL_DISCONNECT_BACKUP_KEY = "gmail_disconnect_backup_filename"
+GMAIL_DISCONNECT_REMOTE_KEY = "gmail_disconnect_remote_revocation_pending"
+GMAIL_DISCONNECT_UPDATED_KEY = "gmail_disconnect_updated_at"
+GMAIL_DISCONNECT_PENDING_STATES = {
+    "credentials_pending",
+    "data_cleared_credentials_pending",
+}
+
+
+def _set_app_setting(db: Session, key: str, value: str) -> None:
+    setting = db.query(AppSetting).filter_by(key=key).first()
+    if setting is None:
+        db.add(AppSetting(key=key, value=value))
+    else:
+        setting.value = value
+
+
+def _disconnect_operation(db: Session) -> dict[str, object]:
+    keys = {
+        GMAIL_DISCONNECT_STATE_KEY,
+        GMAIL_DISCONNECT_DELETED_KEY,
+        GMAIL_DISCONNECT_BACKUP_KEY,
+        GMAIL_DISCONNECT_REMOTE_KEY,
+        GMAIL_DISCONNECT_UPDATED_KEY,
+    }
+    values = {
+        row.key: row.value
+        for row in db.query(AppSetting).filter(AppSetting.key.in_(keys)).all()
+    }
+    try:
+        deleted_transactions = max(
+            0,
+            int(values.get(GMAIL_DISCONNECT_DELETED_KEY) or 0),
+        )
+    except (TypeError, ValueError):
+        deleted_transactions = 0
+    return {
+        "state": values.get(GMAIL_DISCONNECT_STATE_KEY),
+        "deleted_transactions": deleted_transactions,
+        "backup_filename": values.get(GMAIL_DISCONNECT_BACKUP_KEY) or None,
+        "remote_revocation_pending": (
+            values.get(GMAIL_DISCONNECT_REMOTE_KEY) == "true"
+        ),
+        "updated_at": values.get(GMAIL_DISCONNECT_UPDATED_KEY) or None,
+    }
+
+
+def _record_disconnect_operation(
+    db: Session,
+    *,
+    state: str,
+    deleted_transactions: int,
+    backup_filename: str | None,
+    remote_revocation_pending: bool = False,
+) -> None:
+    _set_app_setting(db, GMAIL_DISCONNECT_STATE_KEY, state)
+    _set_app_setting(
+        db,
+        GMAIL_DISCONNECT_DELETED_KEY,
+        str(max(0, deleted_transactions)),
+    )
+    _set_app_setting(db, GMAIL_DISCONNECT_BACKUP_KEY, backup_filename or "")
+    _set_app_setting(
+        db,
+        GMAIL_DISCONNECT_REMOTE_KEY,
+        "true" if remote_revocation_pending else "false",
+    )
+    _set_app_setting(
+        db,
+        GMAIL_DISCONNECT_UPDATED_KEY,
+        datetime.now(UTC).replace(microsecond=0).isoformat(),
+    )
+
+
+def _delete_gmail_transactions(db: Session) -> int:
+    """Delete Gmail-derived rows only, in reviewed foreign-key order."""
+    from app.models.transaction import Transaction
+
+    transaction_ids = [
+        row[0]
+        for row in db.query(Transaction.id)
+        .filter(Transaction.source == "gmail")
+        .all()
+    ]
+    return delete_transactions_with_dependents(
+        db,
+        transaction_ids,
+        void_reason="Gmail source data was deleted by the user.",
+    )
+
+@router.post("/auth/gmail/disconnect", response_model=GmailDisconnectResponse)
 def gmail_disconnect(
-    clear_data: bool = False,
+    request: Request,
+    body: GmailDisconnectRequest = Body(default=GmailDisconnectRequest()),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """
-    Disconnect Gmail and optionally clear all Gmail-sourced transactions.
-    """
-    from app.models.transaction import Transaction
-    from app.models.audit_log import AuditLog
-    from app.models.transaction_split import TransactionSplit
-
+    """Disconnect Gmail with durable, retryable partial-operation state."""
     try:
-        if not gmail_service.is_connected:
-            return {"success": True, "message": "Gmail was not connected"}
+        previous_operation = _disconnect_operation(db)
+        previous_state = previous_operation["state"]
+        resuming_pending = previous_state in GMAIL_DISCONNECT_PENDING_STATES
+        data_already_cleared = previous_state == "data_cleared_credentials_pending"
+        deleted_count = (
+            int(previous_operation["deleted_transactions"])
+            if data_already_cleared
+            else 0
+        )
+        backup_filename = (
+            previous_operation["backup_filename"]
+            if data_already_cleared
+            else None
+        )
+        if body.clear_data:
+            require_current_pin(
+                db,
+                body.pin,
+                client_ip_from_request(request),
+                action="delete_gmail_data",
+            )
+            if body.confirmation != "DELETE GMAIL DATA":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Type DELETE GMAIL DATA to confirm Gmail-data deletion.",
+                )
 
-        # Clear Gmail-sourced transactions if requested
-        deleted_count = 0
-        if clear_data:
-            try:
-                # Use raw SQL to handle cascade deletion properly
-                # First delete audit logs referencing affected transactions
-                db.execute(text("""
-                    DELETE FROM audit_log
-                    WHERE transaction_id IN (
-                        SELECT id FROM transactions
-                        WHERE source IN ('gmail', 'statement_upload', 'statement')
+            if not data_already_cleared:
+                backup_setting = db.query(AppSetting).filter_by(
+                    key="backup_directory"
+                ).first()
+                backup_dir = backup_setting.value if backup_setting else "./backups"
+                try:
+                    backup_filename = create_backup(
+                        str(app_config.database_path),
+                        backup_dir,
                     )
-                """))
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Gmail data was not deleted because the safety backup failed.",
+                    ) from exc
+                deleted_count = _delete_gmail_transactions(db)
 
-                # Delete transaction splits referencing affected transactions
-                db.execute(text("""
-                    DELETE FROM transaction_splits
-                    WHERE parent_transaction_id IN (
-                        SELECT id FROM transactions
-                        WHERE source IN ('gmail', 'statement_upload', 'statement')
-                    )
-                """))
-
-                # Delete all user transactions (gmail + statement uploads)
-                result = db.execute(text("""
-                    DELETE FROM transactions
-                    WHERE source IN ('gmail', 'statement_upload', 'statement')
-                """))
-                deleted_count = result.rowcount
-
-                db.commit()
-            except Exception as e:
-                db.rollback()
-                logger.error(f"Failed to delete Gmail transactions: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to delete transactions: {str(e)}")
-
-        # Clear ingestion settings
-        try:
+        if not resuming_pending:
+            # Clear ingestion settings and durably record the recovery point in the
+            # same transaction as any Gmail-derived data deletion.
             for key in ['last_gmail_history_id', 'last_ingestion_run',
                         'initial_sync_date_range', 'initial_sync_completed',
                         'last_manual_ingestion_range', 'last_manual_ingestion_date',
@@ -317,54 +736,121 @@ def gmail_disconnect(
                 setting = db.query(AppSetting).filter_by(key=key).first()
                 if setting:
                     db.delete(setting)
+            _record_disconnect_operation(
+                db,
+                state=(
+                    "data_cleared_credentials_pending"
+                    if body.clear_data
+                    else "credentials_pending"
+                ),
+                deleted_transactions=deleted_count,
+                backup_filename=backup_filename,
+            )
             db.commit()
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to clear ingestion settings: {e}")
 
-        # Revoke credentials
-        try:
-            success = gmail_service.disconnect()
-        except Exception as e:
-            logger.error(f"Failed to disconnect Gmail service: {e}")
-            # Still return success if we got this far, as we cleared the data
-            success = True
-
-        if success:
-            message = "Gmail disconnected successfully"
-            if clear_data and deleted_count:
-                message += f". {deleted_count} transactions removed."
-            return {"success": True, "message": message}
+        outcome = gmail_service.disconnect()
+        if isinstance(outcome, GmailDisconnectOutcome):
+            credentials_removed = outcome.local_credentials_removed
+            remote_revocation_pending = outcome.remote_revocation_pending
         else:
-            raise HTTPException(status_code=500, detail="Failed to disconnect Gmail")
-    except HTTPException:
+            # Compatibility for tests and older injected service doubles.
+            credentials_removed = bool(outcome)
+            remote_revocation_pending = False
+
+        if credentials_removed:
+            operation_state = (
+                "completed_remote_revocation_unconfirmed"
+                if remote_revocation_pending
+                else "completed"
+            )
+            _record_disconnect_operation(
+                db,
+                state=operation_state,
+                deleted_transactions=deleted_count,
+                backup_filename=backup_filename,
+                remote_revocation_pending=remote_revocation_pending,
+            )
+            db.commit()
+            message = "Gmail disconnected from this computer"
+            if body.clear_data:
+                message += f". {deleted_count} transactions removed."
+            if remote_revocation_pending:
+                message += (
+                    " Google could not confirm remote permission revocation; "
+                    "remove GODFIN from your Google Account connections if needed."
+                )
+            return {
+                "success": True,
+                "message": message,
+                "deleted_transactions": deleted_count,
+                "backup_filename": backup_filename,
+                "operation_state": operation_state,
+                "credentials_removed": True,
+                "remote_revocation_pending": remote_revocation_pending,
+            }
+
+        pending_state = (
+            "data_cleared_credentials_pending"
+            if data_already_cleared or body.clear_data
+            else "credentials_pending"
+        )
+        _record_disconnect_operation(
+            db,
+            state=pending_state,
+            deleted_transactions=deleted_count,
+            backup_filename=backup_filename,
+        )
+        db.commit()
+        if pending_state == "data_cleared_credentials_pending":
+            raise IntegrationUnavailableError(
+                code="GMAIL_DATA_CLEARED_CREDENTIALS_PENDING",
+                message=(
+                    "Gmail-imported data was cleared, but saved Gmail permission "
+                    "could not be removed yet."
+                ),
+                hint="Choose Disconnect again to retry credential removal.",
+                status_code=503,
+            )
+        raise IntegrationUnavailableError(
+            code="GMAIL_CREDENTIAL_REMOVAL_PENDING",
+            message="Saved Gmail permission could not be removed yet.",
+            hint="Choose Disconnect again to retry. No Gmail transactions were deleted.",
+            status_code=503,
+        )
+    except (HTTPException, IntegrationUnavailableError):
         raise
-    except Exception as e:
-        logger.error(f"Error in gmail_disconnect: {e}")
-        raise HTTPException(status_code=500, detail=f"Disconnect failed: {str(e)}")
-
-
-# --- Manual OAuth Code Entry ---
-
-@router.post("/auth/gmail/manual-code")
-def gmail_manual_code(
-    code: str,
-    db: Session = Depends(get_db),
-    _user: bool = Depends(get_current_user),
-):
-    """
-    Handle OAuth code from manual copy-paste (for headless environments).
-    """
-    success, message = handle_manual_oauth_code(code)
-    if success:
-        return {"success": True, "connected": True, "message": message}
-    else:
-        raise HTTPException(status_code=400, detail=message)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Gmail disconnect failed")
+        operation = _disconnect_operation(db)
+        data_was_cleared = (
+            operation["state"] == "data_cleared_credentials_pending"
+        )
+        raise IntegrationUnavailableError(
+            code=(
+                "GMAIL_DATA_CLEARED_CREDENTIALS_PENDING"
+                if data_was_cleared
+                else "GMAIL_DISCONNECT_FAILED"
+            ),
+            message=(
+                "Gmail-imported data was cleared, but saved Gmail permission "
+                "still needs removal."
+                if data_was_cleared
+                else "Gmail could not be disconnected. No Gmail transactions were deleted."
+            ),
+            hint="Choose Disconnect again to retry.",
+            status_code=503,
+        ) from exc
 
 
 # --- Initial Sync ---
 
-@router.post("/ingest/gmail/initial")
+@router.post(
+    "/ingest/gmail/initial",
+    response_model=InitialSyncResponse,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def trigger_initial_sync(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -391,14 +877,21 @@ def trigger_initial_sync(
             "result": result.to_dict(),
             "message": f"Initial sync complete. Created {result.created} transactions.",
         }
-    except Exception as e:
-        logger.error(f"Initial sync failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Initial sync failed: {str(e)}")
+    except Exception as exc:
+        raise IntegrationUnavailableError(
+            code="GMAIL_SYNC_FAILED",
+            message="Gmail sync could not be completed.",
+            hint="Check the Gmail connection and try again.",
+        ) from exc
 
 
-@router.post("/ingest/gmail/initial/start")
+@router.post(
+    "/ingest/gmail/initial/start",
+    response_model=BackgroundIngestionStartResponse,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def start_initial_sync_background(
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -409,11 +902,6 @@ def start_initial_sync_background(
     if not is_connected():
         raise HTTPException(status_code=400, detail="Gmail not connected")
 
-    # Check if already running
-    status_setting = db.query(AppSetting).filter_by(key='sync_status').first()
-    if status_setting and status_setting.value == 'running':
-        return {"success": True, "message": "Sync already in progress", "already_running": True}
-
     # Check if initial sync already completed
     completed = db.query(AppSetting).filter_by(key='initial_sync_completed').first()
     if completed and completed.value == 'true':
@@ -423,12 +911,38 @@ def start_initial_sync_background(
             "already_completed": True,
         }
 
-    background_tasks.add_task(run_initial_sync_background)
+    try:
+        queued = enqueue_job(
+            "gmail_initial_sync",
+            active_key="gmail-ingestion",
+            max_attempts=3,
+            public_message="Preparing the first Gmail import…",
+        )
+    except JobQueueFull as exc:
+        raise StateConflictError(
+            code="BACKGROUND_QUEUE_FULL",
+            message="GODFIN is already handling too much background work.",
+            hint="Wait for the current work to finish, then try again.",
+        ) from exc
 
-    return {"success": True, "message": "Initial sync started in background"}
+    return {
+        "success": True,
+        "message": (
+            "Initial sync started in background"
+            if queued.created
+            else "A Gmail import is already in progress"
+        ),
+        "job_id": queued.job_id,
+        "started": queued.created,
+        "already_running": not queued.created,
+    }
 
 
-@router.get("/ingest/gmail/sync-status")
+@router.get(
+    "/ingest/gmail/sync-status",
+    response_model=IngestionProgressResponse,
+    response_model_exclude_unset=True,
+)
 def get_sync_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -445,7 +959,7 @@ def get_sync_status(
 
     raw_status = (values['sync_status'] or '').strip()
     # Treat empty or unknown values as 'idle'
-    status = raw_status if raw_status in ('running', 'completed', 'error') else 'idle'
+    status = raw_status if raw_status in ('running', 'completed', 'partial', 'error') else 'idle'
 
     result_val = (values['sync_result'] or '').strip()
 
@@ -460,27 +974,73 @@ def get_sync_status(
             processed = 0
             total = 0
 
-    return {
+    parsed_result = None
+    if result_val:
+        try:
+            parsed_result = json.loads(result_val)
+        except json.JSONDecodeError:
+            parsed_result = None
+
+    payload = {
         "status": status,
         "processed": processed,
         "total": total,
         "percent": round((processed / total) * 100, 1) if total > 0 else 0,
-        "result": result_val or None,
+        "result": parsed_result,
         "error": (values['sync_error'] or '').strip() or None,
     }
+    try:
+        job = latest_job(kind="gmail_initial_sync", active_key="gmail-ingestion")
+    except Exception:
+        job = None
+    if job and job["kind"] == "gmail_initial_sync":
+        payload["job_id"] = job["id"]
+        payload["attempt"] = job["attempt"]
+        payload["retry_at"] = job["retry_at"]
+        if job["status"] in {"queued", "running", "retry_wait", "cancel_requested"}:
+            payload["status"] = "running"
+            payload["percent"] = job["progress"]
+            payload["total"] = max(payload["total"], job["total"])
+        elif job["status"] in {"failed", "poisoned"}:
+            payload["status"] = "error"
+            payload["error"] = job["message"]
+        elif job["status"] == "cancelled":
+            payload["status"] = "cancelled"
+    return payload
+
+
+@router.post(
+    "/ingest/gmail/sync/cancel",
+    response_model=BackgroundCancelResponse,
+)
+def cancel_initial_sync_background(
+    _user: bool = Depends(get_current_user),
+):
+    job = latest_job(kind="gmail_initial_sync", active_key="gmail-ingestion")
+    cancelled = bool(job and request_job_cancel(job["id"]))
+    return {"cancel_requested": cancelled, "job_id": job["id"] if job else None}
 
 
 # --- Ingest with Date Range ---
 
-from pydantic import BaseModel
-
-
 class DateRangeRequest(BaseModel):
-    start_date: str  # YYYY-MM-DD
-    end_date: str    # YYYY-MM-DD
+    start_date: date
+    end_date: date
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.start_date >= self.end_date:
+            raise ValueError("Start date must be before end date")
+        if self.end_date > date.today():
+            raise ValueError("End date cannot be in the future")
+        return self
 
 
-@router.post("/ingest/gmail/range")
+@router.post(
+    "/ingest/gmail/range",
+    response_model=DateRangeIngestionResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def trigger_ingestion_range(
     request: DateRangeRequest,
     db: Session = Depends(get_db),
@@ -492,30 +1052,16 @@ def trigger_ingestion_range(
     if not is_connected():
         raise HTTPException(status_code=400, detail="Gmail not connected")
 
-    # Validate dates
-    try:
-        from datetime import date, datetime
-        start = datetime.strptime(request.start_date, '%Y-%m-%d').date()
-        end = datetime.strptime(request.end_date, '%Y-%m-%d').date()
-
-        if start >= end:
-            raise HTTPException(status_code=400, detail="Start date must be before end date")
-
-        today = date.today()
-        if end > today:
-            raise HTTPException(status_code=400, detail="End date cannot be in the future")
-
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    start = request.start_date
+    end = request.end_date
 
     try:
         # Convert to Gmail query format (before_date is exclusive)
-        from datetime import timedelta
         end_plus_one = (end + timedelta(days=1)).strftime('%Y-%m-%d')
 
         result = run_ingestion_with_dates(
             db,
-            after_date=request.start_date,
+            after_date=start.isoformat(),
             before_date=end_plus_one,
             is_manual=True
         )
@@ -523,20 +1069,26 @@ def trigger_ingestion_range(
         return {
             "success": True,
             "result": result.to_dict(),
-            "date_range": f"{request.start_date} to {request.end_date}",
+            "date_range": f"{start.isoformat()} to {end.isoformat()}",
             "message": f"Ingestion complete. Processed {result.processed}, created {result.created}.",
         }
-    except Exception as e:
-        logger.error(f"Date range ingestion failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+    except Exception as exc:
+        raise IntegrationUnavailableError(
+            code="GMAIL_INGESTION_FAILED",
+            message="Gmail import could not be completed for that date range.",
+            hint="Check the Gmail connection and try again.",
+        ) from exc
 
 
 # --- Background Date Range Ingestion ---
 
-@router.post("/ingest/gmail/range/start")
+@router.post(
+    "/ingest/gmail/range/start",
+    response_model=BackgroundIngestionStartResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def start_ingestion_range_background(
     request: DateRangeRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -547,37 +1099,48 @@ def start_ingestion_range_background(
     if not is_connected():
         raise HTTPException(status_code=400, detail="Gmail not connected")
 
-    # Validate dates
-    try:
-        from datetime import date as date_cls, datetime as dt_cls, timedelta
-        start = dt_cls.strptime(request.start_date, '%Y-%m-%d').date()
-        end = dt_cls.strptime(request.end_date, '%Y-%m-%d').date()
-
-        if start >= end:
-            raise HTTPException(status_code=400, detail="Start date must be before end date")
-
-        today = date_cls.today()
-        if end > today:
-            raise HTTPException(status_code=400, detail="End date cannot be in the future")
-
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-
-    # Check if already running
-    status_setting = db.query(AppSetting).filter_by(key='ingest_now_status').first()
-    if status_setting and status_setting.value == 'running':
-        return {"success": True, "message": "Ingestion already in progress", "already_running": True}
+    start = request.start_date
+    end = request.end_date
 
     # end_date is inclusive in the UI, so add 1 day for the query
-    from datetime import timedelta
     end_plus_one = (end + timedelta(days=1)).strftime('%Y-%m-%d')
 
-    background_tasks.add_task(run_ingestion_with_dates_background, request.start_date, end_plus_one)
+    try:
+        queued = enqueue_job(
+            "gmail_date_range",
+            payload={
+                "start_date": start.isoformat(),
+                "end_date": end_plus_one,
+            },
+            active_key="gmail-ingestion",
+            max_attempts=3,
+            public_message="Preparing the selected Gmail date range…",
+        )
+    except JobQueueFull as exc:
+        raise StateConflictError(
+            code="BACKGROUND_QUEUE_FULL",
+            message="GODFIN is already handling too much background work.",
+            hint="Wait for the current work to finish, then try again.",
+        ) from exc
 
-    return {"success": True, "message": "Ingestion started"}
+    return {
+        "success": True,
+        "message": (
+            "Ingestion started"
+            if queued.created
+            else "A Gmail import is already in progress"
+        ),
+        "job_id": queued.job_id,
+        "started": queued.created,
+        "already_running": not queued.created,
+    }
 
 
-@router.get("/ingest/gmail/range/status")
+@router.get(
+    "/ingest/gmail/range/status",
+    response_model=RangeIngestionProgressResponse,
+    response_model_exclude_unset=True,
+)
 def get_ingestion_range_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -599,20 +1162,19 @@ def get_ingestion_range_status(
     batch_total = int(values['ingest_now_batch_total'] or 0)
 
     raw_status = (values['ingest_now_status'] or '').strip()
-    status = raw_status if raw_status in ('running', 'completed', 'error') else 'idle'
+    status = raw_status if raw_status in ('running', 'completed', 'partial', 'error') else 'idle'
 
     result_val = (values['ingest_now_result'] or '').strip()
 
     # Parse result string back to dict if completed
     parsed_result = None
-    if status == 'completed' and result_val:
+    if status in {'completed', 'partial'} and result_val:
         try:
-            import ast
-            parsed_result = ast.literal_eval(result_val)
-        except Exception:
-            parsed_result = result_val
+            parsed_result = json.loads(result_val)
+        except json.JSONDecodeError:
+            parsed_result = None
 
-    return {
+    payload = {
         "status": status,
         "processed": processed,
         "total": total,
@@ -622,11 +1184,41 @@ def get_ingestion_range_status(
         "result": parsed_result,
         "error": (values['ingest_now_error'] or '').strip() or None,
     }
+    try:
+        job = latest_job(kind="gmail_date_range", active_key="gmail-ingestion")
+    except Exception:
+        job = None
+    if job and job["kind"] == "gmail_date_range":
+        payload["job_id"] = job["id"]
+        payload["attempt"] = job["attempt"]
+        payload["retry_at"] = job["retry_at"]
+        if job["status"] in {"queued", "running", "retry_wait", "cancel_requested"}:
+            payload["status"] = "running"
+            payload["percent"] = job["progress"]
+            payload["total"] = max(payload["total"], job["total"])
+        elif job["status"] in {"failed", "poisoned"}:
+            payload["status"] = "error"
+            payload["error"] = job["message"]
+        elif job["status"] == "cancelled":
+            payload["status"] = "cancelled"
+    return payload
+
+
+@router.post(
+    "/ingest/gmail/range/cancel",
+    response_model=BackgroundCancelResponse,
+)
+def cancel_ingestion_range_background(
+    _user: bool = Depends(get_current_user),
+):
+    job = latest_job(kind="gmail_date_range", active_key="gmail-ingestion")
+    cancelled = bool(job and request_job_cancel(job["id"]))
+    return {"cancel_requested": cancelled, "job_id": job["id"] if job else None}
 
 
 # --- Scheduler/History Status ---
 
-@router.get("/ingest/scheduler/status")
+@router.get("/ingest/scheduler/status", response_model=SchedulerStatusResponse)
 def scheduler_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -642,7 +1234,7 @@ def scheduler_status(
 
 # --- Auto-Ingestion Settings ---
 
-@router.get("/ingest/settings")
+@router.get("/ingest/settings", response_model=IngestSettingsResponse)
 def get_ingest_settings(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -713,15 +1305,16 @@ def get_ingest_settings(
     }
 
 
-from pydantic import BaseModel
-
-
 class IngestSettingsRequest(BaseModel):
     enabled: bool = True
     frequency_minutes: int = 15
 
 
-@router.post("/ingest/settings")
+@router.post(
+    "/ingest/settings",
+    response_model=IngestSettingsUpdateResponse,
+    dependencies=[Depends(GMAIL_SYNC_ENTITLEMENT)],
+)
 def update_ingest_settings(
     request: IngestSettingsRequest,
     db: Session = Depends(get_db),

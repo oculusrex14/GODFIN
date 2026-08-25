@@ -99,6 +99,7 @@ def resolve_sender_mapping(
 def resolve_profile_account(
     db: Session,
     parser_profile: str,
+    last_4_digits: str | None = None,
 ) -> Optional[str]:
     for mapping in load_sender_mappings(db):
         if mapping["parser_profile"] != parser_profile:
@@ -108,6 +109,9 @@ def resolve_profile_account(
             .filter_by(id=mapping["account_id"], is_active=True)
             .first()
         )
-        if account:
+        if account and (
+            last_4_digits is None
+            or account.last_4_digits == last_4_digits
+        ):
             return account.id
     return None

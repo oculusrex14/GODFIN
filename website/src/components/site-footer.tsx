@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { GodfinLogo } from "./godfin-logo";
 
 export function SiteFooter() {
   return (
@@ -7,8 +8,7 @@ export function SiteFooter() {
         <div className="footer-grid">
           <div>
             <Link className="brand" href="/">
-              <span className="brand-mark">GF</span>
-              GODFIN
+              <GodfinLogo tagline />
             </Link>
             <p className="footer-copy">
               A local-first personal finance app for people who refuse to trade

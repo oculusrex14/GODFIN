@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+import io
+import json
 import uuid
 from datetime import date
 
+import pdfplumber
+
 from app.core.reporting import (
+    _get_spending_trend,
     generate_category_chart,
     generate_daily_chart,
-    generate_financial_insights,
+    generate_deterministic_insights,
     generate_trend_chart,
     month_label_of,
     prepare_detailed_report,
     prepare_summary_report,
+    set_savings_target_percent,
 )
 from app.models.transaction import Transaction
+from app.models.llm_config import LLMConfiguration
 from app.seed import SAVINGS_ACCOUNT_ID
+from tests.license_helpers import install_test_license
 
 
 def _add_txn(db, merchant, amount, txn_date, category=None, txn_type='debit'):
@@ -35,6 +43,41 @@ def _add_txn(db, merchant, amount, txn_date, category=None, txn_type='debit'):
     return txn
 
 
+def _activate_test_llm(db):
+    db.add(
+        LLMConfiguration(
+            provider="ollama_local",
+            auth_method="none",
+            model="qwen-test",
+            base_url="http://127.0.0.1:11434",
+            is_active=True,
+        )
+    )
+    db.commit()
+
+
+def _activate_max(db):
+    install_test_license(db, "max")
+
+
+def _valid_llm_report():
+    return json.dumps(
+        {
+            "executive_summary": "Recorded income covered recorded spending.",
+            "sections": [
+                {
+                    "title": "Spending Breakdown",
+                    "tone": "neutral",
+                    "icon": "pie",
+                    "content": "Recorded spending was reviewed by category.",
+                }
+            ],
+            "highlights": [],
+            "recommendations": ["Review the largest flexible category."],
+        }
+    )
+
+
 # --- Summary Report ---
 
 def test_summary_report_empty(db_session):
@@ -43,6 +86,7 @@ def test_summary_report_empty(db_session):
     assert data['total_income'] == 0
     assert data['transaction_count'] == 0
     assert data['top_categories'] == []
+    assert data['financial_health_score'] is None
 
 
 def test_summary_report_with_data(db_session):
@@ -59,6 +103,100 @@ def test_summary_report_with_data(db_session):
     assert data['transaction_count'] == 3
     assert len(data['top_categories']) == 3
     assert data['top_categories'][0]['category'] == 'HOUSING'
+    assert 0 <= data['financial_health_score'] <= 100
+    assert data['financial_health_caveat']
+
+
+def test_completed_month_solves_target_gap_and_bounds_it_by_flexible_spend(
+    db_session,
+):
+    set_savings_target_percent(db_session, 20)
+    _add_txn(
+        db_session,
+        'SALARY',
+        100000,
+        date(2025, 1, 1),
+        category='INCOME',
+        txn_type='credit',
+    )
+    _add_txn(db_session, 'RENT', 85000, date(2025, 1, 2), category='HOUSING')
+    _add_txn(db_session, 'SHOP', 5000, date(2025, 1, 3), category='SHOPPING')
+    db_session.flush()
+
+    data = prepare_summary_report(
+        db_session,
+        '2025-01',
+        as_of=date(2025, 2, 1),
+    )
+
+    assert data['period_status'] == 'complete'
+    assert data['savings_rate'] == 10.0
+    assert data['savings_target_percent'] == 20.0
+    assert data['required_spend_reduction_to_target'] == 10000.0
+    assert data['actionable_flexible_reduction'] == 5000.0
+    assert data['remaining_target_gap'] == 5000.0
+    assert data['financial_health_score'] == 50
+    assert data['financial_health_version'] == '2.0'
+
+
+def test_partial_month_never_scores_or_recommends_a_target_cut(db_session):
+    _add_txn(
+        db_session,
+        'SALARY',
+        100000,
+        date(2026, 8, 1),
+        category='INCOME',
+        txn_type='credit',
+    )
+    _add_txn(db_session, 'SHOP', 90000, date(2026, 8, 3), category='SHOPPING')
+    db_session.flush()
+
+    data = prepare_summary_report(
+        db_session,
+        '2026-08',
+        as_of=date(2026, 8, 9),
+    )
+
+    assert data['period_status'] == 'partial'
+    assert data['savings_target_assessment_available'] is False
+    assert data['financial_health_score'] is None
+    assert data['required_spend_reduction_to_target'] is None
+    assert data['actionable_flexible_reduction'] is None
+    assert data['remaining_target_gap'] is None
+
+
+def test_target_already_met_and_negative_savings_reference_vectors(db_session):
+    set_savings_target_percent(db_session, 20)
+    _add_txn(
+        db_session,
+        'JAN SALARY',
+        100000,
+        date(2025, 1, 1),
+        category='INCOME',
+        txn_type='credit',
+    )
+    _add_txn(db_session, 'JAN SHOP', 70000, date(2025, 1, 2), category='SHOPPING')
+    _add_txn(
+        db_session,
+        'FEB SALARY',
+        100000,
+        date(2025, 2, 1),
+        category='INCOME',
+        txn_type='credit',
+    )
+    _add_txn(db_session, 'FEB SHOP', 120000, date(2025, 2, 2), category='SHOPPING')
+    db_session.flush()
+
+    met = prepare_summary_report(db_session, '2025-01', as_of=date(2025, 3, 1))
+    deficit = prepare_summary_report(db_session, '2025-02', as_of=date(2025, 3, 1))
+
+    assert met['savings_rate'] == 30.0
+    assert met['target_already_met'] is True
+    assert met['required_spend_reduction_to_target'] == 0.0
+    assert met['financial_health_score'] == 100
+    assert deficit['savings_rate'] == -20.0
+    assert deficit['required_spend_reduction_to_target'] == 40000.0
+    assert deficit['financial_health_score'] == 0
 
 
 # --- Detailed Report ---
@@ -76,6 +214,40 @@ def test_detailed_report_with_data(db_session):
     assert data['top_merchants'][0]['merchant'] == 'RENT'  # Highest spend
     assert 'daily_spending' in data
     assert 'category_comparison' in data
+    assert data['income_breakdown'][0]['source'] == 'SALARY'
+
+
+def test_category_average_uses_only_observed_prior_months(db_session):
+    _add_txn(db_session, 'OLD SHOP', 300, date(2025, 5, 5), category='SHOPPING')
+    _add_txn(db_session, 'CURRENT SHOP', 600, date(2025, 7, 5), category='SHOPPING')
+    db_session.flush()
+
+    data = prepare_detailed_report(
+        db_session,
+        '2025-07',
+        as_of=date(2025, 8, 1),
+    )
+
+    assert data['category_comparison_sample_size'] == 1
+    assert data['category_comparison_months'] == ['2025-05']
+    assert data['category_comparison'][0]['average'] == 300.0
+    assert data['category_comparison'][0]['sample_months'] == 1
+
+
+def test_partial_month_has_no_category_comparison(db_session):
+    _add_txn(db_session, 'OLD SHOP', 300, date(2026, 7, 5), category='SHOPPING')
+    _add_txn(db_session, 'CURRENT SHOP', 600, date(2026, 8, 5), category='SHOPPING')
+    db_session.flush()
+
+    data = prepare_detailed_report(
+        db_session,
+        '2026-08',
+        as_of=date(2026, 8, 9),
+    )
+
+    assert data['category_comparison'] == []
+    assert data['category_comparison_sample_size'] == 0
+    assert 'partial' in data['category_comparison_caveat'].lower()
 
 
 # --- Chart Generation ---
@@ -128,18 +300,51 @@ def test_insights_high_savings():
         'total_spend': 50000,
         'total_income': 75000,
         'savings_rate': 33.3,
+        'period_status': 'complete',
+        'savings_target_percent': 20.0,
+        'savings_target_assessment_available': True,
+        'required_spend_reduction_to_target': 0.0,
+        'actionable_flexible_reduction': 0.0,
+        'remaining_target_gap': 0.0,
         'transaction_count': 10,
         'top_categories': [{'category': 'HOUSING', 'amount': 20000}],
         'spending_by_elasticity': {'fixed': 20000, 'semi_flexible': 15000, 'flexible': 15000},
         'category_comparison': [],
         'recurring_total': 0,
     }
-    insights = generate_financial_insights(detailed, [])
+    insights = generate_deterministic_insights(detailed, [])
     assert insights['available'] is True
-    assert insights['source'] in ('heuristic', 'llm')
+    assert insights['source'] == 'heuristic'
     assert 'executive_summary' in insights
     assert len(insights['sections']) >= 2
-    assert 'Savings Health' in [s['title'] for s in insights['sections']]
+    assert 'Savings Target Check' in [s['title'] for s in insights['sections']]
+
+
+def test_zero_spend_delta_is_described_as_unchanged(db_session):
+    _add_txn(db_session, 'JAN SHOP', 1000, date(2025, 1, 5), category='SHOPPING')
+    _add_txn(db_session, 'FEB SHOP', 1000, date(2025, 2, 5), category='SHOPPING')
+    db_session.flush()
+    trend = _get_spending_trend(
+        db_session,
+        '2025-02',
+        num_months=2,
+        as_of=date(2025, 3, 1),
+    )
+    detailed = prepare_detailed_report(
+        db_session,
+        '2025-02',
+        as_of=date(2025, 3, 1),
+    )
+
+    insights = generate_deterministic_insights(detailed, trend)
+    trend_section = next(
+        section for section in insights['sections']
+        if section['title'] == 'Finished-Month Trend'
+    )
+
+    assert 'unchanged' in trend_section['content']
+    assert 'down' not in trend_section['content']
+    assert insights['sample_sizes']['trend_recorded_complete_months'] == 2
 
 
 def test_insights_no_data():
@@ -154,7 +359,7 @@ def test_insights_no_data():
         'category_comparison': [],
         'recurring_total': 0,
     }
-    insights = generate_financial_insights(detailed, [])
+    insights = generate_deterministic_insights(detailed, [])
     assert insights['available'] is False
     assert insights['source'] == 'none'
     assert 'not enough' in insights['executive_summary'].lower() or 'no transactions' in insights['executive_summary'].lower()
@@ -186,29 +391,142 @@ def test_detailed_endpoint(auth_client):
     assert 'category_comparison' in data
 
 
-def test_insights_endpoint(auth_client, db_session):
-    from datetime import UTC, datetime
+def test_report_savings_target_preference_is_validated_and_persisted(auth_client):
+    response = auth_client.put(
+        '/api/v1/reports/preferences/savings-target',
+        json={'target_percent': 35.5},
+    )
+    assert response.status_code == 200
+    assert response.json()['target_percent'] == 35.5
 
-    from app.models.app_setting import AppSetting
+    summary = auth_client.get('/api/v1/reports/summary?month=2025-01')
+    assert summary.status_code == 200
+    assert summary.json()['savings_target_percent'] == 35.5
 
-    for key, value in {
-        "license_tier": "pro",
-        "license_status": "active",
-        "license_verified_at": datetime.now(UTC).isoformat(),
-    }.items():
-        db_session.query(AppSetting).filter_by(key=key).one().value = value
+    invalid = auth_client.put(
+        '/api/v1/reports/preferences/savings-target',
+        json={'target_percent': 0},
+    )
+    assert invalid.status_code == 422
+
+
+def test_insights_endpoint(auth_client, db_session, monkeypatch):
+    _activate_max(db_session)
+    _activate_test_llm(db_session)
+    _add_txn(
+        db_session,
+        "SALARY",
+        75000,
+        date(2025, 1, 1),
+        category="INCOME",
+        txn_type="credit",
+    )
     db_session.commit()
+    monkeypatch.setattr(
+        "app.core.reporting.call_llm",
+        lambda *args, **kwargs: _valid_llm_report(),
+    )
 
-    resp = auth_client.get('/api/v1/reports/insights?month=2025-01')
+    resp = auth_client.post(
+        '/api/v1/reports/ai/insights',
+        json={'month': '2025-01', 'consent': True},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert 'month' in data
     assert 'insights' in data
     assert 'executive_summary' in data['insights']
     assert 'sections' in data['insights']
+    assert data['insights']['source'] == 'llm'
+    assert data['llm']['model'] == 'qwen-test'
+    assert data['consent']['provided'] is True
+    assert data['generated_at']
+    assert 'raw transaction descriptions' in data['data_disclosure']['not_shared']
 
 
-def test_summary_pdf_endpoint(auth_client):
+def test_detailed_reports_require_connected_ai(auth_client, db_session):
+    _activate_max(db_session)
+
+    insights = auth_client.post(
+        '/api/v1/reports/ai/insights',
+        json={'month': '2025-01', 'consent': True},
+    )
+    detailed_pdf = auth_client.post(
+        '/api/v1/reports/pdf/detailed',
+        json={'month': '2025-01', 'consent': True},
+    )
+    assert insights.status_code == 409
+    assert detailed_pdf.status_code == 409
+    assert "Connect an AI" in insights.json()["detail"]
+
+
+def test_hosted_reports_require_saved_provider_disclosure_consent(
+    auth_client,
+    db_session,
+):
+    _activate_max(db_session)
+    db_session.add(
+        LLMConfiguration(
+            provider="openai",
+            auth_method="openapi",
+            model="gpt-test",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    response = auth_client.post(
+        "/api/v1/reports/ai/insights",
+        json={"month": "2025-01", "consent": True},
+    )
+    assert response.status_code == 409
+    assert "data disclosure" in response.json()["detail"]
+
+
+def test_detailed_reports_never_mislabel_a_rules_fallback_as_ai(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    _activate_max(db_session)
+    _activate_test_llm(db_session)
+    _add_txn(
+        db_session,
+        "SALARY",
+        75000,
+        date(2025, 1, 1),
+        category="INCOME",
+        txn_type="credit",
+    )
+    db_session.commit()
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("model is offline")
+
+    monkeypatch.setattr("app.core.reporting.call_llm", unavailable)
+    response = auth_client.post(
+        '/api/v1/reports/ai/insights',
+        json={'month': '2025-01', 'consent': True},
+    )
+    assert response.status_code == 502
+    assert "did not return a usable report" in response.json()["detail"]
+
+
+def test_summary_pdf_endpoint(auth_client, db_session, monkeypatch):
+    _add_txn(
+        db_session,
+        'SALARY',
+        75000,
+        date(2025, 1, 1),
+        category='INCOME',
+        txn_type='credit',
+    )
+    db_session.commit()
+
+    def forbidden_ai_call(*_args, **_kwargs):
+        raise AssertionError('standard summary must never call an LLM')
+
+    monkeypatch.setattr('app.core.reporting.call_llm', forbidden_ai_call)
     resp = auth_client.get('/api/v1/reports/pdf/summary?month=2025-01')
     assert resp.status_code == 200
     assert resp.headers['content-type'] == 'application/pdf'
@@ -217,13 +535,59 @@ def test_summary_pdf_endpoint(auth_client):
     assert resp.content[:5] == b'%PDF-'
 
 
-def test_detailed_pdf_endpoint(auth_client):
-    resp = auth_client.get('/api/v1/reports/pdf/detailed?month=2025-01')
+def test_ai_report_requires_explicit_consent(auth_client, db_session, monkeypatch):
+    _activate_max(db_session)
+    _activate_test_llm(db_session)
+    calls = []
+    monkeypatch.setattr(
+        'app.core.reporting.call_llm',
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    insights = auth_client.post(
+        '/api/v1/reports/ai/insights',
+        json={'month': '2025-01', 'consent': False},
+    )
+    detailed_pdf = auth_client.post(
+        '/api/v1/reports/pdf/detailed',
+        json={'month': '2025-01', 'consent': False},
+    )
+
+    assert insights.status_code == 400
+    assert detailed_pdf.status_code == 400
+    assert calls == []
+
+
+def test_detailed_pdf_endpoint(auth_client, db_session, monkeypatch):
+    _activate_max(db_session)
+    _activate_test_llm(db_session)
+    _add_txn(
+        db_session,
+        "SALARY",
+        75000,
+        date(2025, 1, 1),
+        category="INCOME",
+        txn_type="credit",
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.core.reporting.call_llm",
+        lambda *args, **kwargs: _valid_llm_report(),
+    )
+    resp = auth_client.post(
+        '/api/v1/reports/pdf/detailed',
+        json={'month': '2025-01', 'consent': True},
+    )
     assert resp.status_code == 200
     assert resp.headers['content-type'] == 'application/pdf'
     assert len(resp.content) > 100
     # PDF magic bytes
     assert resp.content[:5] == b'%PDF-'
+    with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+        pdf_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert 'AI REPORT DISCLOSURE' in pdf_text
+    assert 'ollama_local / qwen-test' in pdf_text
+    assert 'Data provided to the connected AI' in pdf_text
 
 
 def test_csv_endpoint(auth_client):

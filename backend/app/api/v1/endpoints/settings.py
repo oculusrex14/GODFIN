@@ -1,25 +1,50 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
+from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user, verify_pin_hash
+from app.core.auth import get_current_user
 from app.core.backup import create_backup, list_backups
 from app.core.config import settings as app_config
+from app.core.data_deletion import reset_dynamic_data
 from app.core.database import get_db
+from app.core.errors import LocalOperationError
 from app.core.encryption import SecretDecryptionError, decrypt, get_encryption_health
 from app.core.license import license_status
+from app.core.pin_security import client_ip_from_request, require_current_pin
+from app.core.restore_request import (
+    default_restore_request_path,
+    prepare_restore_request,
+)
+from app.core.startup_migrations import CURRENT_SCHEMA_REVISION
 from app.models.app_setting import AppSetting
 from app.models.classification_rule import ClassificationRule
+from app.models.classification_learning import ClassificationCorrection
 from app.models.llm_config import LLMConfiguration
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 DB_PATH = str(app_config.database_path)
+PUBLIC_SETTING_KEYS = frozenset(
+    {
+        "allow_network_access",
+        "auto_ingestion_enabled",
+        "backup_directory",
+        "developer_mode",
+        "enable_embeddings",
+        "ingestion_frequency_minutes",
+        "local_ai_choice",
+        "user_timezone",
+    }
+)
 
 
 def _get_backup_dir(db: Session) -> str:
@@ -27,47 +52,136 @@ def _get_backup_dir(db: Session) -> str:
     return setting.value if setting else './backups'
 
 
+def _safe_nonnegative_int(value: str | None) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 # --- App Settings ---
 
-@router.get("")
+@router.get("", response_model=dict[str, str])
 def get_settings(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     settings = db.query(AppSetting).all()
-    # Exclude sensitive settings from response
-    sensitive_keys = {'pin_hash', 'auth_token', 'license_key'}
-    return {s.key: s.value for s in settings if s.key not in sensitive_keys}
+    return {s.key: s.value for s in settings if s.key in PUBLIC_SETTING_KEYS}
 
 
-class SettingUpdate(BaseModel):
+class TimezoneUpdate(BaseModel):
+    timezone: str = Field(..., min_length=1, max_length=64)
+
+
+class SensitiveToggleUpdate(BaseModel):
+    enabled: bool
+    current_pin: str | None = Field(
+        default=None,
+        min_length=4,
+        max_length=8,
+        pattern=r"^\d+$",
+    )
+
+
+class PreferenceUpdateResponse(BaseModel):
+    key: str
     value: str
+    restart_required: bool
 
 
-@router.get("/health")
+class EncryptionHealthResponse(BaseModel):
+    status: str
+    source: str | None
+    message: str
+
+
+class GmailHealthResponse(BaseModel):
+    status: str
+    connected: bool
+    message: str
+    retryable: bool
+    action_required: str | None
+    credentials_present: bool
+    token_expiry: str | None
+    last_refresh_success_at: str | None
+    last_refresh_failure_at: str | None
+    client_config_match: bool | None
+    safe_reason_code: str
+
+
+class LLMHealthResponse(BaseModel):
+    status: str
+    provider: str | None
+    model: str | None
+    message: str
+
+
+class BackupFileResponse(BaseModel):
+    filename: str
+    size_bytes: int
+    created_at: str
+    restore_ready: bool
+
+
+class BackupHealthResponse(BaseModel):
+    status: str
+    scheduler_status: str
+    job_status: str
+    directory: str
+    count: int
+    last_backup: BackupFileResponse | None
+    last_success_at: str | None
+    last_failure_at: str | None
+    next_retry_at: str | None
+    failure_code: str | None
+    failure_count: int
+    message: str
+
+
+class IngestionHealthResponse(BaseModel):
+    status: str
+    last_run: str | None
+
+
+class NetworkHealthResponse(BaseModel):
+    allow_network_access: bool
+    message: str
+
+
+class LicenseHealthResponse(BaseModel):
+    status: str
+    tier: str
+    message: str
+
+
+class SettingsHealthResponse(BaseModel):
+    encryption: EncryptionHealthResponse
+    gmail: GmailHealthResponse
+    llm: LLMHealthResponse
+    backup: BackupHealthResponse
+    ingestion: IngestionHealthResponse
+    network: NetworkHealthResponse
+    license: LicenseHealthResponse
+
+
+def _set_existing_setting(db: Session, key: str, value: str) -> None:
+    setting = db.query(AppSetting).filter_by(key=key).first()
+    if setting is None:
+        raise HTTPException(status_code=500, detail="Required application setting is missing")
+    setting.value = value
+
+
+@router.get("/health", response_model=SettingsHealthResponse)
 def settings_health(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    from app.core.gmail_service import CLIENT_SECRETS_FILE, TOKEN_FILE, gmail_service
+    from app.core.gmail_service import gmail_service
 
     encryption = get_encryption_health()
 
-    gmail_connected = gmail_service.is_connected
-    if gmail_connected:
-        gmail_status = "connected"
-        gmail_message = "Gmail credentials are valid."
-    elif TOKEN_FILE.exists():
-        gmail_status = "needs_reauth"
-        gmail_message = "Stored Gmail credentials need to be re-authorized."
-    elif CLIENT_SECRETS_FILE.exists() or (
-        os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET")
-    ):
-        gmail_status = "ready"
-        gmail_message = "Gmail is configured and ready to connect."
-    else:
-        gmail_status = "not_configured"
-        gmail_message = "Add Google OAuth credentials to connect Gmail."
+    gmail_health = gmail_service.connection_health()
 
     active_llm = db.query(LLMConfiguration).filter_by(is_active=True).first()
     llm_status = "not_configured"
@@ -75,6 +189,11 @@ def settings_health(
     if active_llm:
         llm_status = "ok"
         llm_message = f"{active_llm.provider} / {active_llm.model} is active."
+        from app.core.llm_privacy import has_hosted_data_consent
+
+        if not has_hosted_data_consent(active_llm):
+            llm_status = "consent_required"
+            llm_message = "Review the hosted AI data disclosure before using this provider."
         if active_llm.api_key:
             try:
                 decrypt(active_llm.api_key)
@@ -85,6 +204,56 @@ def settings_health(
     backup_dir = _get_backup_dir(db)
     backups = list_backups(backup_dir)
     latest_backup = backups[0] if backups else None
+    backup_health_keys = {
+        "backup_scheduler_status",
+        "backup_scheduler_failure_code",
+        "backup_scheduler_last_failure_at",
+        "backup_scheduler_next_retry_at",
+        "backup_scheduler_failure_count",
+        "backup_job_status",
+        "backup_last_success_at",
+        "backup_job_last_failure_at",
+        "backup_job_failure_code",
+        "backup_job_next_retry_at",
+        "backup_job_failure_count",
+    }
+    backup_health = {
+        setting.key: setting.value
+        for setting in db.query(AppSetting)
+        .filter(AppSetting.key.in_(backup_health_keys))
+        .all()
+    }
+    scheduler_status = backup_health.get("backup_scheduler_status", "unknown")
+    backup_job_status = backup_health.get("backup_job_status", "never")
+    scheduler_degraded = scheduler_status == "degraded"
+    backup_job_degraded = backup_job_status == "degraded"
+    backup_degraded = scheduler_degraded or backup_job_degraded
+    last_success_at = backup_health.get("backup_last_success_at") or (
+        latest_backup["created_at"] if latest_backup else None
+    )
+    next_retry_at = (
+        backup_health.get("backup_scheduler_next_retry_at")
+        if scheduler_degraded
+        else backup_health.get("backup_job_next_retry_at")
+    )
+    if scheduler_degraded:
+        backup_message = (
+            "Automatic backup protection could not start. GODFIN will retry "
+            "automatically; manual backups remain available."
+        )
+    elif backup_job_degraded:
+        backup_message = (
+            "The latest automatic backup failed. The last successful backup "
+            "was preserved and GODFIN will retry automatically."
+        )
+    elif latest_backup:
+        backup_message = "Automatic backup protection is active and backups are available."
+    elif scheduler_status == "operational":
+        backup_message = (
+            "Automatic backup protection is active. No backup has completed yet."
+        )
+    else:
+        backup_message = "No backup has been created yet."
 
     last_ingest = db.query(AppSetting).filter_by(key="last_ingestion_run").first()
     network_setting = db.query(AppSetting).filter_by(key="allow_network_access").first()
@@ -93,9 +262,7 @@ def settings_health(
     return {
         "encryption": encryption,
         "gmail": {
-            "status": gmail_status,
-            "connected": gmail_connected,
-            "message": gmail_message,
+            **gmail_health.to_dict(),
         },
         "llm": {
             "status": llm_status,
@@ -104,15 +271,36 @@ def settings_health(
             "message": llm_message,
         },
         "backup": {
-            "status": "ok" if latest_backup else "never",
+            "status": (
+                "degraded"
+                if backup_degraded
+                else "ok"
+                if latest_backup
+                else "never"
+            ),
+            "scheduler_status": scheduler_status,
+            "job_status": backup_job_status,
             "directory": backup_dir,
             "count": len(backups),
             "last_backup": latest_backup,
-            "message": (
-                "Backups are available."
-                if latest_backup
-                else "No backup has been created yet."
+            "last_success_at": last_success_at,
+            "last_failure_at": (
+                backup_health.get("backup_scheduler_last_failure_at")
+                if scheduler_degraded
+                else backup_health.get("backup_job_last_failure_at")
             ),
+            "next_retry_at": next_retry_at or None,
+            "failure_code": (
+                backup_health.get("backup_scheduler_failure_code")
+                if scheduler_degraded
+                else backup_health.get("backup_job_failure_code")
+            ) or None,
+            "failure_count": _safe_nonnegative_int(
+                backup_health.get("backup_scheduler_failure_count")
+                if scheduler_degraded
+                else backup_health.get("backup_job_failure_count")
+            ),
+            "message": backup_message,
         },
         "ingestion": {
             "status": "ok" if last_ingest and last_ingest.value else "never",
@@ -120,7 +308,8 @@ def settings_health(
         },
         "network": {
             "allow_network_access": bool(
-                network_setting and network_setting.value == "true"
+                network_setting
+                and network_setting.value.strip().lower() in {"true", "lan"}
             ),
             "message": "A restart is required after changing network access.",
         },
@@ -132,35 +321,98 @@ def settings_health(
     }
 
 
-@router.put("/{key}")
-def update_setting(
-    key: str,
-    body: SettingUpdate,
+@router.put(
+    "/preferences/timezone",
+    response_model=PreferenceUpdateResponse,
+)
+def update_timezone(
+    body: TimezoneUpdate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    setting = db.query(AppSetting).filter_by(key=key).first()
-    if not setting:
-        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+    try:
+        ZoneInfo(body.timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise HTTPException(status_code=422, detail="Unknown IANA timezone") from exc
 
-    # Protect sensitive settings
-    if key in ('pin_hash',):
-        raise HTTPException(status_code=403, detail="Cannot update this setting directly")
-    if key == "allow_network_access" and body.value not in {"true", "false"}:
-        raise HTTPException(status_code=400, detail="Network access must be true or false")
+    _set_existing_setting(db, "user_timezone", body.timezone)
+    db.commit()
+    return {"key": "user_timezone", "value": body.timezone, "restart_required": False}
 
-    setting.value = body.value
+
+@router.put(
+    "/preferences/network-access",
+    response_model=PreferenceUpdateResponse,
+)
+def update_network_access(
+    body: SensitiveToggleUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    if body.enabled:
+        require_current_pin(
+            db,
+            body.current_pin,
+            client_ip_from_request(request),
+            action="enable_network_access",
+            missing_detail="Enter your current PIN to make this security change",
+        )
+    value = "lan" if body.enabled else "local"
+    _set_existing_setting(db, "allow_network_access", value)
     db.commit()
     return {
-        'key': key,
-        'value': body.value,
-        'restart_required': key == "allow_network_access",
+        "key": "allow_network_access",
+        "value": value,
+        "restart_required": True,
     }
+
+
+@router.put(
+    "/preferences/developer-mode",
+    response_model=PreferenceUpdateResponse,
+)
+def update_developer_mode(
+    body: SensitiveToggleUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    if body.enabled:
+        require_current_pin(
+            db,
+            body.current_pin,
+            client_ip_from_request(request),
+            action="enable_developer_mode",
+            missing_detail="Enter your current PIN to make this security change",
+        )
+    value = "true" if body.enabled else "false"
+    _set_existing_setting(db, "developer_mode", value)
+    db.commit()
+    return {"key": "developer_mode", "value": value, "restart_required": False}
+
+
+@router.put("/{key}", include_in_schema=False)
+def reject_generic_setting_mutation(
+    key: str,
+    _body: dict,
+    _user: bool = Depends(get_current_user),
+):
+    del key
+    raise HTTPException(
+        status_code=403,
+        detail="This setting cannot be changed through the generic settings API",
+    )
 
 
 # --- Backup ---
 
-@router.post("/backup")
+class BackupCreatedResponse(BaseModel):
+    filename: str
+    status: Literal["success"]
+
+
+@router.post("/backup", response_model=BackupCreatedResponse)
 def trigger_backup(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -169,11 +421,15 @@ def trigger_backup(
     try:
         filename = create_backup(DB_PATH, backup_dir)
         return {'filename': filename, 'status': 'success'}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise LocalOperationError(
+            code="BACKUP_FAILED",
+            message="GODFIN could not create the backup.",
+            hint="Check the backup location and available disk space, then try again.",
+        ) from exc
 
 
-@router.get("/backups")
+@router.get("/backups", response_model=list[BackupFileResponse])
 def get_backups(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -182,9 +438,81 @@ def get_backups(
     return list_backups(backup_dir)
 
 
+class RestoreBackupRequest(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=8, pattern=r"^\d+$")
+    confirmation: Literal["RESTORE"]
+
+
+class RestoreBackupPrepared(BaseModel):
+    restore_token: str
+    backup_filename: str
+    expires_at: str
+
+
+@router.post(
+    "/backups/{filename}/prepare-restore",
+    response_model=RestoreBackupPrepared,
+)
+def prepare_backup_restore(
+    filename: str,
+    body: RestoreBackupRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Authorize one desktop-controlled restore after PIN reauthentication."""
+    require_current_pin(
+        db,
+        body.pin,
+        client_ip_from_request(request),
+        action="restore_backup",
+    )
+    try:
+        return prepare_restore_request(
+            backup_dir=_get_backup_dir(db),
+            filename=filename,
+            request_path=default_restore_request_path(DB_PATH),
+            maximum_schema_revision=CURRENT_SCHEMA_REVISION,
+        )
+    except Exception as exc:
+        raise LocalOperationError(
+            code="BACKUP_RESTORE_PREPARATION_FAILED",
+            message="GODFIN could not prepare that backup for restore.",
+            hint=(
+                "Choose a verified GODFIN backup from this installation, "
+                "then try again."
+            ),
+        ) from exc
+
+
 # --- Developer Mode ---
 
-@router.get("/developer")
+
+class DeveloperRuleResponse(BaseModel):
+    id: str
+    rule_type: str
+    pattern: str
+    category: str
+    subcategory: str | None
+    priority: int
+    is_system: bool
+
+
+class ClassificationHealthResponse(BaseModel):
+    source_counts: dict[str, int]
+    avg_confidence: dict[str, float]
+    unclassified_count: int
+    merchant_memory_count: int
+    active_rules_count: int
+
+
+class DeveloperStatusResponse(BaseModel):
+    developer_mode: bool
+    rules: list[DeveloperRuleResponse]
+    classification_health: ClassificationHealthResponse
+
+
+@router.get("/developer", response_model=DeveloperStatusResponse)
 def developer_mode_status(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -250,20 +578,29 @@ def developer_mode_status(
 
 class RuleCreate(BaseModel):
     rule_type: str = Field(..., pattern=r'^(regex|contains|exact)$')
-    pattern: str = Field(..., min_length=1)
-    category: str = Field(..., min_length=1)
-    subcategory: str = None
-    priority: int = 100
+    pattern: str = Field(..., min_length=1, max_length=1000)
+    category: str = Field(..., min_length=1, max_length=100)
+    subcategory: str | None = Field(default=None, max_length=100)
+    priority: int = Field(default=100, ge=0, le=10_000)
 
 
 class RuleUpdate(BaseModel):
-    pattern: str = Field(None, min_length=1)
-    category: str = Field(None, min_length=1)
-    subcategory: str = None
-    priority: int = None
+    pattern: str | None = Field(default=None, min_length=1, max_length=1000)
+    category: str | None = Field(default=None, min_length=1, max_length=100)
+    subcategory: str | None = Field(default=None, max_length=100)
+    priority: int | None = Field(default=None, ge=0, le=10_000)
 
 
-@router.post("/developer/rules", status_code=201)
+class RuleUpdateResponse(BaseModel):
+    id: str
+    status: Literal["updated"]
+
+
+@router.post(
+    "/developer/rules",
+    status_code=201,
+    response_model=DeveloperRuleResponse,
+)
 def create_rule(
     body: RuleCreate,
     db: Session = Depends(get_db),
@@ -276,8 +613,11 @@ def create_rule(
     if body.rule_type == 'regex':
         try:
             re.compile(body.pattern)
-        except re.error as e:
-            raise HTTPException(status_code=400, detail=f"Invalid regex: {e}")
+        except re.error as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="The pattern is not valid. Check brackets and special characters.",
+            ) from exc
 
     import uuid
     rule = ClassificationRule(
@@ -303,7 +643,10 @@ def create_rule(
     }
 
 
-@router.put("/developer/rules/{rule_id}")
+@router.put(
+    "/developer/rules/{rule_id}",
+    response_model=RuleUpdateResponse,
+)
 def update_rule(
     rule_id: str,
     body: RuleUpdate,
@@ -324,8 +667,13 @@ def update_rule(
         if rule.rule_type == 'regex':
             try:
                 re.compile(body.pattern)
-            except re.error as e:
-                raise HTTPException(status_code=400, detail=f"Invalid regex: {e}")
+            except re.error as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "The pattern is not valid. Check brackets and special characters."
+                    ),
+                ) from exc
         rule.pattern = body.pattern
 
     if body.category is not None:
@@ -360,72 +708,280 @@ def delete_rule(
 # --- Reset Data ---
 
 class ResetDataRequest(BaseModel):
-    pin: str = Field(..., min_length=1)
-    create_backup: bool = True
+    pin: str = Field(..., min_length=4, max_length=8, pattern=r"^\d+$")
+    create_backup: Literal[True] = True
 
 
-@router.post("/reset-data", status_code=200)
+class ClassificationMemoryReset(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=8)
+
+
+class PersonalClassifierUpdate(BaseModel):
+    enabled: bool
+
+
+class PersonalClassifierEligibilityResponse(BaseModel):
+    eligible: bool
+    enabled: bool
+    confirmed_corrections: int
+    required_corrections: int
+    category_count: int
+    required_categories: int
+
+
+class LearnedPatternResponse(BaseModel):
+    id: str
+    pattern: str
+    instrument: str | None
+    category: str
+    subcategory: str | None
+    confirmations: int
+    confidence: float
+    active: bool
+    updated_at: str
+
+
+class ClassificationCorrectionResponse(BaseModel):
+    id: str
+    transaction_id: str
+    merchant: str
+    old_category: str | None
+    new_category: str
+    new_subcategory: str | None
+    undone: bool
+    created_at: str
+
+
+class MerchantMemoryResponse(BaseModel):
+    id: str
+    merchant: str
+    category: str
+    subcategory: str | None
+    times_seen: int
+    confidence: float
+
+
+class ClassificationMemoryResponse(BaseModel):
+    eligibility: PersonalClassifierEligibilityResponse
+    patterns: list[LearnedPatternResponse]
+    corrections: list[ClassificationCorrectionResponse]
+    merchants: list[MerchantMemoryResponse]
+
+
+class ClassificationUndoResponse(BaseModel):
+    status: Literal["undone"]
+    correction_id: str
+    transaction_id: str
+
+
+class ClassificationMemoryResetResponse(BaseModel):
+    patterns_removed: int
+    corrections_removed: int
+    merchant_memories_removed: int
+    backup_filename: str
+    message: str
+
+
+class ResetDataResponse(BaseModel):
+    success: Literal[True]
+    backup_created: Literal[True]
+    backup_filename: str
+    deleted_records: int
+    deletion_counts: dict[str, int]
+    message: str
+
+
+@router.get(
+    "/classification-memory",
+    response_model=ClassificationMemoryResponse,
+)
+def classification_memory(
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import list_learning_memory
+
+    return list_learning_memory(db, limit=min(max(limit, 1), 500))
+
+
+@router.get(
+    "/classification-memory/export",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Spreadsheet-safe classification-memory CSV.",
+            "content": {"text/csv": {"schema": {"type": "string"}}},
+        }
+    },
+)
+def export_classification_memory(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import export_learning_memory_csv
+
+    return Response(
+        content=export_learning_memory_csv(db),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=godfin-classification-memory.csv"
+        },
+    )
+
+
+@router.post(
+    "/classification-memory/{correction_id}/undo",
+    response_model=ClassificationUndoResponse,
+)
+def undo_classification_memory(
+    correction_id: str,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import undo_correction
+
+    existing = db.query(ClassificationCorrection).filter_by(id=correction_id).first()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Classification correction not found.")
+    try:
+        correction = undo_correction(db, correction_id)
+        db.commit()
+        return {
+            "status": "undone",
+            "correction_id": correction.id,
+            "transaction_id": correction.transaction_id,
+        }
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="This classification correction cannot be undone in its current state.",
+        ) from exc
+
+
+@router.put(
+    "/classification-memory/personal",
+    response_model=PersonalClassifierEligibilityResponse,
+)
+def update_personal_classifier(
+    body: PersonalClassifierUpdate,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import personal_classifier_eligibility
+
+    eligibility = personal_classifier_eligibility(db)
+    if body.enabled and "personal_classifier" not in license_status(db)["features"]:
+        raise HTTPException(
+            status_code=403,
+            detail="The personal classifier is a GODFIN Max feature.",
+        )
+    if body.enabled and not eligibility["eligible"]:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Personal classification requires at least "
+                f"{eligibility['required_corrections']} confirmed corrections "
+                f"across {eligibility['required_categories']} categories."
+            ),
+        )
+    setting = db.query(AppSetting).filter_by(
+        key="personal_classification_enabled"
+    ).first()
+    if setting is None:
+        setting = AppSetting(
+            key="personal_classification_enabled",
+            value="true" if body.enabled else "false",
+        )
+        db.add(setting)
+    else:
+        setting.value = "true" if body.enabled else "false"
+    db.commit()
+    return personal_classifier_eligibility(db)
+
+
+@router.post(
+    "/classification-memory/reset",
+    response_model=ClassificationMemoryResetResponse,
+)
+def reset_classification_memory(
+    body: ClassificationMemoryReset,
+    request: Request,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    from app.core.classification_learning import reset_learning_memory
+
+    require_current_pin(
+        db,
+        body.pin,
+        client_ip_from_request(request),
+        action="reset_classification_memory",
+    )
+    backup_filename = create_backup(DB_PATH, _get_backup_dir(db))
+    result = reset_learning_memory(db)
+    db.commit()
+    return {
+        **result,
+        "backup_filename": backup_filename,
+        "message": "Classification memory reset. Existing transaction labels were preserved.",
+    }
+
+
+@router.post(
+    "/reset-data",
+    status_code=200,
+    response_model=ResetDataResponse,
+)
 def reset_all_data(
     body: ResetDataRequest,
+    request: Request,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Reset all transaction and dynamic data. PIN-protected."""
-    # 1. Verify PIN
-    pin_setting = db.query(AppSetting).filter_by(key='pin_hash').first()
-    if not pin_setting or not pin_setting.value:
-        raise HTTPException(status_code=400, detail='No PIN set')
-    if not verify_pin_hash(body.pin, pin_setting.value):
-        raise HTTPException(status_code=401, detail='Incorrect PIN')
+    require_current_pin(
+        db,
+        body.pin,
+        client_ip_from_request(request),
+        action="reset_all_data",
+    )
 
-    # 2. Create backup first (safety net)
-    backup_filename = None
-    if body.create_backup:
-        try:
-            backup_dir = _get_backup_dir(db)
-            backup_filename = create_backup(DB_PATH, backup_dir)
-        except Exception:
-            pass  # Don't fail the reset if backup fails
+    try:
+        backup_filename = create_backup(DB_PATH, _get_backup_dir(db))
+    except Exception as exc:
+        logger.error("Safety backup failed before data reset: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Data was not reset because the safety backup failed.",
+        ) from exc
 
-    # 3. Delete all dynamic data (preserve accounts, settings, rules)
-    from app.models.transaction import Transaction
-    from app.models.transaction_split import TransactionSplit
-    from app.models.audit_session import AuditSession
-    from app.models.audit_log import AuditLog
-    from app.models.merchant_memory import MerchantMemory
-    from app.models.monthly_aggregate import MonthlyAggregate
-    from app.models.recurring_pattern import RecurringPattern
-    from app.models.goal import Goal
-    from app.models.income_source import IncomeSource
-    from app.models.subscription import Subscription
-    from app.models.system_log import SystemLog
+    try:
+        deletion_counts = reset_dynamic_data(db)
+        for key in ['last_ingestion_run', 'last_gmail_history_id', 'ingestion_history']:
+            setting = db.query(AppSetting).filter_by(key=key).first()
+            if setting:
+                setting.value = ''
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Data reset rolled back after the safety backup succeeded")
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Data was not reset because deletion could not be completed safely. "
+                "The safety backup remains available."
+            ),
+        ) from exc
 
-    # Delete child tables FIRST (FK order matters):
-    # TransactionSplit → Transaction; AuditLog → Transaction
-    # Transaction → AuditSession; MonthlyAggregate → AuditSession
-    db.query(TransactionSplit).delete(synchronize_session=False)
-    db.query(AuditLog).delete(synchronize_session=False)
-    db.query(Transaction).delete(synchronize_session=False)
-    db.query(MonthlyAggregate).delete(synchronize_session=False)
-    db.query(AuditSession).delete(synchronize_session=False)
-    db.query(MerchantMemory).delete(synchronize_session=False)
-    db.query(RecurringPattern).delete(synchronize_session=False)
-    db.query(Goal).delete(synchronize_session=False)
-    db.query(IncomeSource).delete(synchronize_session=False)
-    db.query(Subscription).delete(synchronize_session=False)
-    db.query(SystemLog).delete(synchronize_session=False)
-
-    # 4. Reset ingestion tracking state
-    for key in ['last_ingestion_run', 'last_gmail_history_id', 'ingestion_history']:
-        setting = db.query(AppSetting).filter_by(key=key).first()
-        if setting:
-            setting.value = ''
-
-    db.commit()
+    deleted_records = sum(deletion_counts.values())
 
     return {
         'success': True,
-        'backup_created': backup_filename is not None,
+        'backup_created': True,
         'backup_filename': backup_filename,
+        'deleted_records': deleted_records,
+        'deletion_counts': deletion_counts,
         'message': 'All data has been reset. Accounts and settings preserved.',
     }

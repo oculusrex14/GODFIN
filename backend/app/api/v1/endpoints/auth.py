@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import ipaddress
-import os
 import re
-from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -17,112 +14,103 @@ from app.core.auth import (
     verify_pin_hash,
 )
 from app.core.database import get_db
+from app.core.local_api_trust import (
+    TRUSTED_DESKTOP_STATE_KEY,
+    RuntimeMode,
+    runtime_mode,
+)
+from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
-from app.models.pin_attempt import PinAttempt
-from app.schemas.auth import AuthResponse, AuthStatusResponse, PinChange, PinSet, PinVerify
+from app.schemas.auth import (
+    AuthResponse,
+    AuthStatusResponse,
+    LogoutResponse,
+    PinChange,
+    PinSet,
+    PinVerify,
+)
 
 router = APIRouter()
 
-RATE_LIMIT_MAX_ATTEMPTS = 5  # Max failed attempts
-RATE_LIMIT_WINDOW_SECONDS = 300  # 5 minute window
-
 # PIN validation constants
 MIN_PIN_LENGTH = 4
-MAX_PIN_LENGTH = 8
+MAX_NEW_PIN_LENGTH = 6
+MAX_LEGACY_PIN_LENGTH = 8
+PIN_LENGTH_SETTING_KEY = "pin_length"
 
 
-def _validate_pin_format(pin: str) -> None:
+def _validate_pin_format(
+    pin: str,
+    *,
+    allow_legacy_length: bool = False,
+    reject_weak: bool = True,
+) -> None:
     """Validate PIN format. Raises HTTPException if invalid."""
+    max_length = MAX_LEGACY_PIN_LENGTH if allow_legacy_length else MAX_NEW_PIN_LENGTH
     if not pin:
         raise HTTPException(status_code=400, detail="PIN cannot be empty")
     if not re.match(r'^\d+$', pin):
         raise HTTPException(status_code=400, detail="PIN must contain only digits")
     if len(pin) < MIN_PIN_LENGTH:
         raise HTTPException(status_code=400, detail=f"PIN must be at least {MIN_PIN_LENGTH} digits")
-    if len(pin) > MAX_PIN_LENGTH:
-        raise HTTPException(status_code=400, detail=f"PIN cannot exceed {MAX_PIN_LENGTH} digits")
-    # Reject weak PINs (sequential or repeated digits)
-    weak_pins = ['2345', '3456', '4567', '5678', '6789', '7890',
-                 '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '0000']
-    if pin in weak_pins:
+    if len(pin) > max_length:
+        raise HTTPException(status_code=400, detail=f"PIN cannot exceed {max_length} digits")
+    ascending = "01234567890123456789"
+    descending = ascending[::-1]
+    common_pins = {"1234", "4321", "1212", "2580", "0852", "6969"}
+    repeated_pair = len(pin) in {4, 6} and pin == pin[:2] * (len(pin) // 2)
+    year_like = len(pin) == 4 and 1900 <= int(pin) <= 2099
+    weak = (
+        len(set(pin)) == 1
+        or pin in ascending
+        or pin in descending
+        or pin in common_pins
+        or repeated_pair
+        or year_like
+    )
+    if reject_weak and weak:
         raise HTTPException(status_code=400, detail="PIN is too simple. Avoid sequential or repeated digits.")
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _client_ip(request: Request) -> str:
-    direct_ip = request.client.host if request.client else "unknown"
-    trusted = {
-        value.strip()
-        for value in os.environ.get("GODFIN_TRUSTED_PROXIES", "").split(",")
-        if value.strip()
-    }
-    if direct_ip in trusted:
-        forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-        if forwarded:
-            try:
-                return str(ipaddress.ip_address(forwarded))
-            except ValueError:
-                pass
-    return direct_ip[:64]
-
-
-def _check_rate_limit(db: Session, client_ip: str) -> None:
-    attempt = db.query(PinAttempt).filter_by(client_ip=client_ip).first()
-    if attempt is None:
-        return
-    now = _utcnow()
-    if attempt.blocked_until and attempt.blocked_until > now:
-        retry_after = max(1, int((attempt.blocked_until - now).total_seconds()))
-        raise HTTPException(
-            status_code=429,
-            detail="Too many failed attempts. Please try again later.",
-            headers={"Retry-After": str(retry_after)},
-        )
-    if now - attempt.window_started_at >= timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS):
-        db.delete(attempt)
-        db.commit()
-
-
-def _record_failed_attempt(db: Session, client_ip: str) -> None:
-    now = _utcnow()
-    attempt = db.query(PinAttempt).filter_by(client_ip=client_ip).first()
-    if attempt is None:
-        attempt = PinAttempt(
-            client_ip=client_ip,
-            failed_attempts=1,
-            window_started_at=now,
-            updated_at=now,
-        )
-        db.add(attempt)
-    elif now - attempt.window_started_at >= timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS):
-        attempt.failed_attempts = 1
-        attempt.window_started_at = now
-        attempt.blocked_until = None
-        attempt.updated_at = now
+def _store_pin_length(db: Session, length: int) -> None:
+    setting = db.query(AppSetting).filter_by(key=PIN_LENGTH_SETTING_KEY).first()
+    if setting:
+        setting.value = str(length)
     else:
-        attempt.failed_attempts += 1
-        attempt.updated_at = now
-
-    if attempt.failed_attempts >= RATE_LIMIT_MAX_ATTEMPTS:
-        attempt.blocked_until = now + timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS)
-    db.commit()
+        db.add(AppSetting(key=PIN_LENGTH_SETTING_KEY, value=str(length)))
 
 
-def _clear_failed_attempts(db: Session, client_ip: str) -> None:
-    db.query(PinAttempt).filter_by(client_ip=client_ip).delete(
-        synchronize_session=False
-    )
-    db.commit()
+def _stored_pin_length(db: Session) -> int | None:
+    setting = db.query(AppSetting).filter_by(key=PIN_LENGTH_SETTING_KEY).first()
+    if not setting:
+        return None
+    try:
+        length = int(setting.value)
+    except (TypeError, ValueError):
+        return None
+    return length if MIN_PIN_LENGTH <= length <= MAX_LEGACY_PIN_LENGTH else None
 
 
 @router.get("/status", response_model=AuthStatusResponse)
-def auth_status(db: Session = Depends(get_db)):
+def auth_status(request: Request, db: Session = Depends(get_db)):
     setting = db.query(AppSetting).filter_by(key="is_first_run").first()
     is_first_run = setting.value == "true" if setting else True
-    return AuthStatusResponse(is_first_run=is_first_run)
+    trusted_desktop = bool(
+        request.scope.get("state", {}).get(TRUSTED_DESKTOP_STATE_KEY, False)
+    )
+    return AuthStatusResponse(
+        is_first_run=(
+            False
+            if runtime_mode() is RuntimeMode.LAN and not trusted_desktop
+            else is_first_run
+        ),
+        pin_length=(
+            None
+            if is_first_run
+            or (runtime_mode() is RuntimeMode.LAN and not trusted_desktop)
+            else _stored_pin_length(db)
+        ),
+    )
 
 
 @router.post("/set-pin", response_model=AuthResponse)
@@ -139,6 +127,7 @@ def set_pin(body: PinSet, request: Request, db: Session = Depends(get_db)):
         pin_setting.value = hash_pin(body.pin)
     else:
         db.add(AppSetting(key="pin_hash", value=hash_pin(body.pin)))
+    _store_pin_length(db, len(body.pin))
 
     first_run.value = "false"
     onboarding_completed = (
@@ -158,7 +147,7 @@ def set_pin(body: PinSet, request: Request, db: Session = Depends(get_db)):
     token = create_session(
         db,
         user_agent=request.headers.get("user-agent"),
-        ip_address=_client_ip(request),
+        ip_address=client_ip_from_request(request),
     )
     db.commit()
     return AuthResponse(authenticated=True, token=token)
@@ -171,12 +160,13 @@ def change_pin(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    pin_setting = db.query(AppSetting).filter_by(key="pin_hash").first()
-    if not pin_setting or not pin_setting.value:
-        raise HTTPException(status_code=400, detail="No PIN set")
-
-    if not verify_pin_hash(body.current_pin, pin_setting.value):
-        raise HTTPException(status_code=400, detail="Current PIN is incorrect")
+    pin_setting = require_current_pin(
+        db,
+        body.current_pin,
+        client_ip_from_request(request),
+        action="change_pin",
+        failure_detail="Current PIN is incorrect",
+    )
 
     # Validate new PIN format
     _validate_pin_format(body.new_pin)
@@ -219,6 +209,7 @@ def change_pin(
         db.add(AppSetting(key=PIN_HISTORY_KEY, value=json.dumps([current_pin_hash])))
 
     pin_setting.value = hash_pin(body.new_pin)
+    _store_pin_length(db, len(body.new_pin))
     db.commit()
 
     # Changing the PIN rotates the session identity and revokes every other
@@ -227,7 +218,7 @@ def change_pin(
     token = create_session(
         db,
         user_agent=request.headers.get("user-agent"),
-        ip_address=_client_ip(request),
+        ip_address=client_ip_from_request(request),
     )
     db.commit()
     return AuthResponse(authenticated=True, token=token)
@@ -235,21 +226,22 @@ def change_pin(
 
 @router.post("/verify-pin", response_model=AuthResponse)
 def verify_pin(body: PinVerify, request: Request, db: Session = Depends(get_db)):
-    client_ip = _client_ip(request)
-    _check_rate_limit(db, client_ip)
+    client_ip = client_ip_from_request(request)
 
     # Validate PIN format
-    _validate_pin_format(body.pin)
-
-    pin_setting = db.query(AppSetting).filter_by(key="pin_hash").first()
-    if not pin_setting or not pin_setting.value:
-        raise HTTPException(status_code=400, detail="No PIN set")
-
-    if not verify_pin_hash(body.pin, pin_setting.value):
-        _record_failed_attempt(db, client_ip)
-        raise HTTPException(status_code=401, detail="Incorrect PIN")
-
-    _clear_failed_attempts(db, client_ip)
+    _validate_pin_format(body.pin, allow_legacy_length=True, reject_weak=False)
+    require_current_pin(
+        db,
+        body.pin,
+        client_ip,
+        action="unlock",
+        failure_status=401,
+        failure_detail="Incorrect PIN",
+        missing_status=400,
+        missing_detail="No PIN set",
+    )
+    if _stored_pin_length(db) != len(body.pin):
+        _store_pin_length(db, len(body.pin))
     token = create_session(
         db,
         user_agent=request.headers.get("user-agent"),
@@ -259,7 +251,7 @@ def verify_pin(body: PinVerify, request: Request, db: Session = Depends(get_db))
     return AuthResponse(authenticated=True, token=token)
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=LogoutResponse)
 def logout(
     authorization: str = Header(default=""),
     db: Session = Depends(get_db),

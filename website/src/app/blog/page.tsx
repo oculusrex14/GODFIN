@@ -26,7 +26,7 @@ export default function BlogPage() {
     <>
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+          <div className="eyebrow eyebrow-accent">
             Notes from GODFIN
           </div>
           <h1>Privacy with implementation details</h1>
@@ -40,7 +40,7 @@ export default function BlogPage() {
         <div className="shell feature-grid">
           {articles.map((article) => (
             <article className="content-card" key={article.slug}>
-              <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+              <div className="eyebrow eyebrow-accent">
                 Guide
               </div>
               <h2>{article.title}</h2>

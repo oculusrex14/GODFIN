@@ -9,6 +9,8 @@
   "scripts": {
     "test": "playwright test",
     "test:smoke": "playwright test tests/production-smoke.test.js",
+    "test:app-matrix": "playwright test --config=playwright.app-matrix.config.js",
+    "test:website": "playwright test --config=playwright.website.config.js",
     "test:legacy": "playwright test --config=playwright.legacy.config.js"
   },
   "keywords": [],
@@ -16,6 +18,7 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@playwright/test": "^1.58.2"
   }
 }

@@ -1,3 +1,7 @@
+> **ARCHIVED HISTORICAL DOCUMENT — DO NOT USE FOR CURRENT IMPLEMENTATION.**
+> The tool schemas and agent workflow below are obsolete. Follow the active
+> environment instructions and `docs/ENGINEERING_GUIDE.md`.
+
 # GODFIN — Tools Used Log
 
 This log documents every unique tool invocation pattern with exact formatting, purpose, and response handling. Intended for replicating Claude Code tool use with locally running models.

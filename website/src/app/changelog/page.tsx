@@ -10,7 +10,7 @@ export default function ChangelogPage() {
     <>
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+          <div className="eyebrow eyebrow-accent">
             Release history
           </div>
           <h1>Changelog</h1>

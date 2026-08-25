@@ -1,18 +1,32 @@
 "use strict";
 
-const { app, BrowserWindow, dialog, net, protocol, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { existsSync, readFileSync } = require("node:fs");
+const { randomBytes } = require("node:crypto");
 const http = require("node:http");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const BACKEND_PORT = 5100;
 const BACKEND_ORIGIN = `http://127.0.0.1:${BACKEND_PORT}`;
+const BACKEND_REQUEST_FILTER = { urls: [`${BACKEND_ORIGIN}/*`] };
+const LAUNCH_SECRET_HEADER = "X-GODFIN-Launch";
+const verificationSecret = process.env.GODFIN_PACKAGE_VERIFICATION_SECRET;
+const launchSecret = (
+  process.env.GODFIN_PACKAGE_VERIFICATION === "1"
+  && typeof verificationSecret === "string"
+  && /^[A-Za-z0-9_-]{43,128}$/.test(verificationSecret)
+)
+  ? verificationSecret
+  : randomBytes(32).toString("base64url");
 const APP_ORIGIN = "godfin://app";
+const UPDATE_ORIGIN = "https://releases.godfin.dev";
 const WEBSITE_ORIGINS = new Set([
   "https://godfin.dev",
+  "https://godfin.vercel.app",
   "https://accounts.google.com",
+  "https://ollama.com",
 ]);
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -41,7 +55,8 @@ protocol.registerSchemesAsPrivileged([
 
 let backendProcess = null;
 let mainWindow = null;
-let quittingForUpdate = false;
+let backendMaintenanceInProgress = false;
+let updateDownloadPromptOpen = false;
 
 function frontendRoot() {
   return app.isPackaged
@@ -104,7 +119,9 @@ function backendCommand() {
         executable,
       ),
       args: [],
-      cwd: path.join(process.resourcesPath, "backend", "godfin-backend"),
+      // All relative writes (including logs and seeded backup settings) must
+      // remain outside the signed application bundle.
+      cwd: app.getPath("userData"),
     };
   }
   const projectRoot = path.join(__dirname, "..");
@@ -123,14 +140,34 @@ function backendEnvironment() {
   return {
     ...process.env,
     DB_PATH: path.join(userData, "godfin.db"),
+    GODFIN_BACKUP_DIR: path.join(userData, "backups"),
     GODFIN_BACKEND_PORT: String(BACKEND_PORT),
     GODFIN_ENCRYPTION_KEY_FILE: path.join(userData, ".encryption_key"),
     GODFIN_MACHINE_ID_FILE: path.join(userData, ".machine_id"),
     GODFIN_GMAIL_TOKEN_FILE: path.join(userData, "gmail_token.json"),
     GODFIN_GMAIL_CLIENT_SECRETS_FILE: path.join(userData, "client_secret.json"),
     GODFIN_MODEL_CACHE_DIR: path.join(userData, "models"),
+    GODFIN_UPDATE_RECOVERY_JOURNAL: path.join(userData, "update-recovery.json"),
+    GODFIN_APP_VERSION: app.getVersion(),
     GODFIN_PACKAGED: app.isPackaged ? "1" : "0",
+    GODFIN_LAUNCH_SECRET: launchSecret,
     MPLCONFIGDIR: path.join(userData, "matplotlib"),
+  };
+}
+
+function backendMaintenanceCommand(maintenanceArguments) {
+  if (app.isPackaged) {
+    const launch = backendCommand();
+    return { ...launch, args: maintenanceArguments };
+  }
+  const projectRoot = path.join(__dirname, "..");
+  const python = process.platform === "win32"
+    ? path.join(projectRoot, "backend", "venv", "Scripts", "python.exe")
+    : path.join(projectRoot, "backend", "venv", "bin", "python");
+  return {
+    command: python,
+    args: [path.join(projectRoot, "backend", "desktop_entry.py"), ...maintenanceArguments],
+    cwd: path.join(projectRoot, "backend"),
   };
 }
 
@@ -149,7 +186,7 @@ function startBackend() {
   });
   backendProcess.once("exit", (code, signal) => {
     backendProcess = null;
-    if (!quittingForUpdate && !app.isQuitting && code !== 0) {
+    if (!backendMaintenanceInProgress && !app.isQuitting && code !== 0) {
       dialog.showErrorBox(
         "GODFIN backend stopped",
         `The local finance service exited (${signal || code}). Restart GODFIN to continue.`,
@@ -162,7 +199,9 @@ function waitForBackend(timeoutMs = 30_000) {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
     const check = () => {
-      const request = http.get(`${BACKEND_ORIGIN}/api/v1/health`, (response) => {
+      const request = http.get(`${BACKEND_ORIGIN}/api/v1/health`, {
+        headers: { [LAUNCH_SECRET_HEADER]: launchSecret },
+      }, (response) => {
         response.resume();
         if (response.statusCode === 200) {
           resolve();
@@ -186,6 +225,20 @@ function waitForBackend(timeoutMs = 30_000) {
   });
 }
 
+function configureBackendRequestTrust() {
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    BACKEND_REQUEST_FILTER,
+    (details, callback) => {
+      callback({
+        requestHeaders: {
+          ...details.requestHeaders,
+          [LAUNCH_SECRET_HEADER]: launchSecret,
+        },
+      });
+    },
+  );
+}
+
 function isTrustedExternal(rawUrl) {
   try {
     const parsed = new URL(rawUrl);
@@ -196,6 +249,27 @@ function isTrustedExternal(rawUrl) {
   } catch {
     return false;
   }
+}
+
+function isTrustedRendererUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (app.isPackaged) {
+      return parsed.protocol === "godfin:" && parsed.hostname === "app";
+    }
+    return parsed.origin === "http://127.0.0.1:5200";
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedRendererEvent(event) {
+  return Boolean(
+    mainWindow
+    && event.sender === mainWindow.webContents
+    && event.senderFrame === mainWindow.webContents.mainFrame
+    && isTrustedRendererUrl(event.senderFrame?.url || ""),
+  );
 }
 
 function createWindow() {
@@ -212,6 +286,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      preload: path.join(__dirname, "preload.cjs"),
       devTools: !app.isPackaged,
       spellcheck: false,
     },
@@ -222,7 +297,7 @@ function createWindow() {
     return { action: "deny" };
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (url.startsWith(APP_ORIGIN) || url.startsWith(BACKEND_ORIGIN)) return;
+    if (isTrustedRendererUrl(url)) return;
     event.preventDefault();
     if (isTrustedExternal(url)) void shell.openExternal(url);
   });
@@ -237,26 +312,67 @@ function createWindow() {
 
 function configureUpdater() {
   if (!app.isPackaged || process.env.GODFIN_DISABLE_UPDATES === "1") return;
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowDowngrade = false;
+  const updateOrigin = process.env.GODFIN_UPDATE_ORIGIN || UPDATE_ORIGIN;
+  const updateChannel = `${process.platform}-${process.arch}`;
+  autoUpdater.setFeedURL({
+    provider: "generic",
+    url: `${updateOrigin.replace(/\/+$/, "")}/${updateChannel}`,
+  });
+  autoUpdater.autoDownload = false;
+  // A downloaded binary is never installed merely because the app quits. The
+  // explicit install path below first creates the verified database recovery
+  // state required for both upgrade failure and signed rollback.
+  autoUpdater.autoInstallOnAppQuit = false;
+  // Release metadata can point to a previously signed immutable version only
+  // through the owner-confirmed rollback workflow. Code signing remains the
+  // authenticity boundary for every downloaded application.
+  autoUpdater.allowDowngrade = process.env.GODFIN_ALLOW_SIGNED_ROLLBACK === "1";
   autoUpdater.on("error", (error) => {
     console.error("Auto-update failed", error);
   });
-  autoUpdater.on("update-downloaded", () => {
+  autoUpdater.on("update-available", (event) => {
+    if (updateDownloadPromptOpen) return;
+    updateDownloadPromptOpen = true;
     dialog.showMessageBox(mainWindow, {
       type: "info",
-      title: "GODFIN update ready",
-      message: "A signed GODFIN update is ready to install.",
-      detail: "Restart now to install it, or it will install when you next quit.",
-      buttons: ["Restart and install", "Later"],
+      title: "GODFIN update available",
+      message: `GODFIN ${event.version} is available.`,
+      detail: "Download the signed update now? GODFIN will keep working while it downloads, and will ask again before installing.",
+      buttons: ["Download update", "Not now"],
+      defaultId: 0,
+      cancelId: 1,
+    })
+      .then(({ response }) => {
+        if (response === 0) return autoUpdater.downloadUpdate();
+        return undefined;
+      })
+      .catch((error) => {
+        console.error("Could not start the update download", error);
+      })
+      .finally(() => {
+        updateDownloadPromptOpen = false;
+      });
+  });
+  autoUpdater.on("update-downloaded", (event) => {
+    const currentVersion = autoUpdater.currentVersion.version;
+    const targetVersion = event.version;
+    const isDowngrade = autoUpdater.currentVersion.compare(targetVersion) > 0;
+    dialog.showMessageBox(mainWindow, {
+      type: isDowngrade ? "warning" : "info",
+      title: isDowngrade ? "GODFIN rollback ready" : "GODFIN update ready",
+      message: isDowngrade
+        ? `Restore the verified ${targetVersion} snapshot and roll back?`
+        : `GODFIN ${targetVersion} is ready to install.`,
+      detail: isDowngrade
+        ? "GODFIN will preserve a safety backup of the current database, then restore the database snapshot made before the newer version was installed. Activity added after that snapshot will not appear while the older version is active."
+        : "Before restarting, GODFIN will create and verify a private recovery snapshot. Choosing Later leaves the current version unchanged.",
+      buttons: [isDowngrade ? "Restore snapshot and roll back" : "Back up and install", "Later"],
       defaultId: 0,
       cancelId: 1,
     })
       .then(({ response }) => {
         if (response === 0) {
-          quittingForUpdate = true;
-          autoUpdater.quitAndInstall();
+          void installDownloadedUpdate(currentVersion, targetVersion);
         }
       })
       .catch((error) => {
@@ -264,11 +380,195 @@ function configureUpdater() {
       });
   });
   setTimeout(() => {
-    autoUpdater.checkForUpdatesAndNotify().catch(() => {
+    autoUpdater.checkForUpdates().catch(() => {
       // The updater emits a detailed "error" event above. Offline startup is
       // expected and must never surface as an unhandled promise rejection.
     });
   }, 10_000);
+}
+
+function stopBackendForMaintenance(timeoutMs = 10_000) {
+  if (!backendProcess) return Promise.resolve();
+  const child = backendProcess;
+  return new Promise((resolve, reject) => {
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      if (timedOut) {
+        reject(new Error("The local finance service did not stop safely in time."));
+      } else {
+        resolve();
+      }
+    });
+    child.kill("SIGTERM");
+  });
+}
+
+function runUpdateMaintenance(currentVersion, targetVersion, timeoutMs = 120_000) {
+  const launch = backendMaintenanceCommand([
+    "--prepare-update-transition",
+    "--current-version",
+    currentVersion,
+    "--target-version",
+    targetVersion,
+  ]);
+  return new Promise((resolve, reject) => {
+    const child = spawn(launch.command, launch.args, {
+      cwd: launch.cwd,
+      env: backendEnvironment(),
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    child.stdout.on("data", (chunk) => {
+      stdout = `${stdout}${chunk}`.slice(-16_384);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-16_384);
+    });
+    const timeout = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    child.once("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error("The local update recovery tool could not start."));
+    });
+    child.once("exit", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (code !== 0) {
+        console.error("Update recovery preparation failed", stderr);
+        reject(new Error("GODFIN could not establish a verified update recovery point."));
+        return;
+      }
+      try {
+        const result = JSON.parse(stdout.trim());
+        if (!result || !["upgrade", "downgrade"].includes(result.direction)) {
+          throw new Error("unknown maintenance result");
+        }
+        resolve(result);
+      } catch {
+        reject(new Error("The local update recovery tool returned an invalid result."));
+      }
+    });
+  });
+}
+
+async function installDownloadedUpdate(currentVersion, targetVersion) {
+  backendMaintenanceInProgress = true;
+  try {
+    await stopBackendForMaintenance();
+    await runUpdateMaintenance(currentVersion, targetVersion);
+    autoUpdater.quitAndInstall();
+  } catch (error) {
+    backendMaintenanceInProgress = false;
+    try {
+      startBackend();
+      await waitForBackend();
+    } catch (restartError) {
+      console.error("Backend restart after update failure failed", restartError);
+    }
+    await dialog.showMessageBox(mainWindow, {
+      type: "error",
+      title: "Update not installed",
+      message: error.message,
+      detail: "Your current GODFIN version and database were kept active. Try again after checking available disk space and backup permissions.",
+      buttons: ["OK"],
+    });
+  }
+}
+
+function runRestoreMaintenance(restoreToken, timeoutMs = 120_000) {
+  const launch = backendMaintenanceCommand([
+    "--complete-backup-restore",
+    "--restore-token",
+    restoreToken,
+  ]);
+  return new Promise((resolve, reject) => {
+    const child = spawn(launch.command, launch.args, {
+      cwd: launch.cwd,
+      env: backendEnvironment(),
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    child.stdout.on("data", (chunk) => {
+      stdout = `${stdout}${chunk}`.slice(-16_384);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-16_384);
+    });
+    const timeout = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    child.once("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error("The local restore tool could not start."));
+    });
+    child.once("exit", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (code !== 0) {
+        console.error("Backup restore failed", stderr);
+        reject(new Error("GODFIN could not restore the selected backup safely."));
+        return;
+      }
+      try {
+        const result = JSON.parse(stdout.trim());
+        if (result?.status !== "restored") throw new Error("unknown restore result");
+        resolve(result);
+      } catch {
+        reject(new Error("The local restore tool returned an invalid result."));
+      }
+    });
+  });
+}
+
+function configureDesktopBridge() {
+  ipcMain.handle("godfin:restore-backup", async (event, restoreToken) => {
+    if (
+      !isTrustedRendererEvent(event)
+      || backendMaintenanceInProgress
+      || typeof restoreToken !== "string"
+      || !/^[A-Za-z0-9_-]{40,128}$/.test(restoreToken)
+    ) {
+      throw new Error("Restore request rejected.");
+    }
+
+    backendMaintenanceInProgress = true;
+    try {
+      await stopBackendForMaintenance();
+      const result = await runRestoreMaintenance(restoreToken);
+      startBackend();
+      await waitForBackend();
+      backendMaintenanceInProgress = false;
+      mainWindow?.webContents.reload();
+      return result;
+    } catch (error) {
+      try {
+        if (!backendProcess) {
+          startBackend();
+          await waitForBackend();
+        }
+      } catch (restartError) {
+        console.error("Backend restart after restore failure failed", restartError);
+      }
+      backendMaintenanceInProgress = false;
+      throw new Error(error?.message || "The backup was not restored.");
+    }
+  });
 }
 
 function stopBackend() {
@@ -292,6 +592,8 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
       callback(false);
     });
+    configureBackendRequestTrust();
+    configureDesktopBridge();
     registerAppProtocol();
     try {
       startBackend();

@@ -1,0 +1,71 @@
+name: Roll back signed update metadata
+
+on:
+  workflow_dispatch:
+    inputs:
+      current_tag:
+        description: Currently published signed release tag (for example v1.1.0)
+        required: true
+        type: string
+      tag:
+        description: Immediate predecessor signed release tag (for example v1.0.0)
+        required: true
+        type: string
+      confirmation:
+        description: Type ROLLBACK_SIGNED_RELEASE
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    if: inputs.confirmation == 'ROLLBACK_SIGNED_RELEASE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release-production
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      GH_TOKEN: ${{ github.token }}
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_BUCKET: ${{ secrets.R2_RELEASE_BUCKET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Download current and predecessor signed assets
+        run: |
+          gh release download "${{ inputs.current_tag }}" --dir current-artifacts
+          gh release download "${{ inputs.tag }}" --dir target-artifacts
+      - name: Verify both immutable release sets
+        shell: bash
+        run: |
+          (cd current-artifacts && sha256sum --check SHA256SUMS.txt)
+          (cd target-artifacts && sha256sum --check SHA256SUMS.txt)
+          node packaging/verify-release-provenance.mjs \
+            --input current-artifacts \
+            --provenance current-artifacts/release-provenance.intoto.json
+          node packaging/verify-release-provenance.mjs \
+            --input target-artifacts \
+            --provenance target-artifacts/release-provenance.intoto.json
+      - name: Require the declared immediate predecessor transition
+        run: |
+          node packaging/verify-rollback-transition.mjs \
+            --current current-artifacts/release-compatibility.json \
+            --target target-artifacts/release-compatibility.json
+      - name: Prepare rollback metadata
+        run: |
+          node packaging/prepare-update-feed.mjs \
+            --input target-artifacts \
+            --output update-feed \
+            --version "${{ inputs.tag }}" \
+            --rollout-percentage 100
+      - name: Point update channels to the reviewed rollback release
+        run: |
+          aws s3 sync target-artifacts "s3://${R2_BUCKET}/${{ inputs.tag }}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --no-progress
+          aws s3 sync update-feed "s3://${R2_BUCKET}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --no-progress

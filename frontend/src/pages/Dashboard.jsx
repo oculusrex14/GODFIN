@@ -19,11 +19,13 @@ import {
   fetchSpendingTrend,
   fetchReviewStats,
   fetchIngestionStatus,
+  fetchGmailStatus,
   fetchSchedulerStatus,
   fetchAuditSessions,
 } from '../api/client';
 import { StatCard } from '../components/StatCard';
 import { GlassSelect } from '../components/GlassSelect';
+import CalculationInfo from '../components/CalculationInfo';
 
 function formatINR(amount) {
   if (amount == null) return '--';
@@ -33,6 +35,19 @@ function formatINR(amount) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+function balanceStatusText(stats) {
+  if (stats?.account_balance_status === 'verified') {
+    return `Verified through ${stats.account_balance_as_of}`;
+  }
+  if (stats?.account_balance_status === 'conflict') {
+    return 'Statement balances need review';
+  }
+  if (stats?.account_balance_status === 'unverified_gap') {
+    return 'Some statement dates are missing';
+  }
+  return 'Import a statement that shows balances';
 }
 
 // Compact INR formatter for axis ticks (shows ₹ symbol)
@@ -67,6 +82,20 @@ const tooltipStyle = {
   color: '#ffffff',
   backdropFilter: 'blur(12px)',
 };
+
+function gmailHealthLabel(status) {
+  if (status?.connected) return 'Connected';
+  if (status?.status === 'temporarily_unavailable') return 'Retry needed';
+  if (
+    ['reauthorization_required', 'client_config_changed', 'credential_corrupt'].includes(
+      status?.status,
+    )
+  ) {
+    return 'Reconnect';
+  }
+  if (status?.status === 'not_configured') return 'Setup needed';
+  return 'Not connected';
+}
 
 export default function Dashboard() {
   const currentYear = new Date().getFullYear();
@@ -136,10 +165,16 @@ export default function Dashboard() {
     queryFn: fetchIngestionStatus,
   });
 
+  const { data: gmailStatus } = useQuery({
+    queryKey: ['gmailStatus'],
+    queryFn: fetchGmailStatus,
+    staleTime: 30000,
+  });
+
   useQuery({
     queryKey: ['schedulerStatus'],
     queryFn: fetchSchedulerStatus,
-    enabled: ingestionStatus?.gmail_connected,
+    enabled: gmailStatus?.connected,
     staleTime: 60000,
   });
 
@@ -161,13 +196,13 @@ export default function Dashboard() {
             animate={{ opacity: 1, y: 0 }}
             className="mb-4 flex items-center gap-3 px-4 py-2.5 bg-amber-400/[0.08] border border-amber-400/[0.15] rounded-[16px] cursor-pointer hover:bg-amber-400/[0.12] transition-colors backdrop-blur-[12px]"
           >
-            <Shield className="h-4 w-4 text-amber-400/80 shrink-0" />
-            <span className="text-amber-300/80 text-[0.8rem]">
+            <Shield className="h-4 w-4 text-amber-200 shrink-0" />
+            <span className="text-amber-200 text-[0.8rem]">
               Draft audit in progress for {
                 ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][draftAudit.period_month]
               } {draftAudit.period_year}
             </span>
-            <span className="text-amber-500/40 text-[0.7rem] ml-auto">View &rarr;</span>
+            <span className="text-amber-200 text-[0.7rem] ml-auto">View &rarr;</span>
           </motion.div>
         </Link>
       )}
@@ -179,14 +214,14 @@ export default function Dashboard() {
         className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
       >
         <div>
-          <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>
+          <h1 className="text-ink-primary text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>
             Dashboard
           </h1>
           <div className="mt-2 flex items-center gap-2">
             <button
               onClick={() => navigateYear(1)}
               disabled={yearIndex < 0 || yearIndex >= availableYears.length - 1}
-              className="p-2 rounded-[10px] bg-white/[0.05] border border-white/[0.1] text-white/40 hover:text-white/70 disabled:opacity-25"
+              className="p-2 rounded-[10px] bg-white/[0.05] border border-white/[0.1] text-ink-muted hover:text-ink-secondary disabled:opacity-25"
               aria-label="Previous year"
             >
               <ChevronLeft size={14} />
@@ -195,7 +230,7 @@ export default function Dashboard() {
             <button
               onClick={() => navigateYear(-1)}
               disabled={yearIndex <= 0}
-              className="p-2 rounded-[10px] bg-white/[0.05] border border-white/[0.1] text-white/40 hover:text-white/70 disabled:opacity-25"
+              className="p-2 rounded-[10px] bg-white/[0.05] border border-white/[0.1] text-ink-muted hover:text-ink-secondary disabled:opacity-25"
               aria-label="Next year"
             >
               <ChevronRight size={14} />
@@ -218,46 +253,60 @@ export default function Dashboard() {
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
           <div className="flex items-center gap-2.5 mb-2">
-            <Wallet size={16} className="text-cyan-400" />
-            <span className="text-white/40 text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 400 }}>Account Balance</span>
+            <Wallet size={16} className="text-cyan-200" />
+            <span className="text-ink-muted text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 400 }}>Account Balance</span>
             {showBalance ? (
-              <EyeOff size={12} className="text-white/30 ml-auto" />
+              <EyeOff size={12} className="text-ink-muted ml-auto" />
             ) : (
-              <Eye size={12} className="text-white/30 ml-auto" />
+              <Eye size={12} className="text-ink-muted ml-auto" />
             )}
           </div>
-          <p className="text-white/90 text-[1.4rem] tracking-tight" style={{ fontWeight: 300 }}>
-            {statsLoading ? '--' : showBalance ? formatINR(stats?.account_balance) : 'Tap to reveal'}
+          <p className="text-ink-primary text-[1.4rem] tracking-tight" style={{ fontWeight: 300 }}>
+            {statsLoading ? '--' : showBalance
+              ? stats?.account_balance == null ? 'Unavailable' : formatINR(stats.account_balance)
+              : 'Tap to reveal'}
           </p>
-          {!showBalance && <p className="text-white/30 text-[0.7rem] mt-0.5">Hidden for privacy</p>}
+          <p className="text-ink-muted text-[0.7rem] mt-0.5">
+            {showBalance ? balanceStatusText(stats) : 'Hidden for privacy'}
+          </p>
         </motion.div>
         <StatCard
           title="Month Spend"
           value={statsLoading ? '--' : formatINR(stats?.month_spend)}
           icon={TrendingDown}
-          color="text-rose-400"
+          color="text-rose-200"
           delay={0.05}
         />
         <StatCard
           title="Income"
           value={statsLoading ? '--' : formatINR(stats?.month_income)}
           icon={TrendingUp}
-          color="text-emerald-400"
+          color="text-emerald-200"
           delay={0.1}
         />
         <StatCard
           title="Savings Rate"
           value={statsLoading ? '--' : stats?.savings_rate != null ? `${stats.savings_rate.toFixed(1)}%` : '--'}
           icon={PiggyBank}
-          color="text-emerald-400"
+          color="text-emerald-200"
           delay={0.15}
+          calculationInfo={(
+            <CalculationInfo
+              title="Savings rate"
+              meaning="The share of verified income left after included expenses."
+              formula="(income − expenses) ÷ income × 100"
+              inputs="Income and non-transfer expenses included by the selected month and period filters."
+              period={`${effectiveMonth} · ${PERIOD_OPTIONS.find(item => item.value === period)?.label || period}`}
+              caveat="If income is missing or zero, the rate is unavailable. This ratio is descriptive, not financial advice."
+            />
+          )}
         />
         <StatCard
           title="Review Queue"
           value={statsLoading ? '--' : stats?.review_queue_count ?? 0}
           subtitle={stats?.review_queue_count ? 'needs categorization' : 'all clear'}
           icon={AlertCircle}
-          color={stats?.review_queue_count > 0 ? 'text-amber-400' : 'text-emerald-400'}
+          color={stats?.review_queue_count > 0 ? 'text-amber-200' : 'text-emerald-200'}
           delay={0.2}
         />
       </div>
@@ -272,11 +321,11 @@ export default function Dashboard() {
           className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>
             Category Breakdown
           </h2>
           {!categoryData?.length ? (
-            <p className="text-sm text-white/50 text-center py-8">No spending data</p>
+            <p className="text-sm text-ink-muted text-center py-8">No spending data</p>
           ) : (
             <div className="flex items-center gap-4">
               <div className="w-36 h-36 flex-shrink-0">
@@ -305,8 +354,8 @@ export default function Dashboard() {
                 {categoryData.slice(0, 6).map((item, i) => (
                   <div key={item.category} className="flex items-center gap-2 text-[0.7rem]">
                     <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }} />
-                    <span className="text-white/50 truncate flex-1">{item.category}</span>
-                    <span className="text-white/30 tabular-nums">{formatINR(item.amount)}</span>
+                    <span className="text-ink-muted truncate flex-1">{item.category}</span>
+                    <span className="text-ink-muted tabular-nums">{formatINR(item.amount)}</span>
                   </div>
                 ))}
               </div>
@@ -322,11 +371,11 @@ export default function Dashboard() {
           className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>
             Spending Trend
           </h2>
           {!trendData?.length ? (
-            <p className="text-sm text-white/50 text-center py-8">No trend data</p>
+            <p className="text-sm text-ink-muted text-center py-8">No trend data</p>
           ) : (
             <div className="h-36">
               <ResponsiveContainer width="100%" height="100%" minWidth={0}>
@@ -354,23 +403,23 @@ export default function Dashboard() {
           className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5 md:col-span-2"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>
             Recent Transactions
           </h2>
           {!recentTxns?.items?.length ? (
-            <p className="text-sm text-white/50">No transactions yet</p>
+            <p className="text-sm text-ink-muted">No transactions yet</p>
           ) : (
             <div className="space-y-3">
               {recentTxns.items.map((txn) => (
                 <div key={txn.id} className="flex items-center justify-between">
                   <div className="min-w-0 flex-1">
-                    <p className="text-white/80 text-[0.85rem] truncate">{txn.merchant_normalized || txn.merchant_raw}</p>
-                    <p className="text-white/25 text-[0.7rem]">
+                    <p className="text-ink-primary text-[0.85rem] truncate">{txn.merchant_normalized || txn.merchant_raw}</p>
+                    <p className="text-ink-muted text-[0.7rem]">
                       {format(new Date(txn.date), 'dd MMM')}
                       {txn.category && ` · ${txn.category}`}
                     </p>
                   </div>
-                  <span className={`text-[0.85rem] tabular-nums ml-3 ${txn.type === 'credit' ? 'text-emerald-400/80' : 'text-white/70'}`} style={{ fontWeight: 500 }}>
+                  <span className={`text-[0.85rem] tabular-nums ml-3 ${txn.type === 'credit' ? 'text-emerald-200' : 'text-ink-secondary'}`} style={{ fontWeight: 500 }}>
                     {txn.type === 'credit' ? '+' : '-'}{formatINR(txn.amount)}
                   </span>
                 </div>
@@ -387,40 +436,42 @@ export default function Dashboard() {
           className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5"
         >
           <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-4" style={{ fontWeight: 500 }}>
             System Health
           </h2>
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Activity className="h-3.5 w-3.5 text-emerald-400/80" />
-              <span className="text-white/50 text-[0.8rem]">Gmail</span>
+              <Activity className="h-3.5 w-3.5 text-emerald-200" />
+              <span className="text-ink-muted text-[0.8rem]">Gmail</span>
               <span className={`text-[0.7rem] ml-auto px-2.5 py-0.5 rounded-full ${
-                ingestionStatus?.gmail_connected
-                  ? 'bg-emerald-500/[0.1] text-emerald-400/80 border border-emerald-500/[0.12]'
-                  : 'bg-white/[0.05] text-white/40 border border-white/[0.1]'
-              }`}>
-                {ingestionStatus?.gmail_connected ? 'Connected' : 'Not connected'}
+                gmailStatus?.connected
+                  ? 'bg-emerald-500/[0.1] text-emerald-200 border border-emerald-500/[0.12]'
+                  : gmailStatus?.retryable
+                    ? 'bg-amber-500/[0.1] text-amber-200 border border-amber-500/[0.12]'
+                    : 'bg-white/[0.05] text-ink-muted border border-white/[0.1]'
+              }`} title={gmailStatus?.message}>
+                {gmailHealthLabel(gmailStatus)}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <Inbox className="h-3.5 w-3.5 text-blue-400/80" />
-              <span className="text-white/50 text-[0.8rem]">Last Ingestion</span>
-              <span className="text-white/30 text-[0.7rem] ml-auto">
+              <Inbox className="h-3.5 w-3.5 text-blue-200" />
+              <span className="text-ink-muted text-[0.8rem]">Last Ingestion</span>
+              <span className="text-ink-muted text-[0.7rem] ml-auto">
                 {ingestionStatus?.last_run ? format(new Date(ingestionStatus.last_run), 'dd MMM HH:mm') : 'Never'}
               </span>
             </div>
             <div className="border-t border-white/[0.06] pt-3 mt-3 space-y-2">
               <div className="flex justify-between text-[0.7rem]">
-                <span className="text-white/30">Review queue</span>
-                <span className="text-white/60 tabular-nums">{reviewStats?.queue_size ?? 0}</span>
+                <span className="text-ink-muted">Review queue</span>
+                <span className="text-ink-secondary tabular-nums">{reviewStats?.queue_size ?? 0}</span>
               </div>
               <div className="flex justify-between text-[0.7rem]">
-                <span className="text-white/30">Auto-classified</span>
-                <span className="text-emerald-400/70 tabular-nums">{reviewStats?.auto_accepted ?? 0}</span>
+                <span className="text-ink-muted">Auto-classified</span>
+                <span className="text-emerald-200 tabular-nums">{reviewStats?.auto_accepted ?? 0}</span>
               </div>
               <div className="flex justify-between text-[0.7rem]">
-                <span className="text-white/30">Soft-flagged</span>
-                <span className="text-amber-400/70 tabular-nums">{reviewStats?.soft_flagged ?? 0}</span>
+                <span className="text-ink-muted">Soft-flagged</span>
+                <span className="text-amber-200 tabular-nums">{reviewStats?.soft_flagged ?? 0}</span>
               </div>
             </div>
           </div>

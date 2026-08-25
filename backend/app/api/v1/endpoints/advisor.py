@@ -5,28 +5,32 @@ from __future__ import annotations
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.errors import IntegrationUnavailableError, StateConflictError
 from app.core.advisor_service import chat
 from app.core.advisor_digest import build_weekly_digest, digest_to_html
-from app.api.v1.endpoints.license import enforce_feature
 from app.core.gmail_service import gmail_service
 from app.models.app_setting import AppSetting
+from app.schemas.financial import ChatRole
 
 router = APIRouter()
+AI_ADVISOR_ENTITLEMENT = require_entitlement("ai_advisor")
+ADVANCED_REPORTS_ENTITLEMENT = require_entitlement("advanced_reports")
 
 
 class ChatMessage(BaseModel):
-    role: str  # "user" or "assistant"
-    content: str
+    role: ChatRole
+    content: str = Field(min_length=1, max_length=4000)
 
 
 class ChatRequest(BaseModel):
-    message: str
-    history: List[ChatMessage] = []
+    message: str = Field(min_length=1, max_length=4000)
+    history: List[ChatMessage] = Field(default_factory=list, max_length=20)
 
 
 class ChatResponse(BaseModel):
@@ -35,17 +39,72 @@ class ChatResponse(BaseModel):
 
 class DigestSettingsUpdate(BaseModel):
     enabled: bool
-    recipient: str | None = None
+    recipient: str | None = Field(default=None, max_length=254)
 
 
-@router.post("/chat", response_model=ChatResponse)
+class DigestPeriodResponse(BaseModel):
+    start: str
+    end: str
+
+
+class DigestAnomalyResponse(BaseModel):
+    transaction_id: str
+    merchant: str
+    amount: float
+    date: str
+    reason: str
+
+
+class DigestBudgetBreachResponse(BaseModel):
+    goal_id: str
+    name: str
+    current_saved: float
+    expected_saved: float
+    shortfall: float
+
+
+class DigestMerchantResponse(BaseModel):
+    name: str
+    category: str
+    first_seen: str
+
+
+class WeeklyDigestResponse(BaseModel):
+    period: DigestPeriodResponse
+    generated_at: str
+    current_spend: float
+    previous_spend: float
+    spending_velocity_percent: float | None
+    spending_velocity_message: str
+    anomalies: list[DigestAnomalyResponse]
+    budget_breaches: list[DigestBudgetBreachResponse]
+    new_merchants: list[DigestMerchantResponse]
+
+
+class DigestSettingsResponse(BaseModel):
+    enabled: bool
+    recipient: str | None
+    last_sent: str | None
+    gmail_connected: bool
+    gmail_send_supported: bool
+
+
+class DigestSendResponse(BaseModel):
+    sent: bool
+    recipient: str
+
+
+@router.post(
+    "/chat",
+    response_model=ChatResponse,
+    dependencies=[Depends(AI_ADVISOR_ENTITLEMENT)],
+)
 def advisor_chat(
     body: ChatRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
     """Send a message to the financial advisor AI."""
-    enforce_feature(db, "ai_classification")
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
@@ -70,40 +129,50 @@ def _get_setting(db: Session, key: str, default: str = "") -> AppSetting:
     return setting
 
 
-@router.get("/digest")
+def _setting_value(db: Session, key: str, default: str = "") -> str:
+    setting = db.query(AppSetting).filter_by(key=key).first()
+    return setting.value if setting is not None else default
+
+
+@router.get(
+    "/digest",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_model=WeeklyDigestResponse,
+)
 def advisor_weekly_digest(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    enforce_feature(db, "advanced_reports")
     return build_weekly_digest(db)
 
 
-@router.get("/digest/settings")
+@router.get("/digest/settings", response_model=DigestSettingsResponse)
 def get_digest_settings(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    enabled = _get_setting(db, "advisor_weekly_digest_enabled", "false")
-    recipient = _get_setting(db, "advisor_weekly_digest_recipient", "")
-    last_sent = _get_setting(db, "advisor_weekly_digest_last_sent", "")
-    db.commit()
+    enabled = _setting_value(db, "advisor_weekly_digest_enabled", "false")
+    recipient = _setting_value(db, "advisor_weekly_digest_recipient", "")
+    last_sent = _setting_value(db, "advisor_weekly_digest_last_sent", "")
     return {
-        "enabled": enabled.value == "true",
-        "recipient": recipient.value or None,
-        "last_sent": last_sent.value or None,
+        "enabled": enabled == "true",
+        "recipient": recipient or None,
+        "last_sent": last_sent or None,
         "gmail_connected": gmail_service.is_connected,
         "gmail_send_supported": gmail_service.can_send,
     }
 
 
-@router.put("/digest/settings")
+@router.put(
+    "/digest/settings",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_model=DigestSettingsResponse,
+)
 def update_digest_settings(
     body: DigestSettingsUpdate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    enforce_feature(db, "advanced_reports")
     recipient = (body.recipient or "").strip()
     if body.enabled and "@" not in recipient:
         raise HTTPException(
@@ -118,13 +187,16 @@ def update_digest_settings(
     return get_digest_settings(db, _user=True)
 
 
-@router.post("/digest/send")
+@router.post(
+    "/digest/send",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_model=DigestSendResponse,
+)
 def send_advisor_digest(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    enforce_feature(db, "advanced_reports")
-    recipient = _get_setting(db, "advisor_weekly_digest_recipient", "").value
+    recipient = _setting_value(db, "advisor_weekly_digest_recipient", "")
     if not recipient:
         raise HTTPException(status_code=400, detail="Configure a digest recipient first.")
     digest = build_weekly_digest(db)
@@ -135,10 +207,16 @@ def send_advisor_digest(
             digest_to_html(digest),
         )
     except RuntimeError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        raise StateConflictError(
+            code="GMAIL_SEND_NOT_READY",
+            message="Gmail is not ready to send the weekly digest.",
+            hint="Reconnect Gmail in Settings, then try again.",
+        ) from error
     except Exception as error:
-        raise HTTPException(
-            status_code=502, detail="Gmail could not send the weekly digest."
+        raise IntegrationUnavailableError(
+            code="GMAIL_SEND_FAILED",
+            message="Gmail could not send the weekly digest.",
+            hint="Check your connection and Gmail status, then try again.",
         ) from error
     from datetime import datetime
 

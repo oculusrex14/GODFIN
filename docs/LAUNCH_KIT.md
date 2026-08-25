@@ -183,7 +183,8 @@ and optional Gmail/AI controls.
 
 **4:35–5:00 — Pricing and limits**
 
-Explain free Core, lifetime Pro/Max, optional one-time AI packs, and that HDFC
+Explain free Core, lifetime Pro/Max, local AI or bring-your-own provider keys,
+zero included hosted credits, and that HDFC
 is the launch parser while other banks remain on the roadmap.
 
 ## Measurement plan
@@ -200,7 +201,7 @@ desktop telemetry. Review aggregate website events:
 - license resend;
 - documentation search/referrer campaign.
 
-Stripe remains the source of truth for payment conversion. Supabase purchase
+Cashfree remains the source of truth for payment conversion. Supabase purchase
 and license rows remain the source of truth for provisioning. Never send license
 keys, emails, device hashes, statement names, or financial values to analytics.
 

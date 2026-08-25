@@ -75,11 +75,11 @@ export function CheckoutAnalytics({
   return null;
 }
 
-export function PrivacyAnalytics() {
+export function PrivacyAnalytics({ nonce }: { nonce?: string }) {
   const measurementId = process.env.NEXT_PUBLIC_GA_ID;
   const { consent, choose } = useAnalyticsConsent();
 
-  if (!measurementId) return null;
+  if (!measurementId || !/^G-[A-Z0-9]{6,20}$/.test(measurementId)) return null;
 
   return (
     <>
@@ -88,8 +88,9 @@ export function PrivacyAnalytics() {
           <Script
             src={`https://www.googletagmanager.com/gtag/js?id=${measurementId}`}
             strategy="afterInteractive"
+            nonce={nonce}
           />
-          <Script id="godfin-analytics" strategy="afterInteractive">
+          <Script id="godfin-analytics" strategy="afterInteractive" nonce={nonce}>
             {`
               window.dataLayer = window.dataLayer || [];
               function gtag(){dataLayer.push(arguments);}
@@ -108,8 +109,9 @@ export function PrivacyAnalytics() {
           <div>
             <strong>Private by default</strong>
             <p>
-              GODFIN can collect anonymous website traffic to improve launch
-              pages. Desktop financial data is never included.
+              With your permission, Google Analytics can receive website page,
+              device, approximate-region, referrer, campaign, and interaction
+              information. Desktop financial data is never included.
             </p>
           </div>
           <div className="consent-actions">
@@ -117,7 +119,7 @@ export function PrivacyAnalytics() {
               No analytics
             </button>
             <button className="button" onClick={() => choose("granted")}>
-              Allow anonymous analytics
+              Allow site analytics
             </button>
           </div>
         </aside>
@@ -131,7 +133,7 @@ export function AnalyticsPreferences() {
   const { consent, choose } = useAnalyticsConsent();
 
   if (!measurementId) {
-    return <p>Anonymous analytics are not configured on this environment.</p>;
+    return <p>Website analytics are not configured in this environment.</p>;
   }
 
   return (
@@ -145,7 +147,7 @@ export function AnalyticsPreferences() {
           Disable analytics
         </button>
         <button className="button" onClick={() => choose("granted")}>
-          Allow anonymous analytics
+          Allow site analytics
         </button>
       </div>
     </div>

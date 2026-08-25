@@ -1,3 +1,7 @@
+> **ARCHIVED HISTORICAL DOCUMENT — DO NOT USE FOR CURRENT IMPLEMENTATION.**
+> This is a point-in-time change log, not an operating guide or current test
+> result. Use the private Git history and remediation register.
+
 # GODFIN Change Log
 
 ## Phase 2.5 - Syntax Fix

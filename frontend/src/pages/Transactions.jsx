@@ -22,6 +22,20 @@ function formatINR(amount) {
   }).format(amount);
 }
 
+const CLASSIFICATION_LABELS = {
+  transfer_detect: 'transfer detection',
+  exact_match: 'exact merchant memory',
+  confirmed_pattern: 'confirmed pattern',
+  rule: 'deterministic rule',
+  fuzzy: 'similar merchant memory',
+  embedding: 'local similarity',
+  personal_model: 'personal classifier',
+  llm: 'AI suggestion',
+  user: 'your correction',
+  user_undo: 'restored after undo',
+  narration_hint: 'statement parser',
+};
+
 const SORT_OPTIONS = [
   { value: 'date_desc', label: 'Newest First' },
   { value: 'date_asc', label: 'Oldest First' },
@@ -33,6 +47,8 @@ export default function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [addOpen, setAddOpen] = useState(false);
   const [editTxn, setEditTxn] = useState(null);
+  const search = searchParams.get('q') || '';
+  const [searchInput, setSearchInput] = useState(search);
   const searchTimerRef = useRef(null);
   const pageSize = 20;
   const queryClient = useQueryClient();
@@ -40,7 +56,6 @@ export default function Transactions() {
   const { confirm, ConfirmDialog: DeleteConfirmDialog } = useConfirm();
   const { categories, categoryNames } = useTaxonomy();
 
-  const search = searchParams.get('q') || '';
   const effectiveSearch = search.trim().length >= 2 ? search.trim() : '';
   const categoryFilter = searchParams.get('category') || '';
   const subcategoryFilter = searchParams.get('subcategory') || '';
@@ -55,6 +70,15 @@ export default function Transactions() {
     },
     [],
   );
+
+  useEffect(() => {
+    const syncSearchAfterHistoryNavigation = () => {
+      const restoredSearch = new URLSearchParams(window.location.search).get('q') || '';
+      setSearchInput(restoredSearch);
+    };
+    window.addEventListener('popstate', syncSearchAfterHistoryNavigation);
+    return () => window.removeEventListener('popstate', syncSearchAfterHistoryNavigation);
+  }, []);
 
   function updateUrl(updates, { resetPage = true } = {}) {
     setSearchParams((current) => {
@@ -72,6 +96,7 @@ export default function Transactions() {
   }
 
   function handleSearchChange(value) {
+    setSearchInput(value);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
       const trimmed = value.trim();
@@ -139,8 +164,8 @@ export default function Transactions() {
       <DeleteConfirmDialog />
       <div className="flex items-center justify-between mb-5">
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-          <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Transactions</h1>
-          <p className="text-white/30 text-[0.8rem]">{data ? `${data.total} transaction${data.total !== 1 ? 's' : ''}` : '...'}</p>
+          <h1 className="text-ink-primary text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Transactions</h1>
+          <p className="text-ink-muted text-[0.8rem]">{data ? `${data.total} transaction${data.total !== 1 ? 's' : ''}` : '...'}</p>
         </motion.div>
         <GlassButton icon={<Plus size={15} />} onClick={() => setAddOpen(true)}>Add</GlassButton>
       </div>
@@ -153,14 +178,13 @@ export default function Transactions() {
         className="flex flex-wrap gap-3 mb-5"
       >
         <div className="relative flex-1 min-w-[200px] max-w-full">
-          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/20" aria-hidden="true" />
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted" aria-hidden="true" />
           <input
-            key={search}
-            defaultValue={search}
+            value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Search merchants..."
             aria-label="Search merchants"
-            className="w-full pl-9 pr-4 py-2.5 bg-white/[0.06] backdrop-blur-[12px] border border-white/[0.12] rounded-[14px] text-white/80 text-[0.8rem] placeholder-white/20 focus:outline-none focus:border-cyan-400/30 transition-all"
+            className="w-full pl-9 pr-4 py-2.5 bg-white/[0.06] backdrop-blur-[12px] border border-white/[0.12] rounded-[14px] text-ink-primary text-[0.8rem] placeholder-white/20 focus:outline-none focus:border-cyan-400/30 transition-all"
           />
         </div>
         <GlassSelect
@@ -189,7 +213,7 @@ export default function Transactions() {
           max={dateTo || undefined}
           onChange={(event) => updateUrl({ date_from: event.target.value })}
           aria-label="Transactions from date"
-          className="min-h-11 rounded-[14px] bg-white/[0.06] border border-white/[0.12] px-3 text-white/55 text-xs outline-none focus:border-cyan-400/30"
+          className="min-h-11 rounded-[14px] bg-white/[0.06] border border-white/[0.12] px-3 text-ink-secondary text-xs outline-none focus:border-cyan-400/30"
         />
         <input
           type="date"
@@ -197,18 +221,18 @@ export default function Transactions() {
           min={dateFrom || undefined}
           onChange={(event) => updateUrl({ date_to: event.target.value })}
           aria-label="Transactions to date"
-          className="min-h-11 rounded-[14px] bg-white/[0.06] border border-white/[0.12] px-3 text-white/55 text-xs outline-none focus:border-cyan-400/30"
+          className="min-h-11 rounded-[14px] bg-white/[0.06] border border-white/[0.12] px-3 text-ink-secondary text-xs outline-none focus:border-cyan-400/30"
         />
         {(dateFrom || dateTo) && (
           <button
             onClick={() => updateUrl({ date_from: '', date_to: '' })}
-            className="min-h-11 px-3 rounded-xl text-white/35 hover:text-white/60 hover:bg-white/[0.05] text-xs"
+            className="min-h-11 px-3 rounded-xl text-ink-muted hover:text-ink-secondary hover:bg-white/[0.05] text-xs"
           >
             Clear dates
           </button>
         )}
         {isAuditActive && (
-          <div className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/10 border border-amber-400/20 rounded-[14px] text-amber-400/80 text-[0.7rem]">
+          <div className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/10 border border-amber-400/20 rounded-[14px] text-amber-200 text-[0.7rem]">
             <Pencil size={11} aria-hidden="true" />
             Audit Active{activeAudit?.month ? ` (${activeAudit.month}/${activeAudit.year})` : ''}
           </div>
@@ -229,38 +253,45 @@ export default function Transactions() {
           <table className="w-full text-[0.8rem]">
             <thead>
               <tr className="border-b border-white/[0.06]">
-                <th className="text-left text-white/30 text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Date</th>
-                <th className="text-left text-white/30 text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Merchant</th>
-                <th className="text-right text-white/30 text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Amount</th>
-                <th className="text-left text-white/30 text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Category</th>
-                <th className="text-right text-white/30 text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Actions</th>
+                <th className="text-left text-ink-muted text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Date</th>
+                <th className="text-left text-ink-muted text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Merchant</th>
+                <th className="text-right text-ink-muted text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Amount</th>
+                <th className="text-left text-ink-muted text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Category</th>
+                <th className="text-right text-ink-muted text-[0.65rem] uppercase tracking-wider px-5 py-3" style={{ fontWeight: 500 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={5} className="px-5 py-8 text-center text-white/30">Loading...</td></tr>
+                <tr><td colSpan={5} className="px-5 py-8 text-center text-ink-muted">Loading...</td></tr>
               ) : !data?.items?.length ? (
-                <tr><td colSpan={5} className="px-5 py-8 text-center text-white/30">No transactions found</td></tr>
+                <tr><td colSpan={5} className="px-5 py-8 text-center text-ink-muted">No transactions found</td></tr>
               ) : (
                 data.items.map((txn) => (
                   <tr key={txn.id} className="border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors group">
-                    <td className="px-5 py-3 text-white/50 tabular-nums">
+                    <td className="px-5 py-3 text-ink-muted tabular-nums">
                       {format(new Date(txn.date), 'dd MMM yyyy')}
                     </td>
-                    <td className="px-5 py-3 text-white/80">
+                    <td className="px-5 py-3 text-ink-primary">
                       {txn.merchant_normalized || txn.merchant_raw}
-                      {txn.subcategory && <span className="ml-2 text-white/20 text-[0.7rem]">({txn.subcategory})</span>}
+                      {txn.subcategory && <span className="ml-2 text-ink-muted text-[0.7rem]">({txn.subcategory})</span>}
                     </td>
-                    <td className={`px-5 py-3 text-right tabular-nums ${txn.type === 'credit' ? 'text-emerald-400/80' : 'text-white/70'}`} style={{ fontWeight: 500 }}>
+                    <td className={`px-5 py-3 text-right tabular-nums ${txn.type === 'credit' ? 'text-emerald-200' : 'text-ink-secondary'}`} style={{ fontWeight: 500 }}>
                       {txn.type === 'credit' ? '+' : '-'}{formatINR(txn.amount)}
                     </td>
                     <td className="px-5 py-3">
                       {txn.category ? (
-                        <span className="inline-block px-2.5 py-0.5 bg-white/[0.06] rounded-[8px] text-white/50 text-[0.7rem] border border-white/[0.06]">
-                          {txn.category}
-                        </span>
+                        <div>
+                          <span className="inline-block px-2.5 py-0.5 bg-white/[0.06] rounded-[8px] text-ink-muted text-[0.7rem] border border-white/[0.06]">
+                            {txn.category}
+                          </span>
+                          {txn.classification_source && (
+                            <p className="mt-1 text-ink-muted text-[0.6rem]">
+                              Why: {CLASSIFICATION_LABELS[txn.classification_source] || txn.classification_source}
+                            </p>
+                          )}
+                        </div>
                       ) : (
-                        <span className="text-amber-400/70 text-[0.7rem]">Uncategorized</span>
+                        <span className="text-amber-200 text-[0.7rem]">Uncategorized</span>
                       )}
                     </td>
                     <td className="px-5 py-3 text-right">
@@ -268,7 +299,7 @@ export default function Transactions() {
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={() => setEditTxn(txn)}
-                            className="p-1.5 text-white/30 hover:text-white/70 hover:bg-white/[0.06] rounded-[8px] transition-colors"
+                            className="p-1.5 text-ink-muted hover:text-ink-secondary hover:bg-white/[0.06] rounded-[8px] transition-colors"
                             title="Edit"
                             aria-label={`Edit transaction ${txn.merchant_normalized || txn.merchant_raw}`}
                           >
@@ -276,7 +307,7 @@ export default function Transactions() {
                           </button>
                           <button
                             onClick={() => handleDelete(txn)}
-                            className="p-1.5 text-white/30 hover:text-rose-400/70 hover:bg-white/[0.06] rounded-[8px] transition-colors"
+                            className="p-1.5 text-ink-muted hover:text-rose-200 hover:bg-white/[0.06] rounded-[8px] transition-colors"
                             title="Delete"
                             aria-label={`Delete transaction ${txn.merchant_normalized || txn.merchant_raw}`}
                           >
@@ -286,7 +317,7 @@ export default function Transactions() {
                       ) : (
                         <Link
                           to={`/audit?year=${txn.date.slice(0, 4)}&month=${Number(txn.date.slice(5, 7))}`}
-                          className="inline-flex items-center gap-1 text-amber-300/60 hover:text-amber-200/80 text-[0.68rem]"
+                          className="inline-flex items-center gap-1 text-amber-200 hover:text-amber-200 text-[0.68rem]"
                           title="This month is finalized"
                         >
                           <LockKeyhole size={11} />
@@ -304,25 +335,25 @@ export default function Transactions() {
         {/* Mobile */}
         <div className="sm:hidden divide-y divide-white/[0.04]">
           {isLoading ? (
-            <div className="px-5 py-8 text-center text-white/30">Loading...</div>
+            <div className="px-5 py-8 text-center text-ink-muted">Loading...</div>
           ) : !data?.items?.length ? (
-            <div className="px-5 py-8 text-center text-white/30">No transactions found</div>
+            <div className="px-5 py-8 text-center text-ink-muted">No transactions found</div>
           ) : (
             data.items.map((txn) => (
               <div key={txn.id} className="px-5 py-3">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-white/80 text-[0.85rem]" style={{ fontWeight: 500 }}>{txn.merchant_normalized || txn.merchant_raw}</span>
+                  <span className="text-ink-primary text-[0.85rem]" style={{ fontWeight: 500 }}>{txn.merchant_normalized || txn.merchant_raw}</span>
                   <div className="flex items-center gap-2">
-                    <span className={`text-[0.85rem] tabular-nums ${txn.type === 'credit' ? 'text-emerald-400/80' : 'text-white/70'}`} style={{ fontWeight: 500 }}>
+                    <span className={`text-[0.85rem] tabular-nums ${txn.type === 'credit' ? 'text-emerald-200' : 'text-ink-secondary'}`} style={{ fontWeight: 500 }}>
                       {txn.type === 'credit' ? '+' : '-'}{formatINR(txn.amount)}
                     </span>
                     {!txn.is_locked ? <>
-                      <button onClick={() => setEditTxn(txn)} className="p-1 text-white/30 hover:text-white/70" aria-label={`Edit ${txn.merchant_normalized || txn.merchant_raw}`}><Pencil size={13} /></button>
-                      <button onClick={() => handleDelete(txn)} className="p-1 text-white/30 hover:text-rose-400/70" aria-label={`Delete ${txn.merchant_normalized || txn.merchant_raw}`}><Trash2 size={13} /></button>
+                      <button onClick={() => setEditTxn(txn)} className="p-1 text-ink-muted hover:text-ink-secondary" aria-label={`Edit ${txn.merchant_normalized || txn.merchant_raw}`}><Pencil size={13} /></button>
+                      <button onClick={() => handleDelete(txn)} className="p-1 text-ink-muted hover:text-rose-200" aria-label={`Delete ${txn.merchant_normalized || txn.merchant_raw}`}><Trash2 size={13} /></button>
                     </> : (
                       <Link
                         to={`/audit?year=${txn.date.slice(0, 4)}&month=${Number(txn.date.slice(5, 7))}`}
-                        className="p-1 text-amber-300/60"
+                        className="p-1 text-amber-200"
                         aria-label="Reopen finalized month to edit"
                       >
                         <LockKeyhole size={13} />
@@ -330,10 +361,11 @@ export default function Transactions() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-[0.7rem] text-white/30">
+                <div className="flex items-center gap-2 text-[0.7rem] text-ink-muted">
                   <span>{format(new Date(txn.date), 'dd MMM')}</span>
-                  {txn.category && <><span>·</span><span className="text-white/40">{txn.category}</span></>}
-                  {txn.subcategory && <><span>·</span><span className="text-white/25">{txn.subcategory}</span></>}
+                  {txn.category && <><span>·</span><span className="text-ink-muted">{txn.category}</span></>}
+                  {txn.subcategory && <><span>·</span><span className="text-ink-muted">{txn.subcategory}</span></>}
+                  {txn.classification_source && <><span>·</span><span className="text-ink-muted">{CLASSIFICATION_LABELS[txn.classification_source] || txn.classification_source}</span></>}
                 </div>
               </div>
             ))
@@ -346,16 +378,16 @@ export default function Transactions() {
             <button
               onClick={() => updateUrl({ page: Math.max(1, page - 1) }, { resetPage: false })}
               disabled={page === 1}
-              className="flex items-center gap-1 text-[0.8rem] text-white/40 hover:text-white/70 disabled:opacity-30 transition-colors"
+              className="flex items-center gap-1 text-[0.8rem] text-ink-muted hover:text-ink-secondary disabled:opacity-30 transition-colors"
               aria-label="Previous page"
             >
               <ChevronLeft size={15} aria-hidden="true" /> Prev
             </button>
-            <span className="text-white/30 text-[0.8rem] tabular-nums">Page {page} of {totalPages}</span>
+            <span className="text-ink-muted text-[0.8rem] tabular-nums">Page {page} of {totalPages}</span>
             <button
               onClick={() => updateUrl({ page: Math.min(totalPages, page + 1) }, { resetPage: false })}
               disabled={page === totalPages}
-              className="flex items-center gap-1 text-[0.8rem] text-white/40 hover:text-white/70 disabled:opacity-30 transition-colors"
+              className="flex items-center gap-1 text-[0.8rem] text-ink-muted hover:text-ink-secondary disabled:opacity-30 transition-colors"
               aria-label="Next page"
             >
               Next <ChevronRight size={15} aria-hidden="true" />

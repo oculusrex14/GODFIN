@@ -9,7 +9,10 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.audit import FinalizedPeriodError, assert_period_writable
 from app.core.database import get_db
+from app.core.errors import LocalOperationError, StateConflictError
+from app.core.transaction_semantics import apply_category_semantic
 from app.models.transaction import Transaction
 from app.schemas.transaction import (
     TransactionCreate,
@@ -27,6 +30,18 @@ def create_transaction(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
+    try:
+        assert_period_writable(db, body.date)
+    except FinalizedPeriodError as exc:
+        raise StateConflictError(
+            code="FINALIZED_PERIOD_READ_ONLY",
+            message=(
+                "This month is finalized and read-only. "
+                "Reopen the month before adding a transaction."
+            ),
+            hint="Reopen the month before adding a transaction.",
+        ) from exc
+
     txn = Transaction(
         id=str(uuid.uuid4()),
         date=body.date,
@@ -43,12 +58,31 @@ def create_transaction(
         confidence=1.0 if body.category else None,
         classification_source="user" if body.category else None,
         source="manual",
-        is_income=body.category == "INCOME" if body.category else False,
-        is_transfer=body.category == "TRANSFERS" if body.category else False,
         notes=body.notes,
         tags=body.tags,
     )
+    apply_category_semantic(txn, explicitly_classified=bool(body.category))
     db.add(txn)
+    if body.category:
+        from app.core.classification_learning import record_explicit_correction
+        from app.core.merchant_memory_service import upsert_merchant_memory
+
+        upsert_merchant_memory(
+            db,
+            txn.merchant_normalized,
+            body.category,
+            body.subcategory,
+            confidence=1.0,
+            raw_string=body.merchant_raw,
+        )
+        record_explicit_correction(
+            db,
+            txn,
+            None,
+            None,
+            body.category,
+            body.subcategory,
+        )
     db.commit()
     db.refresh(txn)
     return txn
@@ -143,6 +177,8 @@ def update_transaction(
 
     try:
         update_data = body.model_dump(exclude_unset=True)
+        old_category = txn.category
+        old_subcategory = txn.subcategory
 
         # Track changes for audit logging
         from app.models.audit_log import AuditLog
@@ -160,19 +196,53 @@ def update_transaction(
         if "category" in update_data and update_data["category"] is not None:
             txn.classification_source = "user"
             txn.confidence = 1.0
-            txn.is_income = update_data["category"] == "INCOME"
-            txn.is_transfer = update_data["category"] == "TRANSFERS"
 
         for field, value in update_data.items():
             setattr(txn, field, value)
+
+        if "category" in update_data and update_data["category"] is not None:
+            apply_category_semantic(txn, explicitly_classified=True)
+
+        if (
+            "category" in update_data
+            and update_data["category"] is not None
+            and (
+                old_category != txn.category
+                or old_subcategory != txn.subcategory
+            )
+            and txn.merchant_normalized
+        ):
+            from app.core.classification_learning import record_explicit_correction
+            from app.core.merchant_memory_service import upsert_merchant_memory
+
+            upsert_merchant_memory(
+                db,
+                txn.merchant_normalized,
+                txn.category,
+                txn.subcategory,
+                confidence=1.0,
+                raw_string=txn.merchant_raw,
+            )
+            record_explicit_correction(
+                db,
+                txn,
+                old_category,
+                old_subcategory,
+                txn.category,
+                txn.subcategory,
+            )
 
         txn.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(txn)
         return txn
-    except Exception as e:
+    except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update transaction: {str(e)}")
+        raise LocalOperationError(
+            code="TRANSACTION_UPDATE_FAILED",
+            message="GODFIN could not save this transaction update.",
+            hint="No partial change was kept. Try again.",
+        ) from exc
 
 
 @router.delete("/{transaction_id}", status_code=204)
@@ -191,6 +261,10 @@ def delete_transaction(
             detail="Transaction is locked (month finalized). Reopen audit to edit.",
         )
 
+    # Preserve the pre-delete value before mutating the row so the audit log
+    # remains an accurate account of the state transition.
+    old_status = txn.status
+
     # Soft delete the transaction
     txn.status = "deleted"
     txn.updated_at = datetime.now(timezone.utc)
@@ -203,12 +277,15 @@ def delete_transaction(
     for split in splits:
         split.status = "deleted"
 
+    from app.core.goal_contributions import reconcile_goal_source_transactions
+    reconcile_goal_source_transactions(db)
+
     # Create audit log entry for the deletion
     from app.models.audit_log import AuditLog
     db.add(AuditLog(
         transaction_id=txn.id,
         field_changed="status",
-        old_value=txn.status,
+        old_value=old_status,
         new_value="deleted",
         change_source="user_delete",
     ))

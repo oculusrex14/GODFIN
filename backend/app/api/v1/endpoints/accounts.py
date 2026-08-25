@@ -1,20 +1,28 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from app.api.v1.endpoints.license import enforce_feature
+from app.api.v1.entitlements import conditional_entitlement, enforce_feature
 from app.core.account_mapping import load_sender_mappings, save_sender_mappings
 from app.core.auth import get_current_user
+from app.core.account_balances import balance_at_date
 from app.core.database import get_db
+from app.core.errors import InvalidOperationError
 from app.core.parsers import supported_parser_profiles
 from app.models.account import Account
 
 router = APIRouter()
+
+
+class AccountRouting(BaseModel):
+    sender_pattern: str = Field(min_length=3, max_length=255)
+    parser_profile: str = Field(pattern=r"^[a-z0-9_]+$")
 
 
 class AccountCreate(BaseModel):
@@ -22,6 +30,7 @@ class AccountCreate(BaseModel):
     account_type: str = Field(pattern=r"^(savings|credit_card)$")
     last_4_digits: str = Field(pattern=r"^\d{4}$")
     nickname: Optional[str] = Field(default=None, max_length=100)
+    routing: Optional[AccountRouting] = None
 
     @field_validator("bank")
     @classmethod
@@ -38,6 +47,7 @@ class AccountUpdate(BaseModel):
     last_4_digits: Optional[str] = Field(default=None, pattern=r"^\d{4}$")
     nickname: Optional[str] = Field(default=None, max_length=100)
     is_active: Optional[bool] = None
+    routing: Optional[AccountRouting] = None
 
     @field_validator("bank")
     @classmethod
@@ -52,7 +62,37 @@ class SenderMapping(BaseModel):
 
 
 class SenderMappingsUpdate(BaseModel):
-    mappings: list[SenderMapping]
+    mappings: list[SenderMapping] = Field(max_length=100)
+
+
+class AccountResponse(BaseModel):
+    id: str
+    bank: str
+    account_type: str
+    last_4_digits: str
+    nickname: Optional[str] = None
+    is_active: bool
+
+
+class ParserProfileResponse(BaseModel):
+    profile: str
+    bank: str
+    account_type: str
+    statement_type: str
+    formats: list[str]
+
+
+class AccountBalanceResponse(BaseModel):
+    balance: Optional[float]
+    currency: str
+    as_of: str
+    status: str
+    anchor_as_of: Optional[str]
+    coverage_complete: bool
+    source: Optional[str]
+    missing_ranges: list[str]
+    account_count: int
+    verified_account_count: int
 
 
 def _account_dict(account: Account) -> dict:
@@ -66,7 +106,48 @@ def _account_dict(account: Account) -> dict:
     }
 
 
-@router.get("")
+def _apply_account_routing(
+    db: Session,
+    account: Account,
+    routing: AccountRouting | None,
+) -> None:
+    mappings = [
+        mapping
+        for mapping in load_sender_mappings(db)
+        if mapping["account_id"] != account.id
+    ]
+    if routing is None:
+        save_sender_mappings(db, mappings)
+        return
+
+    profile = next(
+        (
+            item
+            for item in supported_parser_profiles()
+            if item["profile"] == routing.parser_profile
+        ),
+        None,
+    )
+    if not profile:
+        raise ValueError("The selected parser profile is not available.")
+    if (
+        profile["bank"] != account.bank
+        or profile["account_type"] != account.account_type
+    ):
+        raise ValueError(
+            "The parser profile must match the account bank and account type."
+        )
+    mappings.append(
+        {
+            "sender_pattern": routing.sender_pattern,
+            "parser_profile": routing.parser_profile,
+            "account_id": account.id,
+        }
+    )
+    save_sender_mappings(db, mappings)
+
+
+@router.get("", response_model=list[AccountResponse])
 def list_accounts(
     include_inactive: bool = False,
     db: Session = Depends(get_db),
@@ -78,12 +159,12 @@ def list_accounts(
     return [_account_dict(account) for account in query.order_by(Account.created_at).all()]
 
 
-@router.get("/parser-profiles")
+@router.get("/parser-profiles", response_model=list[ParserProfileResponse])
 def list_parser_profiles(_user: bool = Depends(get_current_user)):
     return supported_parser_profiles()
 
 
-@router.get("/sender-mappings")
+@router.get("/sender-mappings", response_model=list[SenderMapping])
 def list_account_sender_mappings(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -91,7 +172,7 @@ def list_account_sender_mappings(
     return load_sender_mappings(db)
 
 
-@router.put("/sender-mappings")
+@router.put("/sender-mappings", response_model=list[SenderMapping])
 def replace_account_sender_mappings(
     body: SenderMappingsUpdate,
     db: Session = Depends(get_db),
@@ -103,19 +184,46 @@ def replace_account_sender_mappings(
             [mapping.model_dump() for mapping in body.mappings],
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise InvalidOperationError(
+            code="ACCOUNT_ROUTING_INVALID",
+            message="One or more sender-routing values are invalid.",
+            hint="Check the selected account, sender pattern, and parser profile.",
+        ) from exc
     db.commit()
     return mappings
 
 
-@router.post("", status_code=201)
+@router.get("/{account_id}/balance", response_model=AccountBalanceResponse)
+def get_account_balance(
+    account_id: str,
+    as_of: date | None = Query(default=None),
+    allow_estimate: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    account = db.query(Account).filter_by(id=account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return balance_at_date(
+        db,
+        account_id,
+        as_of or date.today(),
+        allow_estimate=allow_estimate,
+    ).to_dict()
+
+
+@router.post("", response_model=AccountResponse, status_code=201)
+@conditional_entitlement("multiple_accounts")
 def create_account(
     body: AccountCreate,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    if body.bank != "HDFC":
-        enforce_feature(db, "multi_bank")
+    active_account_count = (
+        db.query(Account).filter(Account.is_active.is_(True)).count()
+    )
+    if active_account_count >= 1:
+        enforce_feature(db, "multiple_accounts")
     duplicate = (
         db.query(Account)
         .filter_by(
@@ -138,12 +246,23 @@ def create_account(
         is_active=True,
     )
     db.add(account)
-    db.commit()
+    try:
+        db.flush()
+        if body.routing is not None:
+            _apply_account_routing(db, account, body.routing)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise InvalidOperationError(
+            code="ACCOUNT_ROUTING_INVALID",
+            message="The account could not be saved because its routing is invalid.",
+            hint="Check the sender pattern and parser profile, then try again.",
+        ) from exc
     db.refresh(account)
     return _account_dict(account)
 
 
-@router.patch("/{account_id}")
+@router.patch("/{account_id}", response_model=AccountResponse)
 def update_account(
     account_id: str,
     body: AccountUpdate,
@@ -154,15 +273,23 @@ def update_account(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    values = body.model_dump(exclude_unset=True)
-    next_bank = values.get("bank", account.bank)
-    if next_bank != "HDFC":
-        enforce_feature(db, "multi_bank")
+    values = body.model_dump(exclude_unset=True, exclude={"routing"})
     if "nickname" in values and values["nickname"]:
         values["nickname"] = values["nickname"].strip()
     for key, value in values.items():
         setattr(account, key, value)
-    db.commit()
+    try:
+        db.flush()
+        if "routing" in body.model_fields_set:
+            _apply_account_routing(db, account, body.routing)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise InvalidOperationError(
+            code="ACCOUNT_ROUTING_INVALID",
+            message="The account could not be updated because its routing is invalid.",
+            hint="Check the sender pattern and parser profile, then try again.",
+        ) from exc
     db.refresh(account)
     return _account_dict(account)
 

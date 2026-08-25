@@ -8,9 +8,21 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.account_balances import aggregate_balance_at_date
 from app.core.database import get_db
+from app.core.transaction_semantics import (
+    spending_clause,
+    verified_income_clause,
+)
 from app.models.transaction import Transaction
-from app.schemas.dashboard import DashboardStats
+from app.models.audit_session import AuditSession
+from app.schemas.dashboard import (
+    CategoryBreakdownItem,
+    DashboardMonthsResponse,
+    DashboardStats,
+    SpendingTrendItem,
+)
+from app.schemas.financial import YearMonth
 
 router = APIRouter()
 
@@ -20,39 +32,58 @@ def _shift_month(year: int, month: int, offset: int) -> tuple[int, int]:
     return absolute // 12, absolute % 12 + 1
 
 
-@router.get("/months")
+@router.get("/months", response_model=DashboardMonthsResponse)
 def dashboard_months(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Return up to 24 transaction-backed months, with a 24-month fallback."""
+    """Return recent calendar months plus every locally recorded older month."""
     rows = (
         db.query(func.strftime("%Y-%m", Transaction.date).label("month"))
         .filter(Transaction.status != "deleted")
         .group_by(func.strftime("%Y-%m", Transaction.date))
         .order_by(func.strftime("%Y-%m", Transaction.date).desc())
-        .limit(24)
         .all()
     )
-    months = [row.month for row in rows if row.month]
-    has_data = bool(months)
+    data_months = [row.month for row in rows if row.month]
+    audit_rows = (
+        db.query(AuditSession.period_year, AuditSession.period_month)
+        .distinct()
+        .all()
+    )
+    audit_months = sorted(
+        {
+            f"{int(row.period_year):04d}-{int(row.period_month):02d}"
+            for row in audit_rows
+            if row.period_year and row.period_month
+        },
+        reverse=True,
+    )
+    today = date.today()
+    calendar_months = [
+        f"{year:04d}-{month:02d}"
+        for year, month in (
+            _shift_month(today.year, today.month, -offset)
+            for offset in range(24)
+        )
+    ]
+    months = sorted(
+        set(calendar_months) | set(data_months) | set(audit_months),
+        reverse=True,
+    )
 
-    if not months:
-        today = date.today()
-        months = [
-            f"{year:04d}-{month:02d}"
-            for year, month in (
-                _shift_month(today.year, today.month, -offset)
-                for offset in range(24)
-            )
-        ]
-
-    return {"months": months, "has_data": has_data}
+    return {
+        "months": months,
+        "has_data": bool(data_months),
+        "data_months": data_months,
+        "audit_months": audit_months,
+        "calendar_months": calendar_months,
+    }
 
 
 @router.get("/stats", response_model=DashboardStats)
 def dashboard_stats(
-    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    month: YearMonth,
     period: str = Query("full", pattern=r"^(full|week_1|week_2|week_3|week_4|first_half|second_half)$"),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -76,16 +107,15 @@ def dashboard_stats(
         Transaction.status != "deleted",
     )
 
-    # Month spend: sum of debits excluding transfers
+    # Month spend uses the shared economic-semantic definition.
     spend_result = base_query.filter(
-        Transaction.type == "debit",
-        Transaction.is_transfer == False,
+        spending_clause(Transaction),
     ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
     month_spend = float(spend_result)
 
-    # Month income: sum where is_income is True
+    # Only explicit/deterministic verified income is counted.
     income_result = base_query.filter(
-        Transaction.is_income == True,
+        verified_income_clause(Transaction),
     ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
     month_income = float(income_result)
 
@@ -99,35 +129,33 @@ def dashboard_stats(
         Transaction.category == None,
     ).count()
 
-    # Account balance: all-time credits minus debits up to end of selected month
-    balance_query = db.query(Transaction).filter(
-        Transaction.date < end_date,
-        Transaction.status != "deleted",
-    )
-
-    credits_total = balance_query.filter(
-        (Transaction.is_income == True) | (Transaction.type == 'credit'),
-    ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
-
-    debits_total = balance_query.filter(
-        Transaction.type == 'debit',
-        Transaction.is_transfer == False,
-    ).with_entities(func.coalesce(func.sum(Transaction.amount), 0)).scalar()
-
-    account_balance = round(float(credits_total) - float(debits_total), 2)
+    balance = aggregate_balance_at_date(db, end_date - date.resolution)
 
     return DashboardStats(
         month_spend=round(month_spend, 2),
         month_income=round(month_income, 2),
         savings_rate=savings_rate,
         review_queue_count=review_count,
-        account_balance=account_balance,
+        account_balance=(
+            round(float(balance.balance), 2)
+            if balance.balance is not None
+            else None
+        ),
+        account_balance_status=balance.status,
+        account_balance_as_of=balance.as_of.isoformat(),
+        account_balance_anchor_as_of=(
+            balance.anchor_as_of.isoformat() if balance.anchor_as_of else None
+        ),
+        account_balance_coverage_complete=balance.coverage_complete,
+        account_balance_missing_ranges=list(balance.missing_ranges),
+        account_balance_account_count=balance.account_count,
+        account_balance_verified_account_count=balance.verified_account_count,
     )
 
 
-@router.get("/category-breakdown")
+@router.get("/category-breakdown", response_model=list[CategoryBreakdownItem])
 def category_breakdown(
-    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    month: YearMonth,
     period: str = Query("full", pattern=r"^(full|week_1|week_2|week_3|week_4|first_half|second_half)$"),
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
@@ -149,8 +177,7 @@ def category_breakdown(
             Transaction.date >= start_date,
             Transaction.date < end_date,
             Transaction.status != "deleted",
-            Transaction.type == "debit",
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
         )
         .group_by(Transaction.category)
         .order_by(func.sum(Transaction.amount).desc())
@@ -186,10 +213,10 @@ def _get_period_dates(month_start: date, month_end: date, period: str) -> tuple[
     return month_start, month_end
 
 
-@router.get("/spending-trend")
+@router.get("/spending-trend", response_model=list[SpendingTrendItem])
 def spending_trend(
     months: int = Query(6, ge=1, le=12),
-    month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+    month: Optional[YearMonth] = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -231,8 +258,7 @@ def spending_trend(
             Transaction.date >= min_date,
             Transaction.date < max_date,
             Transaction.status != "deleted",
-            Transaction.type == "debit",
-            Transaction.is_transfer == False,
+            spending_clause(Transaction),
         )
         .group_by(func.strftime('%Y-%m', Transaction.date))
         .all()
@@ -248,7 +274,7 @@ def spending_trend(
             Transaction.date >= min_date,
             Transaction.date < max_date,
             Transaction.status != "deleted",
-            Transaction.is_income == True,
+            verified_income_clause(Transaction),
         )
         .group_by(func.strftime('%Y-%m', Transaction.date))
         .all()

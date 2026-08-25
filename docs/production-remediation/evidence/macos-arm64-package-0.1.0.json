@@ -1,0 +1,44 @@
+{
+  "artifact_version": "0.1.0",
+  "built_at_local": "2026-08-16T02:12:53+05:30",
+  "code_commit": "25fd5f7",
+  "candidate_kind": "private-local-ad-hoc",
+  "host": {
+    "architecture": "arm64",
+    "operating_system": "macOS",
+    "python": "3.12.13"
+  },
+  "artifacts": [
+    {
+      "name": "GODFIN-0.1.0-mac-arm64.dmg",
+      "sha256": "5b3fd15ae40e9ab59ea2b344f6de9e15f37e6ad2030b1d2f330253f2ed4c98c5",
+      "size_bytes": 216583868,
+      "size_mib_rounded": 207
+    },
+    {
+      "name": "GODFIN-0.1.0-mac-arm64.zip",
+      "sha256": "8bd9d5b59e11e3bdbb5edfb5f882ed953a5341a178a2d77cd0a7190154ce5b91",
+      "size_bytes": 216486747,
+      "size_mib_rounded": 206
+    }
+  ],
+  "package_verification": {
+    "first_start_ms": 3000,
+    "restart_ms": 1033,
+    "max_idle_memory_mb": 604.5,
+    "process_count": 5,
+    "database_preserved": true,
+    "trust_boundary_enforced": true,
+    "maintenance_boundary_enforced": true,
+    "package_privacy_passed": true,
+    "legal_assets_byte_identical": true
+  },
+  "signing": {
+    "codesign_deep_strict_passed": true,
+    "identity": "ad-hoc",
+    "hardened_runtime": true,
+    "gatekeeper_accepted": false,
+    "notarized": false
+  },
+  "public_release_authorized": false
+}

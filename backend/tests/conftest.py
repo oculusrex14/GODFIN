@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import os
+import json
+import base64
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from starlette.testclient import TestClient
@@ -13,6 +17,28 @@ from starlette.testclient import TestClient
 os.environ["GODFIN_TESTING"] = "1"
 os.environ["DB_PATH"] = "/tmp/godfin_pytest_unused.db"
 os.environ["ENCRYPTION_KEY"] = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+os.environ["GODFIN_MACHINE_ID_FILE"] = "/tmp/godfin_pytest_machine_id"
+_test_license_private_key = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
+_test_license_public_der = _test_license_private_key.public_key().public_bytes(
+    encoding=serialization.Encoding.DER,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+)
+os.environ["GODFIN_LICENSE_PUBLIC_KEYS_JSON"] = json.dumps(
+    {
+        "schema_version": 1,
+        "keys": {
+            "test-ed25519-v1": {
+                "status": "active",
+                "algorithm": "Ed25519",
+                "public_key_spki_b64": base64.b64encode(
+                    _test_license_public_der
+                ).decode(),
+            }
+        },
+    },
+    separators=(",", ":"),
+    sort_keys=True,
+)
 
 from app.core.database import Base, get_db
 from app.models import *  # noqa: F401, F403
@@ -79,9 +105,9 @@ def auth_client(client):
     from app.core.auth import _active_tokens
     _active_tokens.clear()
 
-    resp = client.post("/api/v1/auth/set-pin", json={"pin": "1234"})
+    resp = client.post("/api/v1/auth/set-pin", json={"pin": "4826"})
     assert resp.status_code == 200, f"set-pin failed: {resp.text}"
-    resp = client.post("/api/v1/auth/verify-pin", json={"pin": "1234"})
+    resp = client.post("/api/v1/auth/verify-pin", json={"pin": "4826"})
     assert resp.status_code == 200, f"verify-pin failed: {resp.text}"
     token = resp.json()["token"]
     client.headers["Authorization"] = f"Bearer {token}"

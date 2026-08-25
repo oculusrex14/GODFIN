@@ -13,14 +13,14 @@ export function CopyLicenseKey({ licenseKey }: { licenseKey: string }) {
   }
 
   return (
-    <div className="account-card" style={{ marginBottom: 22 }}>
+    <div className="account-card account-card-spaced">
       <span className="status-pill">Payment complete</span>
       <h2>Your lifetime license key</h2>
       <p className="lead">
         Paste this into GODFIN → Settings → License. A copy has also been sent
         to your account email.
       </p>
-      <div className="license-key" style={{ margin: "18px 0" }}>
+      <div className="license-key license-key-spaced">
         {licenseKey}
       </div>
       <button className="button" onClick={copy} type="button">

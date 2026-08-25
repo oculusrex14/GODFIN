@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import random
+import threading
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -10,10 +12,212 @@ logger = logging.getLogger(__name__)
 
 # Scheduler is optional — only initialize if apscheduler is available
 _scheduler = None
+_scheduler_lock = threading.RLock()
+_scheduler_retry_timer: Optional[threading.Timer] = None
+_backup_retry_timer: Optional[threading.Timer] = None
+_scheduler_retry_attempts = 0
+_backup_retry_attempts = 0
+_shutdown_requested = False
 
-# Track ingestion state to prevent concurrent runs
-_ingestion_lock = False
+# Track ingestion state to prevent concurrent runs within the desktop process.
+_ingestion_lock = threading.Lock()
 _last_ingestion_attempt: Optional[datetime] = None
+_ingestion_retry_attempts = 0
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(value: datetime) -> str:
+    return value.replace(microsecond=0).isoformat()
+
+
+def _save_health_values(values: dict[str, str]) -> None:
+    """Persist support-safe scheduler state without exposing raw exceptions."""
+    from app.core.database import SessionLocal
+    from app.models.app_setting import AppSetting
+
+    db = SessionLocal()
+    try:
+        existing = {
+            setting.key: setting
+            for setting in db.query(AppSetting)
+            .filter(AppSetting.key.in_(tuple(values)))
+            .all()
+        }
+        for key, value in values.items():
+            setting = existing.get(key)
+            if setting is None:
+                setting = AppSetting(key=key, value=value)
+                db.add(setting)
+            else:
+                setting.value = value
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            "Could not persist backup protection health (%s)",
+            type(exc).__name__,
+        )
+    finally:
+        db.close()
+
+
+def _record_scheduler_operational() -> None:
+    _save_health_values(
+        {
+            "backup_scheduler_status": "operational",
+            "backup_scheduler_failure_code": "",
+            "backup_scheduler_next_retry_at": "",
+            "backup_scheduler_failure_count": "0",
+        }
+    )
+
+
+def _record_scheduler_failure(code: str, retry_at: datetime, attempt: int) -> None:
+    _save_health_values(
+        {
+            "backup_scheduler_status": "degraded",
+            "backup_scheduler_failure_code": code,
+            "backup_scheduler_last_failure_at": _iso(_utc_now()),
+            "backup_scheduler_next_retry_at": _iso(retry_at),
+            "backup_scheduler_failure_count": str(attempt),
+        }
+    )
+
+
+def _record_backup_success(filename: str) -> None:
+    _save_health_values(
+        {
+            "backup_job_status": "ok",
+            "backup_last_success_at": _iso(_utc_now()),
+            "backup_last_filename": filename,
+            "backup_job_failure_code": "",
+            "backup_job_next_retry_at": "",
+            "backup_job_failure_count": "0",
+        }
+    )
+
+
+def _record_backup_failure(code: str, retry_at: datetime, attempt: int) -> None:
+    _save_health_values(
+        {
+            "backup_job_status": "degraded",
+            "backup_job_failure_code": code,
+            "backup_job_last_failure_at": _iso(_utc_now()),
+            "backup_job_next_retry_at": _iso(retry_at),
+            "backup_job_failure_count": str(attempt),
+        }
+    )
+
+
+def _record_backup_retry_pending(retry_at: datetime, attempt: int) -> None:
+    """Update retry timing without rewriting the original failure evidence."""
+    _save_health_values(
+        {
+            "backup_job_status": "degraded",
+            "backup_job_next_retry_at": _iso(retry_at),
+            "backup_job_failure_count": str(attempt),
+        }
+    )
+
+
+def _backup_retry_required() -> bool:
+    from app.core.database import SessionLocal
+    from app.models.app_setting import AppSetting
+
+    db = SessionLocal()
+    try:
+        setting = (
+            db.query(AppSetting)
+            .filter_by(key="backup_job_status")
+            .first()
+        )
+        return bool(setting and setting.value == "degraded")
+    except Exception as exc:
+        logger.warning(
+            "Could not read persisted backup protection health (%s)",
+            type(exc).__name__,
+        )
+        return False
+    finally:
+        db.close()
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    """Bounded exponential delay with 0–20% jitter."""
+    base = min(3600.0, 30.0 * (2 ** max(0, attempt - 1)))
+    return base + random.uniform(0, base * 0.2)
+
+
+def _cancel_timer(timer: Optional[threading.Timer]) -> None:
+    if timer is not None:
+        timer.cancel()
+
+
+def _schedule_scheduler_retry(db_path: str, backup_dir: str, code: str) -> None:
+    global _scheduler_retry_attempts, _scheduler_retry_timer
+
+    with _scheduler_lock:
+        if _shutdown_requested:
+            return
+        if _scheduler_retry_timer is not None and _scheduler_retry_timer.is_alive():
+            return
+        _scheduler_retry_attempts += 1
+        delay = _retry_delay_seconds(_scheduler_retry_attempts)
+        retry_at = _utc_now() + timedelta(seconds=delay)
+        _record_scheduler_failure(code, retry_at, _scheduler_retry_attempts)
+
+        def retry() -> None:
+            global _scheduler_retry_timer
+            with _scheduler_lock:
+                _scheduler_retry_timer = None
+                if _shutdown_requested:
+                    return
+            try:
+                start_scheduler(db_path, backup_dir)
+            except Exception as exc:
+                logger.error(
+                    "Backup scheduler retry failed (%s)",
+                    type(exc).__name__,
+                )
+                _schedule_scheduler_retry(db_path, backup_dir, code)
+
+        timer = threading.Timer(delay, retry)
+        timer.daemon = True
+        _scheduler_retry_timer = timer
+        timer.start()
+        logger.warning(
+            "Backup scheduler is degraded; retry %d is scheduled in %.1f seconds",
+            _scheduler_retry_attempts,
+            delay,
+        )
+
+
+def _schedule_backup_retry(job: Callable[[], None]) -> tuple[int, datetime]:
+    global _backup_retry_attempts, _backup_retry_timer
+
+    with _scheduler_lock:
+        _backup_retry_attempts += 1
+        delay = _retry_delay_seconds(_backup_retry_attempts)
+        retry_at = _utc_now() + timedelta(seconds=delay)
+        _cancel_timer(_backup_retry_timer)
+
+        def retry() -> None:
+            global _backup_retry_timer
+            with _scheduler_lock:
+                _backup_retry_timer = None
+                if _shutdown_requested:
+                    return
+            job()
+
+        timer = threading.Timer(delay, retry)
+        timer.daemon = True
+        _backup_retry_timer = timer
+        if not _shutdown_requested:
+            timer.start()
+        return _backup_retry_attempts, retry_at
 
 
 def _get_scheduler():
@@ -77,124 +281,122 @@ def _set_manual_ingestion_running(db: Session, running: bool):
     db.commit()
 
 
-def start_scheduler(db_path: str, backup_dir: str) -> None:
+def _enqueue_scheduled_job(
+    kind: str,
+    active_key: str,
+    message: str,
+    *,
+    max_attempts: int,
+) -> bool:
+    from app.core.background_jobs import JobQueueFull, enqueue_job
+
+    try:
+        queued = enqueue_job(
+            kind,
+            active_key=active_key,
+            max_attempts=max_attempts,
+            public_message=message,
+        )
+    except JobQueueFull:
+        logger.warning(
+            "Scheduled work was deferred because the local queue is full",
+            extra={
+                "operation_id": kind,
+                "error_code": "BACKGROUND_QUEUE_FULL",
+            },
+        )
+        return False
+    except Exception as exc:
+        logger.error(
+            "Scheduled work could not be queued (%s)",
+            type(exc).__name__,
+            extra={
+                "operation_id": kind,
+                "error_code": "BACKGROUND_ENQUEUE_FAILED",
+                "cause_type": type(exc).__name__,
+            },
+        )
+        return False
+    if queued.created:
+        logger.info("Queued scheduled operation %s", kind)
+    else:
+        logger.info("Skipped duplicate scheduled operation %s", kind)
+    return True
+
+
+def _enqueue_automatic_backup() -> bool:
+    return _enqueue_scheduled_job(
+        "automatic_backup",
+        "automatic-backup",
+        "Automatic safety backup is waiting to start.",
+        max_attempts=5,
+    )
+
+
+def _enqueue_scheduled_gmail() -> bool:
+    global _last_ingestion_attempt
+
+    _last_ingestion_attempt = datetime.now(timezone.utc)
+    return _enqueue_scheduled_job(
+        "gmail_scheduled",
+        "gmail-ingestion",
+        "Automatic Gmail import is waiting to start.",
+        max_attempts=4,
+    )
+
+
+def _enqueue_weekly_digest() -> bool:
+    return _enqueue_scheduled_job(
+        "weekly_digest",
+        "weekly-digest",
+        "Weekly money summary is waiting to start.",
+        max_attempts=3,
+    )
+
+
+def _enqueue_license_refresh() -> bool:
+    return _enqueue_scheduled_job(
+        "license_refresh",
+        "license-refresh",
+        "License verification refresh is waiting to start.",
+        max_attempts=5,
+    )
+
+
+def start_scheduler(db_path: str, backup_dir: str) -> bool:
     """Start background scheduler with polling and nightly batch jobs."""
+    global _backup_retry_attempts, _scheduler_retry_attempts
+    global _scheduler_retry_timer, _shutdown_requested
+
+    _shutdown_requested = False
     scheduler = _get_scheduler()
     if scheduler is None:
-        return
-
-    from app.core.backup import create_backup
+        _schedule_scheduler_retry(
+            db_path,
+            backup_dir,
+            "scheduler_dependency_unavailable",
+        )
+        return False
+    if scheduler.running:
+        _record_scheduler_operational()
+        return True
 
     def nightly_batch():
-        logger.info("Running nightly batch job")
-        try:
-            create_backup(db_path, backup_dir)
-            logger.info("Nightly backup complete")
-        except Exception as e:
-            logger.error(f"Nightly batch error: {e}")
+        if not _enqueue_automatic_backup():
+            attempt, retry_at = _schedule_backup_retry(nightly_batch)
+            _record_backup_failure("automatic_backup_enqueue_failed", retry_at, attempt)
 
     def polling_job():
-        """Scheduled job to check for new Gmail transactions."""
-        global _ingestion_lock, _last_ingestion_attempt
-
-        # Prevent concurrent execution
-        if _ingestion_lock:
-            logger.info("Skipping scheduled ingestion - another instance is running")
-            return
-
-        try:
-            _ingestion_lock = True
-            _last_ingestion_attempt = datetime.now(timezone.utc)
-
-            from app.core.database import SessionLocal
-            from app.core.gmail_service import is_connected
-            from app.core.ingestion import run_ingestion
-
-            db = SessionLocal()
-            try:
-                # Check if auto-ingestion is enabled
-                if not _is_auto_ingestion_enabled(db):
-                    logger.debug("Auto-ingestion is disabled")
-                    return
-
-                # Check if Gmail is connected
-                if not is_connected():
-                    logger.debug("Gmail not connected - skipping ingestion")
-                    return
-
-                # Check if manual ingestion is running
-                if _is_manual_ingestion_running(db):
-                    logger.info("Manual ingestion in progress - skipping scheduled run")
-                    return
-
-                logger.info("Starting scheduled ingestion")
-                result = run_ingestion(db)
-
-                if result.created > 0:
-                    logger.info(f"Scheduled ingestion complete: {result.created} new transactions")
-                else:
-                    logger.debug(f"Scheduled ingestion complete: no new transactions")
-
-                _update_last_run(success=True, new_transactions=result.created)
-
-            finally:
-                db.close()
-
-        except Exception as e:
-            logger.error(f"Scheduled ingestion failed: {e}")
-            _update_last_run(success=False, error_message=str(e)[:500])
-        finally:
-            _ingestion_lock = False
+        """Queue one cross-process single-flight Gmail ingestion."""
+        _enqueue_scheduled_gmail()
 
     def weekly_digest_job():
-        """Generate and send an explicitly enabled digest from this device."""
-        from app.core.advisor_digest import build_weekly_digest, digest_to_html
-        from app.core.database import SessionLocal
-        from app.core.gmail_service import gmail_service
-        from app.core.license import license_status
-        from app.models.app_setting import AppSetting
+        """Queue one cross-process single-flight weekly digest."""
+        _enqueue_weekly_digest()
 
-        db = SessionLocal()
-        try:
-            enabled = (
-                db.query(AppSetting)
-                .filter_by(key="advisor_weekly_digest_enabled")
-                .first()
-            )
-            recipient = (
-                db.query(AppSetting)
-                .filter_by(key="advisor_weekly_digest_recipient")
-                .first()
-            )
-            if not enabled or enabled.value != "true" or not recipient or not recipient.value:
-                return
-            if "advanced_reports" not in license_status(db)["features"]:
-                logger.info("Skipping weekly digest because the paid license is inactive")
-                return
-            digest = build_weekly_digest(db)
-            gmail_service.send_email(
-                recipient.value,
-                f"GODFIN weekly digest · {digest['period']['end']}",
-                digest_to_html(digest),
-            )
-            setting = (
-                db.query(AppSetting)
-                .filter_by(key="advisor_weekly_digest_last_sent")
-                .first()
-            )
-            if setting is None:
-                setting = AppSetting(
-                    key="advisor_weekly_digest_last_sent", value=""
-                )
-                db.add(setting)
-            setting.value = datetime.now(timezone.utc).isoformat()
-            db.commit()
-            logger.info("Weekly advisor digest sent through the user's Gmail account")
-        except Exception as error:
-            logger.error("Weekly advisor digest failed: %s", error)
-            db.rollback()
-        finally:
-            db.close()
+    def license_refresh_job():
+        """Refresh expiring signed entitlements with bounded durable retries."""
+        _enqueue_license_refresh()
 
     # Nightly batch at 23:59
     scheduler.add_job(
@@ -215,6 +417,17 @@ def start_scheduler(db_path: str, backup_dir: str) -> None:
         minute=0,
         id="weekly_advisor_digest",
         replace_existing=True,
+    )
+
+    scheduler.add_job(
+        license_refresh_job,
+        "interval",
+        hours=12,
+        id="license_refresh",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60 * 60,
     )
 
     # Read frequency from database for initial scheduling
@@ -240,15 +453,47 @@ def start_scheduler(db_path: str, backup_dir: str) -> None:
         minutes=initial_frequency,
         id='polling',
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
     )
 
     scheduler.start()
+    with _scheduler_lock:
+        _scheduler_retry_attempts = 0
+        _cancel_timer(_scheduler_retry_timer)
+        _scheduler_retry_timer = None
+    _record_scheduler_operational()
+    if _backup_retry_required():
+        if _enqueue_automatic_backup():
+            _record_backup_retry_pending(_utc_now(), 1)
+        else:
+            attempt, retry_at = _schedule_backup_retry(nightly_batch)
+            _record_backup_retry_pending(retry_at, attempt)
     logger.info(f"Scheduler started with nightly batch and {initial_frequency}-min polling")
+    return True
+
+
+def schedule_scheduler_recovery(
+    db_path: str,
+    backup_dir: str,
+    code: str = "scheduler_start_failed",
+) -> None:
+    """Persist a startup failure and retry without blocking API availability."""
+    _schedule_scheduler_retry(db_path, backup_dir, code)
 
 
 def stop_scheduler() -> None:
     """Gracefully stop the scheduler."""
-    scheduler = _get_scheduler()
+    global _backup_retry_timer, _scheduler_retry_timer, _shutdown_requested
+
+    _shutdown_requested = True
+    with _scheduler_lock:
+        _cancel_timer(_scheduler_retry_timer)
+        _cancel_timer(_backup_retry_timer)
+        _scheduler_retry_timer = None
+        _backup_retry_timer = None
+    scheduler = _scheduler
     if scheduler and scheduler.running:
         scheduler.shutdown(wait=False)
         logger.info("Scheduler stopped")
@@ -278,16 +523,22 @@ def reschedule_polling_job(new_minutes: int) -> bool:
 
         # Reschedule with new interval
         scheduler.add_job(
-            polling_job,
+            _enqueue_scheduled_gmail,
             'interval',
             minutes=new_minutes,
             id='polling',
             replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60,
         )
         logger.info(f"Rescheduled polling job to run every {new_minutes} minutes")
         return True
-    except Exception as e:
-        logger.error(f"Failed to reschedule polling job: {e}")
+    except Exception as exc:
+        logger.error(
+            "Failed to reschedule polling job (%s)",
+            type(exc).__name__,
+        )
         return False
 
 
@@ -317,7 +568,11 @@ def run_on_wake(db_path: str, backup_dir: str) -> None:
         logger.warning(f"Run-on-wake check failed: {e}")
 
 
-def _update_last_run(success: bool = True, new_transactions: int = 0, error_message: str = ""):
+def _update_last_run(
+    success: bool = True,
+    new_transactions: int = 0,
+    error_code: str = "",
+):
     """Update the last_ingestion_run timestamp and status in settings."""
     try:
         from app.core.database import SessionLocal
@@ -348,15 +603,29 @@ def _update_last_run(success: bool = True, new_transactions: int = 0, error_mess
         count_setting.value = str(new_transactions)
         db.commit()
 
-        # Update error message if failed
-        if error_message:
+        # Store a stable public message and a support-safe failure code. Never
+        # persist an exception string because it can contain tokens or paths.
+        if error_code:
             error_setting = db.query(AppSetting).filter_by(key='last_auto_ingestion_error').first()
             if not error_setting:
                 error_setting = AppSetting(key='last_auto_ingestion_error', value='')
                 db.add(error_setting)
-            error_setting.value = error_message[:500]  # Limit to 500 chars
+            error_setting.value = "Automatic Gmail import could not be completed."
+            code_setting = db.query(AppSetting).filter_by(
+                key='last_auto_ingestion_error_code'
+            ).first()
+            if not code_setting:
+                code_setting = AppSetting(
+                    key='last_auto_ingestion_error_code',
+                    value='',
+                )
+                db.add(code_setting)
+            code_setting.value = error_code[:80]
             db.commit()
 
         db.close()
-    except Exception as e:
-        logger.warning(f"Failed to update last_run: {e}")
+    except Exception as exc:
+        logger.warning(
+            "Failed to record automatic ingestion status (%s)",
+            type(exc).__name__,
+        )

@@ -27,9 +27,9 @@ function getMonthGrid(year) {
 }
 
 const STATUS_STYLES = {
-  finalized: { bg: 'bg-emerald-400/[0.06] border-emerald-400/[0.15]', text: 'text-emerald-400/70', icon: Lock, label: 'Finalized' },
-  draft: { bg: 'bg-amber-400/[0.06] border-amber-400/[0.15]', text: 'text-amber-400/70', icon: Unlock, label: 'Draft' },
-  no_audit: { bg: 'bg-white/[0.04] border-white/[0.08]', text: 'text-white/30', icon: Shield, label: 'No Audit' },
+  finalized: { bg: 'bg-emerald-400/[0.06] border-emerald-400/[0.15]', text: 'text-emerald-200', icon: Lock, label: 'Finalized' },
+  draft: { bg: 'bg-amber-400/[0.06] border-amber-400/[0.15]', text: 'text-amber-200', icon: Unlock, label: 'Draft' },
+  no_audit: { bg: 'bg-white/[0.04] border-white/[0.08]', text: 'text-ink-muted', icon: Shield, label: 'No Audit' },
 };
 
 function MonthCell({ year, month, isFuture, onAction }) {
@@ -52,17 +52,17 @@ function MonthCell({ year, month, isFuture, onAction }) {
       onClick={() => !isFuture && onAction(year, month, status)}
     >
       <div className="absolute top-0 left-3 right-3 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent" />
-      {isLoading && <Loader2 className="absolute top-2 right-2 h-3 w-3 animate-spin text-white/20" />}
+      {isLoading && <Loader2 className="absolute top-2 right-2 h-3 w-3 animate-spin text-ink-muted" />}
       <div className="flex items-center justify-between mb-2">
-        <Icon size={14} className={isFuture ? 'text-white/15' : style.text} />
-        <span className={`text-[0.55rem] uppercase tracking-wider ${isFuture ? 'text-white/15' : style.text}`} style={{ fontWeight: 500 }}>
+        <Icon size={14} className={isFuture ? 'text-ink-muted' : style.text} />
+        <span className={`text-[0.55rem] uppercase tracking-wider ${isFuture ? 'text-ink-muted' : style.text}`} style={{ fontWeight: 500 }}>
           {isFuture ? 'Pending' : style.label}
         </span>
       </div>
-      <div className={`text-[0.95rem] ${isFuture ? 'text-white/20' : 'text-white/70'}`} style={{ fontWeight: 400 }}>
+      <div className={`text-[0.95rem] ${isFuture ? 'text-ink-muted' : 'text-ink-secondary'}`} style={{ fontWeight: 400 }}>
         {MONTH_NAMES[month - 1]}
       </div>
-      <div className="text-white/15 text-[0.7rem]">{year}</div>
+      <div className="text-ink-muted text-[0.7rem]">{year}</div>
     </motion.div>
   );
 }
@@ -132,10 +132,10 @@ export default function AuditManager() {
     <div className="space-y-6">
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <div className="flex items-center gap-3 mb-2">
-          <Shield className="h-5 w-5 text-emerald-400/70" />
-          <h1 className="text-white/90 text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Audit Manager</h1>
+          <Shield className="h-5 w-5 text-emerald-200" />
+          <h1 className="text-ink-primary text-[1.6rem] tracking-[-0.02em]" style={{ fontWeight: 300 }}>Audit Manager</h1>
         </div>
-        <p className="text-white/30 text-[0.8rem] max-w-xl">
+        <p className="text-ink-muted text-[0.8rem] max-w-xl">
           Lock monthly transactions to preserve financial integrity. Start an audit to review, then finalize to lock.
         </p>
       </motion.div>
@@ -144,15 +144,15 @@ export default function AuditManager() {
       <div className="flex items-center justify-between">
         <button
           onClick={() => setVisibleYear((year) => year - 1)}
-          className="inline-flex items-center gap-1.5 text-white/35 hover:text-white/70 text-[0.75rem]"
+          className="inline-flex items-center gap-1.5 text-ink-muted hover:text-ink-secondary text-[0.75rem]"
         >
           <ChevronLeft size={14} /> Previous year
         </button>
-        <span className="text-white/60 text-[0.9rem] tabular-nums">{visibleYear}</span>
+        <span className="text-ink-secondary text-[0.9rem] tabular-nums">{visibleYear}</span>
         <button
           onClick={() => setVisibleYear((year) => Math.min(new Date().getFullYear(), year + 1))}
           disabled={visibleYear >= new Date().getFullYear()}
-          className="inline-flex items-center gap-1.5 text-white/35 hover:text-white/70 disabled:opacity-25 text-[0.75rem]"
+          className="inline-flex items-center gap-1.5 text-ink-muted hover:text-ink-secondary disabled:opacity-25 text-[0.75rem]"
         >
           Next year <ChevronRight size={14} />
         </button>
@@ -170,20 +170,20 @@ export default function AuditManager() {
             <div className="relative overflow-hidden rounded-[20px] bg-white/[0.08] backdrop-blur-[24px] border border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.2)] p-5">
               <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white/80 text-[1rem]" style={{ fontWeight: 400 }}>
+                <h3 className="text-ink-primary text-[1rem]" style={{ fontWeight: 400 }}>
                   {MONTH_NAMES[selected.month - 1]} {selected.year}
                 </h3>
-                <button onClick={() => { setSelected(null); setActionError(null); }} className="text-white/30 hover:text-white/60 text-[0.8rem]">Close</button>
+                <button onClick={() => { setSelected(null); setActionError(null); }} className="text-ink-muted hover:text-ink-secondary text-[0.8rem]">Close</button>
               </div>
 
               {actionError && (
-                <div className="mb-3 px-3 py-2 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px] text-rose-400/70 text-[0.8rem]">
+                <div className="mb-3 px-3 py-2 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px] text-rose-200 text-[0.8rem]">
                   {actionError}
                 </div>
               )}
 
               {selectedSession?.change_summary && (
-                <p className="text-white/30 text-[0.8rem] mb-4">{selectedSession.change_summary}</p>
+                <p className="text-ink-muted text-[0.8rem] mb-4">{selectedSession.change_summary}</p>
               )}
 
               <div className="flex flex-wrap gap-3">
@@ -210,21 +210,21 @@ export default function AuditManager() {
       {/* Recent Sessions */}
       {sessions?.length > 0 && (
         <div>
-          <h2 className="text-white/40 text-[0.7rem] uppercase tracking-wider mb-3" style={{ fontWeight: 500 }}>Recent Sessions</h2>
+          <h2 className="text-ink-muted text-[0.7rem] uppercase tracking-wider mb-3" style={{ fontWeight: 500 }}>Recent Sessions</h2>
           <div className="space-y-2">
             {sessions.slice(0, 10).map((s) => (
               <div key={s.id} className="flex items-center justify-between bg-white/[0.04] rounded-[14px] px-4 py-3 border border-white/[0.06]">
                 <div className="flex items-center gap-3">
-                  <span className="text-white/70 text-[0.85rem]" style={{ fontWeight: 400 }}>
+                  <span className="text-ink-secondary text-[0.85rem]" style={{ fontWeight: 400 }}>
                     {MONTH_NAMES[s.period_month - 1]} {s.period_year}
                   </span>
                   <span className={`text-[0.65rem] uppercase tracking-wider ${
-                    s.status === 'finalized' ? 'text-emerald-400/70' : s.status === 'draft' ? 'text-amber-400/70' : 'text-white/30'
+                    s.status === 'finalized' ? 'text-emerald-200' : s.status === 'draft' ? 'text-amber-200' : 'text-ink-muted'
                   }`} style={{ fontWeight: 500 }}>
                     {s.status}
                   </span>
                 </div>
-                <span className="text-white/20 text-[0.7rem]">
+                <span className="text-ink-muted text-[0.7rem]">
                   {s.finalized_at ? `Finalized ${new Date(s.finalized_at).toLocaleDateString()}` : s.created_at ? `Created ${new Date(s.created_at).toLocaleDateString()}` : ''}
                 </span>
               </div>

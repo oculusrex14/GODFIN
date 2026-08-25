@@ -1,0 +1,11 @@
+# Release, dependency, and trust controls require explicit owner review.
+/.github/workflows/ @oculusrex14
+/backend/requirements*.txt @oculusrex14
+/packaging/ @oculusrex14
+/scripts/audit_python_dependencies.py @oculusrex14
+/scripts/generate_supply_chain_artifacts.py @oculusrex14
+/scripts/verify_dependency_boundaries.py @oculusrex14
+/scripts/verify_supply_chain_artifacts.py @oculusrex14
+/supply-chain/ @oculusrex14
+/sbom/ @oculusrex14
+/THIRD_PARTY_NOTICES.md @oculusrex14

@@ -2,36 +2,46 @@ const API_BASE = window.location.protocol === 'godfin:'
   ? 'http://127.0.0.1:5100/api/v1'
   : '/api/v1';
 
-const TOKEN_KEY = 'godfin_auth_token';
+const LEGACY_TOKEN_KEYS = ['godfin_auth_token', 'token', 'auth_token'];
+
+function purgeLegacyStoredTokens() {
+  for (const storageName of ['localStorage', 'sessionStorage']) {
+    try {
+      const storage = window[storageName];
+      for (const key of LEGACY_TOKEN_KEYS) storage?.removeItem(key);
+    } catch {
+      // Storage can be unavailable in hardened/private renderer contexts.
+    }
+  }
+}
+
+purgeLegacyStoredTokens();
 
 export class ApiError extends Error {
-  constructor({ code, message, hint = null, retriable = false, status = 0 }) {
+  constructor({
+    code,
+    message,
+    hint = null,
+    retriable = false,
+    status = 0,
+    retryAfter = 0,
+  }) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
     this.hint = hint;
     this.retriable = retriable;
     this.status = status;
+    this.retryAfter = retryAfter;
   }
 }
 
-function getStoredToken() {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-function setStoredToken(token) {
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(TOKEN_KEY);
-  }
-}
-
-let _token = getStoredToken();
+// Deliberately memory-only: reloads, window recreation, and app relaunches lock
+// the renderer even while an abandoned server-side session awaits expiry.
+let _token = null;
 
 export function setAuthToken(token) {
   _token = token;
-  setStoredToken(token);
 }
 
 export function getAuthToken() {
@@ -79,12 +89,14 @@ export async function apiFetch(path, options = {}) {
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    const retryAfter = Number.parseInt(response.headers.get('Retry-After') || '0', 10);
     throw new ApiError({
       code: body.code || `HTTP_${response.status}`,
       message: body.message || body.detail || `Request failed (${response.status})`,
       hint: body.hint || null,
       retriable: body.retriable ?? response.status >= 500,
       status: response.status,
+      retryAfter: Number.isFinite(retryAfter) ? Math.max(0, retryAfter) : 0,
     });
   }
 
@@ -97,6 +109,10 @@ export async function apiFetch(path, options = {}) {
 // Health
 export async function fetchHealth(options = {}) {
   return apiFetch('/health', { ...options, auth: false });
+}
+
+export function isBackendAlive(health) {
+  return health?.status === 'alive' && health?.liveness === true;
 }
 
 // Auth
@@ -126,7 +142,14 @@ export function changePin(currentPin, newPin) {
 }
 
 export function logoutSession() {
-  return apiFetch('/auth/logout', { method: 'POST' });
+  const token = _token;
+  _token = null;
+  if (!token) return Promise.resolve(null);
+  return apiFetch('/auth/logout', {
+    method: 'POST',
+    auth: false,
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
 
 // LLM
@@ -322,24 +345,23 @@ export function fetchTaxonomy() {
 }
 
 // Gmail / Ingestion
-export function fetchGmailAuthUrl(useOob = false) {
-  const url = useOob ? '/auth/gmail/url?use_oob=true' : '/auth/gmail/url';
-  return apiFetch(url);
+export function fetchGmailAuthUrl() {
+  return apiFetch('/auth/gmail/url');
 }
 
 export function fetchGmailStatus() {
   return apiFetch('/auth/gmail/status');
 }
 
-export function submitGmailManualCode(code) {
-  return apiFetch('/auth/gmail/manual-code', {
+export function disconnectGmail({ clearData = false, pin = null, confirmation = null } = {}) {
+  return apiFetch('/auth/gmail/disconnect', {
     method: 'POST',
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({
+      clear_data: clearData,
+      pin,
+      confirmation,
+    }),
   });
-}
-
-export function disconnectGmail(clearData = false) {
-  return apiFetch(`/auth/gmail/disconnect?clear_data=${clearData}`, { method: 'POST' });
 }
 
 export function triggerIngestionWithDates({ startDate, endDate }) {
@@ -351,6 +373,18 @@ export function triggerIngestionWithDates({ startDate, endDate }) {
 
 export function fetchIngestionStatus() {
   return apiFetch('/ingest/status');
+}
+
+export function fetchGmailCoverage() {
+  return apiFetch('/ingest/gmail/coverage');
+}
+
+export function startIncrementalGmailSync() {
+  return apiFetch('/ingest/gmail/sync-now/start', { method: 'POST' });
+}
+
+export function fetchIncrementalGmailSyncStatus() {
+  return apiFetch('/ingest/gmail/sync-now/status');
 }
 
 export function fetchSchedulerStatus() {
@@ -397,10 +431,11 @@ export function fetchIngestionProgress() {
 }
 
 // Statement Upload - GLM multi-step flow
-export async function previewStatement(file, password = null) {
+export async function previewStatement(file, password = null, accountId = null) {
   const formData = new FormData();
   formData.append('file', file);
   if (password) formData.append('password', password);
+  if (accountId) formData.append('account_id', accountId);
 
   return apiFetch('/ingest/upload/preview', {
     method: 'POST',
@@ -426,10 +461,49 @@ export async function importStatement(file, accountId, options = {}) {
   if (accountId) formData.append('account_id', accountId);
   if (options.password) formData.append('password', options.password);
   formData.append('import_new', options.importNew !== false);
-  formData.append('update_matches', options.updateMatches || false);
   formData.append('detect_income', options.detectIncome !== false);
+  formData.append('confirm_reconciled', options.confirmReconciled === true);
+  if (options.acceptedFingerprint) {
+    formData.append('accepted_fingerprint', options.acceptedFingerprint);
+  }
 
   return apiFetch('/ingest/upload/import', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function inspectMappedSpreadsheet(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiFetch('/ingest/mapped/inspect', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function previewMappedSpreadsheet(file, accountId, mapping, dateFormat) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('account_id', accountId);
+  formData.append('mapping_json', JSON.stringify(mapping));
+  formData.append('date_format', dateFormat);
+  return apiFetch('/ingest/mapped/preview', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function importMappedSpreadsheet(file, accountId, mapping, dateFormat, reviewed) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('account_id', accountId);
+  formData.append('mapping_json', JSON.stringify(mapping));
+  formData.append('date_format', dateFormat);
+  formData.append('confirm_mapping', 'true');
+  formData.append('accepted_fingerprint', reviewed.source_fingerprint);
+  formData.append('accepted_mapping_fingerprint', reviewed.mapping_fingerprint);
+  return apiFetch('/ingest/mapped/import', {
     method: 'POST',
     body: formData,
   });
@@ -476,6 +550,53 @@ export function fetchIncomeStats(month) {
   return apiFetch(`/income/stats?month=${month}`);
 }
 
+export function fetchIncomeCoverage() {
+  return apiFetch('/income/coverage');
+}
+
+export function recordActualIncome(data) {
+  return apiFetch('/income/actual', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function previewActualIncomePeriod(data) {
+  return apiFetch('/income/actual/period/preview', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function confirmActualIncomePeriod(data) {
+  return apiFetch('/income/actual/period/confirm', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function scanIncomeMatches(sourceId) {
+  return apiFetch(`/income/${sourceId}/matches/scan`, { method: 'POST' });
+}
+
+export function fetchIncomeMatches(sourceId, status = 'pending') {
+  return apiFetch(`/income/${sourceId}/matches?status=${encodeURIComponent(status)}`);
+}
+
+export function confirmIncomeMatches(sourceId, suggestionIds, subcategory) {
+  return apiFetch(`/income/${sourceId}/matches/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ suggestion_ids: suggestionIds, subcategory }),
+  });
+}
+
+export function dismissIncomeMatches(sourceId, suggestionIds) {
+  return apiFetch(`/income/${sourceId}/matches/dismiss`, {
+    method: 'POST',
+    body: JSON.stringify({ suggestion_ids: suggestionIds }),
+  });
+}
+
 // Goals
 export function fetchGoals() {
   return apiFetch('/goals');
@@ -501,6 +622,40 @@ export function deleteGoal(id) {
 
 export function simulateGoal(id) {
   return apiFetch(`/goals/${id}/simulate`, { method: 'POST' });
+}
+
+export function fetchGoalContributions(id, includeVoided = false) {
+  return apiFetch(
+    `/goals/${id}/contributions?include_voided=${includeVoided}`
+  );
+}
+
+export function createGoalContribution(id, data) {
+  return apiFetch(`/goals/${id}/contributions`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function voidGoalContribution(goalId, contributionId, reason) {
+  return apiFetch(`/goals/${goalId}/contributions/${contributionId}/void`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function fetchGoalContributionSuggestions() {
+  return apiFetch('/goal-contribution-suggestions');
+}
+
+export function decideGoalContributionSuggestion(suggestionId, goalId) {
+  return apiFetch(
+    `/goal-contribution-suggestions/${suggestionId}/decision`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ goal_id: goalId || null }),
+    }
+  );
 }
 
 // Recurring
@@ -559,9 +714,18 @@ export function fetchReportDetailed(month) {
   return apiFetch(`/reports/detailed${qs}`);
 }
 
-export function fetchReportInsights(month) {
-  const qs = month ? `?month=${month}` : '';
-  return apiFetch(`/reports/insights${qs}`);
+export function updateReportSavingsTarget(targetPercent) {
+  return apiFetch('/reports/preferences/savings-target', {
+    method: 'PUT',
+    body: JSON.stringify({ target_percent: targetPercent }),
+  });
+}
+
+export function generateReportInsights(month) {
+  return apiFetch('/reports/ai/insights', {
+    method: 'POST',
+    body: JSON.stringify({ month: month || null, consent: true }),
+  });
 }
 
 export function fetchReportTransactions(params = {}) {
@@ -632,10 +796,24 @@ export function fetchSettingsHealth() {
   return apiFetch('/settings/health');
 }
 
-export function updateSetting(key, value) {
-  return apiFetch(`/settings/${key}`, {
+export function updateTimezone(timezone) {
+  return apiFetch('/settings/preferences/timezone', {
     method: 'PUT',
-    body: JSON.stringify({ value }),
+    body: JSON.stringify({ timezone }),
+  });
+}
+
+export function updateNetworkAccess(enabled, currentPin = null) {
+  return apiFetch('/settings/preferences/network-access', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled, current_pin: currentPin }),
+  });
+}
+
+export function updateDeveloperMode(enabled, currentPin = null) {
+  return apiFetch('/settings/preferences/developer-mode', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled, current_pin: currentPin }),
   });
 }
 
@@ -645,6 +823,13 @@ export function triggerBackup() {
 
 export function fetchBackups() {
   return apiFetch('/settings/backups');
+}
+
+export function prepareBackupRestore(filename, pin) {
+  return apiFetch(`/settings/backups/${encodeURIComponent(filename)}/prepare-restore`, {
+    method: 'POST',
+    body: JSON.stringify({ pin, confirmation: 'RESTORE' }),
+  });
 }
 
 export function fetchDeveloperMode() {
@@ -673,6 +858,10 @@ export function resetData(pin, createBackup = true) {
 // License
 export function fetchLicenseStatus() {
   return apiFetch('/license');
+}
+
+export function fetchLicenseNavigation() {
+  return apiFetch('/license/navigation');
 }
 
 export function activateLicense(licenseKey) {
@@ -709,6 +898,10 @@ export function deleteSubscription(id) {
   return apiFetch(`/subscriptions/${id}`, { method: 'DELETE' });
 }
 
+export function restoreSubscription(id) {
+  return apiFetch(`/subscriptions/${id}/restore`, { method: 'POST' });
+}
+
 export function fetchSubscriptionStats() {
   return apiFetch('/subscriptions/stats');
 }
@@ -717,8 +910,16 @@ export function fetchExchangeRates() {
   return apiFetch('/subscriptions/exchange-rates');
 }
 
+export function refreshExchangeRates() {
+  return apiFetch('/subscriptions/exchange-rates/refresh', { method: 'POST' });
+}
+
 export function scanSubscriptionSuggestions() {
   return apiFetch('/subscriptions/suggestions/scan', { method: 'POST' });
+}
+
+export function fetchRecurringCandidates() {
+  return apiFetch('/subscriptions/suggestions/candidates');
 }
 
 export function fetchSubscriptionSuggestions(includeResolved = false) {
@@ -769,16 +970,135 @@ export function fetchSystemStatus() {
   return apiFetch('/system/status');
 }
 
-export function restartBackend() {
-  return apiFetch('/system/restart', { method: 'POST' });
+export async function downloadSupportDiagnostics() {
+  const blob = await apiFetch('/system/diagnostics', { responseType: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'godfin-support-diagnostics.json';
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export function fetchEmbeddingStatus() {
   return apiFetch('/system/embeddings/status');
 }
 
-export function enableEmbeddings() {
-  return apiFetch('/system/embeddings/enable', { method: 'POST' });
+export function enableEmbeddings(currentPin) {
+  return apiFetch('/system/embeddings/enable', {
+    method: 'POST',
+    body: JSON.stringify({ current_pin: currentPin, confirmed: true }),
+  });
+}
+
+export function disableEmbeddings(currentPin) {
+  return apiFetch('/system/embeddings/disable', {
+    method: 'POST',
+    body: JSON.stringify({ current_pin: currentPin, confirmed: true }),
+  });
+}
+
+export function fetchFeatureFlags() {
+  return apiFetch('/system/feature-flags');
+}
+
+// Max net worth
+export function fetchNetWorth() {
+  return apiFetch('/net-worth');
+}
+
+export function createNetWorthItem(data) {
+  return apiFetch('/net-worth', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateNetWorthItem({ id, ...data }) {
+  return apiFetch(`/net-worth/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteNetWorthItem(id) {
+  return apiFetch(`/net-worth/${id}`, { method: 'DELETE' });
+}
+
+export function restoreNetWorthItem(id) {
+  return apiFetch(`/net-worth/${id}/restore`, { method: 'POST' });
+}
+
+export function refreshNetWorthQuote(id) {
+  return apiFetch(`/net-worth/${id}/refresh`, { method: 'POST' });
+}
+
+export function fetchMarketDataStatus() {
+  return apiFetch('/net-worth/market-data/config/status');
+}
+
+export function configureMarketData(data) {
+  return apiFetch('/net-worth/market-data/config', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+// Transparent behavior insights
+export function fetchBehaviorInsights() {
+  return apiFetch('/behavior-insights');
+}
+
+export function updateBehaviorConfig(monthlyBudget) {
+  return apiFetch('/behavior-insights/config', {
+    method: 'PUT',
+    body: JSON.stringify({ monthly_budget: monthlyBudget }),
+  });
+}
+
+export function updateBehaviorPreference(metricKey, data) {
+  return apiFetch(`/behavior-insights/${metricKey}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function resetBehaviorInsights() {
+  return apiFetch('/behavior-insights/reset', { method: 'POST' });
+}
+
+export function fetchSponsorCard() {
+  return apiFetch('/behavior-insights/sponsor/card');
+}
+
+export async function downloadBehaviorInsights() {
+  const blob = await apiFetch('/behavior-insights/export', { responseType: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'godfin-behavior-insights.csv';
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+// Separately consented compensated-data pilot
+export function fetchRewardPilotStatus() {
+  return apiFetch('/reward-pilot/status');
+}
+
+export function updateRewardPilotConsent(consented) {
+  return apiFetch('/reward-pilot/consent', {
+    method: 'PUT',
+    body: JSON.stringify({ consented }),
+  });
+}
+
+export function fetchRewardPilotPreview() {
+  return apiFetch('/reward-pilot/preview');
+}
+
+export function submitRewardPilotBundle() {
+  return apiFetch('/reward-pilot/submit', { method: 'POST' });
 }
 
 // CSV Export
@@ -795,7 +1115,16 @@ export async function downloadCSV(month) {
 
 export async function downloadMonthlyReportPDF(type, month) {
   const qs = month ? `?month=${month}` : '';
-  const blob = await apiFetch(`/reports/pdf/${type}${qs}`, { responseType: 'blob' });
+  const blob = await apiFetch(
+    type === 'detailed' ? '/reports/pdf/detailed' : `/reports/pdf/${type}${qs}`,
+    type === 'detailed'
+      ? {
+          method: 'POST',
+          body: JSON.stringify({ month: month || null, consent: true }),
+          responseType: 'blob',
+        }
+      : { responseType: 'blob' },
+  );
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -817,6 +1146,23 @@ export async function downloadFinancialYear(startYear, format = 'csv') {
   URL.revokeObjectURL(url);
 }
 
+export async function downloadFinancialYearPack(startYear, passphrase) {
+  const blob = await apiFetch(
+    '/reports/fy/pack',
+    {
+      method: 'POST',
+      body: JSON.stringify({ start_year: startYear, passphrase }),
+      responseType: 'blob',
+    },
+  );
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `godfin_ca_tax_pack_fy${startYear}-${String(startYear + 1).slice(-2)}.zip`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 // Onboarding
 export function fetchOnboardingStatus() {
   return apiFetch('/onboarding');
@@ -827,6 +1173,76 @@ export function updateOnboardingStatus(data) {
     method: 'PUT',
     body: JSON.stringify(data),
   });
+}
+
+// Guided local AI
+export function fetchLocalAIProfile() {
+  return apiFetch('/system/local-ai/profile');
+}
+
+export function chooseLocalAI(choice) {
+  return apiFetch('/system/local-ai/choice', {
+    method: 'PUT',
+    body: JSON.stringify({ choice }),
+  });
+}
+
+export function fetchLocalAIDownload() {
+  return apiFetch('/system/local-ai/download');
+}
+
+export function downloadLocalAIModel({ model, currentPin }) {
+  return apiFetch('/system/local-ai/download', {
+    method: 'POST',
+    body: JSON.stringify({ model, current_pin: currentPin, confirmed: true }),
+  });
+}
+
+export function cancelLocalAIDownload() {
+  return apiFetch('/system/local-ai/download/cancel', { method: 'POST' });
+}
+
+export function benchmarkLocalAI({ model, currentPin }) {
+  return apiFetch('/system/local-ai/benchmark', {
+    method: 'POST',
+    body: JSON.stringify({ model, current_pin: currentPin, confirmed: true }),
+  });
+}
+
+export function fetchClassificationMemory(limit = 100) {
+  return apiFetch(`/settings/classification-memory?limit=${limit}`);
+}
+
+export function undoClassificationCorrection(correctionId) {
+  return apiFetch(`/settings/classification-memory/${correctionId}/undo`, {
+    method: 'POST',
+  });
+}
+
+export function updatePersonalClassifier(enabled) {
+  return apiFetch('/settings/classification-memory/personal', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function resetClassificationMemory(pin) {
+  return apiFetch('/settings/classification-memory/reset', {
+    method: 'POST',
+    body: JSON.stringify({ pin }),
+  });
+}
+
+export async function downloadClassificationMemory() {
+  const blob = await apiFetch('/settings/classification-memory/export', {
+    responseType: 'blob',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'godfin-classification-memory.csv';
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export const authApi = {
@@ -880,7 +1296,8 @@ export const auditApi = {
 export const reportsApi = {
   summary: fetchReportSummary,
   detailed: fetchReportDetailed,
-  insights: fetchReportInsights,
+  updateSavingsTarget: updateReportSavingsTarget,
+  generateInsights: generateReportInsights,
   transactions: fetchReportTransactions,
   comparison: fetchMonthlyComparison,
   downloadCSV,
@@ -891,12 +1308,28 @@ export const reportsApi = {
 export const settingsApi = {
   get: fetchSettings,
   health: fetchSettingsHealth,
-  update: updateSetting,
+  updateTimezone,
+  updateNetworkAccess,
+  updateDeveloperMode,
   backup: triggerBackup,
   backups: fetchBackups,
   developer: fetchDeveloperMode,
   embeddingStatus: fetchEmbeddingStatus,
   enableEmbeddings,
+  classificationMemory: fetchClassificationMemory,
+  undoClassificationCorrection,
+  updatePersonalClassifier,
+  resetClassificationMemory,
+  downloadClassificationMemory,
+};
+
+export const localAIApi = {
+  profile: fetchLocalAIProfile,
+  choose: chooseLocalAI,
+  downloadStatus: fetchLocalAIDownload,
+  download: downloadLocalAIModel,
+  cancelDownload: cancelLocalAIDownload,
+  benchmark: benchmarkLocalAI,
 };
 
 export const licenseApi = {

@@ -1,7 +1,15 @@
 import { memo } from "react";
 import { motion } from "framer-motion";
 
-export const StatCard = memo(function StatCard({ title, value, subtitle, icon: Icon, color = "text-white", delay = 0 }) {
+export const StatCard = memo(function StatCard({
+  title,
+  value,
+  subtitle,
+  icon: Icon,
+  color = "text-white",
+  delay = 0,
+  calculationInfo,
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -13,10 +21,11 @@ export const StatCard = memo(function StatCard({ title, value, subtitle, icon: I
       <div className="absolute top-0 left-4 right-4 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent" />
       <div className="flex items-center gap-2.5 mb-2">
         <Icon size={16} className={color} />
-        <span className="text-white/40 text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 400 }}>{title}</span>
+        <span className="text-ink-muted text-[0.7rem] uppercase tracking-wider" style={{ fontWeight: 400 }}>{title}</span>
+        {calculationInfo}
       </div>
-      <p className="text-white/90 text-[1.4rem] tracking-tight" style={{ fontWeight: 300 }}>{value}</p>
-      {subtitle && <p className="text-white/30 text-[0.7rem] mt-0.5">{subtitle}</p>}
+      <p className="text-ink-primary text-[1.4rem] tracking-tight" style={{ fontWeight: 300 }}>{value}</p>
+      {subtitle && <p className="text-ink-muted text-[0.7rem] mt-0.5">{subtitle}</p>}
     </motion.div>
   );
 });

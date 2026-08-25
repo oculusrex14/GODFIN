@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { PurchaseButton } from "@/components/purchase-button";
-import type { ProductCode } from "@/lib/products";
+import { ENTITLEMENTS, releasedFamilies } from "@/lib/entitlements";
+import { commerceConfigured } from "@/lib/env";
+import { formattedLicensePrice } from "@/lib/regional-pricing";
 
 export const metadata: Metadata = {
   title: "Lifetime Pricing",
@@ -15,69 +17,55 @@ const plans = [
     name: "Core",
     price: "Free",
     suffix: "forever",
-    features: [
-      "One HDFC account",
-      "Manual statement upload",
-      "Local rules + fuzzy classification",
-      "Dashboard, budgets, and basic reports",
-      "CSV export",
-      "No account or telemetry required",
-    ],
+    features: releasedFamilies("free").map(
+      (code) => ENTITLEMENTS.families[code].label,
+    ),
   },
   {
     name: "Pro",
-    price: "₹4,999",
+    price: formattedLicensePrice("pro", "IN"),
+    globalPrice: formattedLicensePrice("pro", "US"),
     suffix: "one time",
     featured: true,
     features: [
-      "Everything in Core",
-      "Multi-account transfer matching",
-      "Verified bank parsers as they are released",
-      "AI classification and advanced reports",
-      "500 included AI credits each month",
-      "Optional encrypted backup and sync",
-      "Priority email support",
+      "Everything released in Core",
+      ...releasedFamilies("pro")
+        .filter((code) => !releasedFamilies("free").includes(code))
+        .map((code) => ENTITLEMENTS.families[code].label),
+      "Three active installations",
+      "Zero recurring hosted AI credits",
     ],
   },
   {
     name: "Max",
-    price: "₹9,999",
+    price: formattedLicensePrice("max", "IN"),
+    globalPrice: formattedLicensePrice("max", "US"),
     suffix: "one time",
     features: [
-      "Everything in Pro",
-      "2,500 included AI credits each month",
-      "Up to five family profiles",
-      "White-label reports",
-      "Local REST API access",
-      "Early parser access",
+      "Everything released in Pro",
+      ...releasedFamilies("max")
+        .filter((code) => !releasedFamilies("pro").includes(code))
+        .map((code) => ENTITLEMENTS.families[code].label),
+      "Three active installations",
+      "Zero recurring hosted AI credits",
     ],
   },
 ];
 
-const creditPacks: Array<{
-  name: string;
-  price: string;
-  credits: string;
-  product: ProductCode;
-}> = [
-  { name: "Starter", price: "₹249", credits: "500", product: "credits_starter" },
-  { name: "Regular", price: "₹499", credits: "1,200", product: "credits_regular" },
-  { name: "Power", price: "₹999", credits: "3,000", product: "credits_power" },
-];
-
 export default function PricingPage() {
+  const checkoutEnabled = commerceConfigured();
   return (
     <>
       <section className="page-hero">
         <div className="shell">
-          <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
+          <div className="eyebrow eyebrow-accent">
             No software subscriptions
           </div>
           <h1>Own the app. Add AI only when it helps.</h1>
           <p>
-            Core stays free. Pro and Max are lifetime desktop licenses. Optional
-            credit packs are one-time purchases, and your own AI key bypasses
-            GODFIN credits entirely.
+            Core stays free. Pro and Max are lifetime desktop licenses. Private
+            local AI and your own supported provider key are optional and are
+            never bundled into the license price.
           </p>
         </div>
       </section>
@@ -96,6 +84,12 @@ export default function PricingPage() {
                 <div className="price">
                   {plan.price} <small>{plan.suffix}</small>
                 </div>
+                {"globalPrice" in plan ? (
+                  <p className="regional-anchor">
+                    {plan.globalPrice} US anchor · regional checkout uses a
+                    manually reviewed PPP table
+                  </p>
+                ) : null}
                 <ul className="check-list">
                   {plan.features.map((feature) => (
                     <li key={feature}>
@@ -106,12 +100,13 @@ export default function PricingPage() {
                 </ul>
                 {plan.name === "Core" ? (
                   <Link className="button-secondary" href="/download">
-                    Download free
+                    Check availability
                   </Link>
                 ) : (
                   <PurchaseButton
                     product={plan.name === "Pro" ? "pro" : "max"}
                     secondary={plan.name === "Max"}
+                    enabled={checkoutEnabled}
                   >
                     Get {plan.name} — {plan.price}
                   </PurchaseButton>
@@ -125,33 +120,20 @@ export default function PricingPage() {
       <section className="section section-soft">
         <div className="shell">
           <div className="section-head">
-            <div className="eyebrow" style={{ color: "var(--teal-dark)" }}>
-              Optional top-ups
+            <div className="eyebrow eyebrow-accent">
+              Optional AI
             </div>
-            <h2>AI credit packs</h2>
+            <h2>Use AI without a GODFIN subscription.</h2>
             <p>
-              Credits cover hosted AI operations. Local rules, fuzzy matching,
-              and your own provider key keep working without them.
+              GODFIN does not currently sell hosted AI credits. You can run a
+              supported model privately on your computer, connect your own
+              provider key, or continue without AI.
             </p>
           </div>
-          <div className="credit-grid">
-            {creditPacks.map(({ name, price, credits, product }) => (
-              <article className="credit-card" key={name}>
-                <h3>{name}</h3>
-                <strong>{credits} credits</strong>
-                <p className="lead" style={{ fontSize: 14 }}>
-                  {price} · one time
-                </p>
-                <PurchaseButton product={product}>
-                  Buy {name}
-                </PurchaseButton>
-              </article>
-            ))}
-          </div>
           <div className="callout">
-            AI credits are not a subscription. Included monthly allowances
-            refresh by license tier; purchased top-ups remain available until
-            used.
+            AI never determines authoritative totals. Imports, classification
+            rules, budgets, calculations, and deterministic reports remain
+            available without an LLM.
           </div>
         </div>
       </section>

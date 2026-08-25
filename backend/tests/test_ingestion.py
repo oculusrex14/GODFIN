@@ -1,6 +1,23 @@
 from __future__ import annotations
 
-from app.core.ingestion import run_ingestion
+from datetime import date
+
+from sqlalchemy.exc import IntegrityError
+
+from app.core.gmail_service import GmailFetchResult, GmailOAuthStateError
+from app.core.ingestion import (
+    IngestionResult,
+    _record_successful_coverage,
+    gmail_coverage_summary,
+    _process_message_with_savepoint,
+    run_ingestion,
+    run_ingestion_with_dates,
+    run_initial_sync,
+)
+from app.models.app_setting import AppSetting
+from app.models.audit_session import AuditSession
+from app.models.transaction import Transaction
+from tests.license_helpers import install_test_license
 from tests.fixtures.mock_emails import (
     ALL_MOCK_EMAILS,
     MOCK_BLACKLISTED_EMAIL,
@@ -17,6 +34,144 @@ def test_ingestion_creates_transactions(db_session):
     result = run_ingestion(db_session, mock_messages=messages)
     assert result.created == 2
     assert result.processed == 2
+
+
+def test_ingestion_uses_explicit_account_digits_when_sender_hint_is_wrong(
+    db_session,
+):
+    message = {
+        "id": "sender-hint-mismatch-1",
+        "sender": "HDFC Alerts <alerts@hdfcbank.bank.in>",
+        "subject": "Transaction alert",
+        "body": (
+            "Dear Customer, Rs.350.00 has been debited from account 0000 to "
+            "VPA cafe@ybl Synthetic Cafe on 10-02-26. Your UPI transaction "
+            "reference number is 504123456789."
+        ),
+    }
+
+    result = run_ingestion(db_session, mock_messages=[message])
+
+    assert result.created == 1
+    transaction = (
+        db_session.query(Transaction)
+        .filter_by(email_message_id=message["id"])
+        .one()
+    )
+    assert transaction.account.last_4_digits == "0000"
+    assert transaction.instrument == "upi"
+
+
+def test_ingestion_reports_and_retries_finalized_period_messages(
+    db_session,
+):
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=2,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+
+    result = run_ingestion(
+        db_session,
+        mock_messages=[MOCK_UPI_DEBIT_EMAIL],
+    )
+
+    assert result.created == 0
+    assert result.skipped_finalized_period == 1
+    assert result.source_status == "partial"
+    assert result.retryable is True
+    assert (
+        db_session.query(Transaction)
+        .filter_by(email_message_id=MOCK_UPI_DEBIT_EMAIL["id"])
+        .first()
+        is None
+    )
+    assert result.to_dict()["skipped_finalized_period"] == 1
+
+
+def test_finalized_period_does_not_advance_gmail_cursor(
+    db_session,
+    monkeypatch,
+):
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=2,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+    existing_history = (
+        db_session.query(AppSetting)
+        .filter_by(key="last_gmail_history_id")
+        .first()
+    )
+    history_before = existing_history.value if existing_history else None
+    existing_last_run = (
+        db_session.query(AppSetting)
+        .filter_by(key="last_ingestion_run")
+        .first()
+    )
+    last_run_before = existing_last_run.value if existing_last_run else None
+    monkeypatch.setattr(
+        "app.core.ingestion.fetch_messages",
+        lambda **kwargs: GmailFetchResult(
+            messages=[MOCK_UPI_DEBIT_EMAIL],
+            history_id="history-after-blocked-message",
+        ),
+    )
+
+    result = run_ingestion(db_session)
+
+    assert result.source_status == "partial"
+    assert result.retryable is True
+    history_after = (
+        db_session.query(AppSetting)
+        .filter_by(key="last_gmail_history_id")
+        .first()
+    )
+    last_run_after = (
+        db_session.query(AppSetting)
+        .filter_by(key="last_ingestion_run")
+        .first()
+    )
+    assert (history_after.value if history_after else None) == history_before
+    assert (last_run_after.value if last_run_after else None) == last_run_before
+
+
+def test_initial_sync_remains_incomplete_when_finalized_rows_are_held(
+    db_session,
+    monkeypatch,
+):
+    db_session.add(
+        AuditSession(
+            period_year=2026,
+            period_month=2,
+            status="finalized",
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.core.ingestion.fetch_messages",
+        lambda **kwargs: GmailFetchResult(
+            messages=[MOCK_UPI_DEBIT_EMAIL],
+            history_id="history-after-blocked-message",
+        ),
+    )
+
+    result = run_initial_sync(db_session)
+
+    assert result.source_status == "partial"
+    assert (
+        db_session.query(AppSetting)
+        .filter_by(key="initial_sync_completed")
+        .one()
+        .value
+        == "false"
+    )
 
 
 def test_ingestion_skips_blacklisted(db_session):
@@ -48,6 +203,67 @@ def test_ingestion_dedup_by_message_id(db_session):
     result2 = run_ingestion(db_session, mock_messages=messages)
     assert result2.created == 0
     assert result2.skipped_duplicate == 1
+
+
+def test_concurrent_gmail_identity_conflict_is_a_safe_duplicate(
+    db_session,
+    monkeypatch,
+):
+    def reject_duplicate(*_args, **_kwargs):
+        raise IntegrityError(
+            "INSERT INTO transactions",
+            {},
+            Exception(
+                "UNIQUE constraint failed: transactions.email_message_id"
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.core.ingestion._process_message",
+        reject_duplicate,
+    )
+    result = IngestionResult()
+
+    _process_message_with_savepoint(
+        db_session,
+        {"id": "concurrent-message"},
+        result,
+    )
+
+    assert result.processed == 1
+    assert result.skipped_duplicate == 1
+    assert result.errors == 0
+    assert result.error_details == []
+
+
+def test_unrelated_gmail_integrity_error_remains_an_error(
+    db_session,
+    monkeypatch,
+):
+    def reject_invalid_row(*_args, **_kwargs):
+        raise IntegrityError(
+            "INSERT INTO transactions",
+            {},
+            Exception("CHECK constraint failed: ck_transaction_amount"),
+        )
+
+    monkeypatch.setattr(
+        "app.core.ingestion._process_message",
+        reject_invalid_row,
+    )
+    result = IngestionResult()
+
+    _process_message_with_savepoint(
+        db_session,
+        {"id": "invalid-message"},
+        result,
+    )
+
+    assert result.processed == 1
+    assert result.skipped_duplicate == 0
+    assert result.errors == 1
+    assert result.error_details == ["A transaction failed local validation."]
+    assert result.skip_reasons == {"database_validation": 1}
 
 
 def test_ingestion_all_mock_emails(db_session):
@@ -101,8 +317,9 @@ def test_ingestion_cc_stores_correct_fields(db_session):
     assert txn.source == 'gmail'
 
 
-def test_ingestion_api_trigger(auth_client):
+def test_ingestion_api_trigger(auth_client, db_session):
     """Test the ingest endpoint returns error when Gmail not connected."""
+    install_test_license(db_session, "pro")
     # Ensure Gmail is disconnected first
     auth_client.post("/api/v1/auth/gmail/disconnect")
     resp = auth_client.post("/api/v1/ingest/gmail")
@@ -116,3 +333,389 @@ def test_ingestion_status_api(auth_client):
     data = resp.json()
     assert "gmail_connected" in data
     assert "last_run" in data
+
+
+def test_gmail_setup_error_is_safe_and_nontechnical(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    install_test_license(db_session, "pro")
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.client_config_available",
+        lambda: False,
+    )
+    response = auth_client.get("/api/v1/auth/gmail/url")
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "not configured" in detail
+    assert "client_secret" not in detail
+    assert "data/" not in detail
+
+
+def _source_transaction(db_session, *, source: str, suffix: str):
+    from app.models.account import Account
+    from app.models.transaction import Transaction
+
+    account = db_session.query(Account).first()
+    transaction = Transaction(
+        id=f"txn-{source}-{suffix}",
+        date=date(2026, 1, 10),
+        raw_text=f"Synthetic {source} transaction {suffix}",
+        merchant_raw="SYNTHETIC MERCHANT",
+        merchant_normalized="SYNTHETIC MERCHANT",
+        amount=100,
+        type="debit",
+        instrument="upi",
+        account_id=account.id,
+        source=source,
+    )
+    db_session.add(transaction)
+    db_session.commit()
+    return transaction
+
+
+def test_gmail_disconnect_without_deletion_needs_no_pin(auth_client, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: True,
+    )
+    response = auth_client.post("/api/v1/auth/gmail/disconnect", json={})
+    assert response.status_code == 200
+    assert response.json()["deleted_transactions"] == 0
+
+
+def test_gmail_data_deletion_requires_current_pin_and_exact_confirmation(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    gmail_transaction = _source_transaction(db_session, source="gmail", suffix="1")
+    statement_transaction = _source_transaction(
+        db_session, source="statement", suffix="1"
+    )
+    gmail_transaction_id = gmail_transaction.id
+    statement_transaction_id = statement_transaction.id
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.create_backup",
+        lambda db_path, backup_dir: "godfin_backup_test.db",
+    )
+
+    wrong_pin = auth_client.post(
+        "/api/v1/auth/gmail/disconnect",
+        json={
+            "clear_data": True,
+            "pin": "9999",
+            "confirmation": "DELETE GMAIL DATA",
+        },
+    )
+    assert wrong_pin.status_code == 403
+
+    wrong_confirmation = auth_client.post(
+        "/api/v1/auth/gmail/disconnect",
+        json={
+            "clear_data": True,
+            "pin": "4826",
+            "confirmation": "delete",
+        },
+    )
+    assert wrong_confirmation.status_code == 400
+
+    accepted = auth_client.post(
+        "/api/v1/auth/gmail/disconnect",
+        json={
+            "clear_data": True,
+            "pin": "4826",
+            "confirmation": "DELETE GMAIL DATA",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["deleted_transactions"] == 1
+    assert accepted.json()["backup_filename"] == "godfin_backup_test.db"
+
+    from app.models.transaction import Transaction
+    db_session.expire_all()
+    assert db_session.query(Transaction).filter_by(id=gmail_transaction_id).first() is None
+    assert db_session.query(Transaction).filter_by(id=statement_transaction_id).first() is not None
+
+
+def test_gmail_data_deletion_stops_when_safety_backup_fails(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    gmail_transaction = _source_transaction(db_session, source="gmail", suffix="backup")
+    transaction_id = gmail_transaction.id
+    disconnect_calls = []
+
+    def fail_backup(*_args, **_kwargs):
+        raise RuntimeError("synthetic backup failure")
+
+    monkeypatch.setattr("app.api.v1.endpoints.gmail.create_backup", fail_backup)
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: disconnect_calls.append(True) or True,
+    )
+
+    response = auth_client.post(
+        "/api/v1/auth/gmail/disconnect",
+        json={
+            "clear_data": True,
+            "pin": "4826",
+            "confirmation": "DELETE GMAIL DATA",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "not deleted" in response.json()["detail"].lower()
+    db_session.expire_all()
+    assert db_session.query(Transaction).filter_by(id=transaction_id).one_or_none()
+    assert disconnect_calls == []
+
+
+def test_gmail_data_clear_records_partial_state_and_retries_without_redeleting(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    from app.models.app_setting import AppSetting
+    from app.models.transaction import Transaction
+
+    transaction = _source_transaction(
+        db_session,
+        source="gmail",
+        suffix="disconnect-retry",
+    )
+    transaction_id = transaction.id
+    backup_calls = []
+    disconnect_results = iter((False, True))
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.create_backup",
+        lambda *_args: backup_calls.append(True) or "godfin_backup_retry.db",
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: next(disconnect_results),
+    )
+
+    payload = {
+        "clear_data": True,
+        "pin": "4826",
+        "confirmation": "DELETE GMAIL DATA",
+    }
+    first = auth_client.post("/api/v1/auth/gmail/disconnect", json=payload)
+
+    assert first.status_code == 503
+    assert first.json()["code"] == "GMAIL_DATA_CLEARED_CREDENTIALS_PENDING"
+    db_session.expire_all()
+    assert db_session.query(Transaction).filter_by(id=transaction_id).one_or_none() is None
+    assert (
+        db_session.query(AppSetting)
+        .filter_by(key="gmail_disconnect_operation_state")
+        .one()
+        .value
+        == "data_cleared_credentials_pending"
+    )
+
+    retry = auth_client.post("/api/v1/auth/gmail/disconnect", json=payload)
+
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["operation_state"] == "completed"
+    assert retry.json()["deleted_transactions"] == 1
+    assert retry.json()["backup_filename"] == "godfin_backup_retry.db"
+    assert backup_calls == [True]
+    db_session.expire_all()
+    assert (
+        db_session.query(AppSetting)
+        .filter_by(key="gmail_disconnect_operation_state")
+        .one()
+        .value
+        == "completed"
+    )
+
+
+def test_gmail_disconnect_reports_unconfirmed_remote_revocation(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    from app.core.gmail_service import GmailDisconnectOutcome
+    from app.models.app_setting import AppSetting
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.disconnect",
+        lambda: GmailDisconnectOutcome(
+            local_credentials_removed=True,
+            remote_revocation_status="unconfirmed",
+            safe_reason_code="remote_revocation_unconfirmed",
+        ),
+    )
+
+    response = auth_client.post("/api/v1/auth/gmail/disconnect", json={})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["credentials_removed"] is True
+    assert response.json()["remote_revocation_pending"] is True
+    assert response.json()["operation_state"] == (
+        "completed_remote_revocation_unconfirmed"
+    )
+    assert "could not confirm remote permission revocation" in response.json()[
+        "message"
+    ]
+    db_session.expire_all()
+    assert (
+        db_session.query(AppSetting)
+        .filter_by(key="gmail_disconnect_operation_state")
+        .one()
+        .value
+        == "completed_remote_revocation_unconfirmed"
+    )
+
+
+def test_gmail_callback_explains_single_use_state_recovery(
+    auth_client,
+    monkeypatch,
+):
+    def reject_replayed_attempt(*_args, **_kwargs):
+        raise GmailOAuthStateError(
+            "This Gmail approval was already used.",
+            code="replayed_state",
+        )
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.gmail.gmail_service.complete_auth",
+        reject_replayed_attempt,
+    )
+
+    response = auth_client.get(
+        "/api/v1/auth/gmail/callback"
+        "?code=provider-code&state=one-time-state-is-long-enough",
+    )
+
+    assert response.status_code == 400
+    assert "text/html" in response.headers["content-type"]
+    assert "approval link cannot be used" in response.text
+    assert "work once" in response.text
+    assert "Connect Gmail" in response.text
+
+
+def test_retired_manual_oauth_endpoint_is_absent(auth_client):
+    response = auth_client.post(
+        "/api/v1/auth/gmail/manual-code",
+        json={"code": "never-used"},
+    )
+    assert response.status_code == 404
+
+
+def test_ingestion_status_rejects_legacy_python_repr(auth_client, db_session):
+    for key, value in (
+        ("ingest_now_status", "completed"),
+        ("ingest_now_result", "{'created': 1}"),
+    ):
+        setting = db_session.query(AppSetting).filter_by(key=key).first()
+        if setting is None:
+            db_session.add(AppSetting(key=key, value=value))
+        else:
+            setting.value = value
+    db_session.commit()
+
+    response = auth_client.get("/api/v1/ingest/gmail/range/status")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert response.json()["result"] is None
+
+
+def test_gmail_coverage_exposes_a_missing_month(db_session):
+    _record_successful_coverage(
+        db_session,
+        date(2026, 1, 1),
+        date(2026, 6, 30),
+    )
+    _record_successful_coverage(
+        db_session,
+        date(2026, 8, 1),
+        date(2026, 8, 31),
+    )
+    db_session.commit()
+
+    coverage = gmail_coverage_summary(db_session, through=date(2026, 8, 31))
+
+    assert coverage["missing_ranges"] == [
+        {"start": "2026-07-01", "end": "2026-07-31"}
+    ]
+    assert coverage["last_successful_coverage_end"] == "2026-08-31"
+    assert coverage["next_sync_start"] == "2026-08-31"
+
+
+def test_exact_july_august_backfill_is_queried_and_idempotent(
+    db_session,
+    monkeypatch,
+):
+    calls = []
+
+    def fetched(**options):
+        calls.append(options)
+        return GmailFetchResult(
+            messages=[MOCK_UPI_DEBIT_EMAIL],
+            history_id=None,
+            status="complete",
+        )
+
+    monkeypatch.setattr("app.core.ingestion.fetch_messages", fetched)
+
+    first = run_ingestion_with_dates(
+        db_session,
+        after_date="2026-07-01",
+        before_date="2026-09-01",
+    )
+    second = run_ingestion_with_dates(
+        db_session,
+        after_date="2026-07-01",
+        before_date="2026-09-01",
+    )
+
+    assert [
+        (call["after_date"], call["before_date"])
+        for call in calls
+    ] == [
+        ("2026-07-01", "2026-09-01"),
+        ("2026-07-01", "2026-09-01"),
+    ]
+    assert first.created == 1
+    assert second.created == 0
+    assert second.skipped_duplicate == 1
+    assert first.requested_start == "2026-07-01"
+    assert first.requested_end == "2026-08-31"
+    assert first.coverage_advanced is True
+
+
+def test_partial_date_range_does_not_claim_coverage(db_session, monkeypatch):
+    monkeypatch.setattr(
+        "app.core.ingestion.fetch_messages",
+        lambda **_options: GmailFetchResult(
+            messages=[],
+            history_id=None,
+            status="partial",
+            errors=("Gmail stopped before every page was read.",),
+            retryable=True,
+        ),
+    )
+
+    result = run_ingestion_with_dates(
+        db_session,
+        after_date="2026-07-01",
+        before_date="2026-09-01",
+    )
+
+    assert result.source_status == "partial"
+    assert result.coverage_advanced is False
+    coverage = gmail_coverage_summary(db_session, through=date(2026, 8, 31))
+    assert coverage["coverage_ranges"] == []
+    assert coverage["missing_ranges"] == [
+        {"start": "2026-01-01", "end": "2026-08-31"}
+    ]

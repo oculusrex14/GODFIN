@@ -1,0 +1,253 @@
+{
+  "schema_version": 2,
+  "updated_at": "2026-08-24",
+  "license_model": "lifetime",
+  "included_hosted_ai_credits": 0,
+  "navigation": {
+    "/transfers": {
+      "feature": "multiple_accounts",
+      "required_tier": "pro",
+      "label": "Transfers",
+      "explanation": "Match transfers across more than one account with GODFIN Pro."
+    },
+    "/net-worth": {
+      "feature": "net_worth",
+      "required_tier": "max",
+      "label": "Net Worth",
+      "explanation": "Track assets, liabilities, and valuation freshness with GODFIN Max."
+    },
+    "/behavior-insights": {
+      "feature": "behavior_insights",
+      "required_tier": "max",
+      "label": "Behavior Insights",
+      "explanation": "Explore explainable money-behavior patterns with GODFIN Max."
+    },
+    "/advisor": {
+      "feature": "ai_advisor",
+      "required_tier": "max",
+      "label": "Advisor",
+      "explanation": "Ask an optional verified AI to explain local calculations with GODFIN Max."
+    }
+  },
+  "tiers": {
+    "free": {
+      "name": "GODFIN Core",
+      "activation_limit": 0,
+      "price": {
+        "IN": { "currency": "inr", "amount_minor": 0 },
+        "US": { "currency": "usd", "amount_minor": 0 }
+      },
+      "released_families": [
+        "local_privacy_security", "transaction_management", "baseline_import",
+        "classification_memory", "dashboard_categories", "cash_flow_calendar",
+        "budgeting", "goal_tracking", "income_tracking", "recurring_basics",
+        "basic_reporting", "ownership_recovery"
+      ],
+      "released_features": [
+        "local_sqlite", "manual_transactions", "manual_import",
+        "deterministic_classification", "dashboard", "cash_flow", "budgets",
+        "goal_contribution_ledger", "income_sources", "recurring_detection",
+        "basic_reports", "data_recovery_export", "csv_export"
+      ]
+    },
+    "pro": {
+      "name": "GODFIN Pro",
+      "activation_limit": 3,
+      "price": {
+        "IN": { "currency": "inr", "amount_minor": 499900 },
+        "US": { "currency": "usd", "amount_minor": 9900 }
+      },
+      "released_families": [
+        "local_privacy_security", "transaction_management", "baseline_import",
+        "classification_memory", "dashboard_categories", "cash_flow_calendar",
+        "budgeting", "goal_tracking", "income_tracking", "recurring_basics",
+        "basic_reporting", "ownership_recovery", "account_import_automation",
+        "gmail_automation", "advanced_insights"
+      ],
+      "released_features": [
+        "local_sqlite", "manual_transactions", "manual_import",
+        "deterministic_classification", "dashboard", "cash_flow", "budgets",
+        "goal_contribution_ledger", "income_sources", "recurring_detection",
+        "basic_reports", "data_recovery_export", "csv_export",
+        "multiple_accounts", "batch_statement_import", "generic_mapped_import",
+        "gmail_sync", "advanced_reports", "advanced_recurring", "reference_fx",
+        "fd_rd_goal_detection"
+      ]
+    },
+    "max": {
+      "name": "GODFIN Max",
+      "activation_limit": 3,
+      "price": {
+        "IN": { "currency": "inr", "amount_minor": 999900 },
+        "US": { "currency": "usd", "amount_minor": 19900 }
+      },
+      "released_families": [
+        "local_privacy_security", "transaction_management", "baseline_import",
+        "classification_memory", "dashboard_categories", "cash_flow_calendar",
+        "budgeting", "goal_tracking", "income_tracking", "recurring_basics",
+        "basic_reporting", "ownership_recovery", "account_import_automation",
+        "gmail_automation", "advanced_insights", "ai_assistance_suite",
+        "personal_classifier_suite", "net_worth_suite", "behavior_insight_suite",
+        "tax_pack_suite"
+      ],
+      "released_features": [
+        "local_sqlite", "manual_transactions", "manual_import",
+        "deterministic_classification", "dashboard", "cash_flow", "budgets",
+        "goal_contribution_ledger", "income_sources", "recurring_detection",
+        "basic_reports", "data_recovery_export", "csv_export",
+        "multiple_accounts", "batch_statement_import", "generic_mapped_import",
+        "gmail_sync", "advanced_reports", "advanced_recurring", "reference_fx",
+        "fd_rd_goal_detection", "ai_classification", "ai_advisor",
+        "personal_classifier", "net_worth", "behavior_insights", "ca_tax_pack"
+      ]
+    }
+  },
+  "families": {
+    "local_privacy_security": {
+      "status": "released", "label": "Local privacy and security",
+      "description": "Financial data stays in the protected local app database.",
+      "grants": ["local_sqlite"]
+    },
+    "transaction_management": {
+      "status": "released", "label": "Transaction tracking and review",
+      "description": "Add, edit, delete, search, and review ordinary transactions locally.",
+      "grants": ["manual_transactions"]
+    },
+    "baseline_import": {
+      "status": "released", "label": "Baseline statement import",
+      "description": "Import the statement profiles explicitly certified in this app build.",
+      "grants": ["manual_import"]
+    },
+    "classification_memory": {
+      "status": "released", "label": "Rules and merchant memory",
+      "description": "Confirmed corrections and deterministic classification stay on this computer.",
+      "grants": ["deterministic_classification"]
+    },
+    "dashboard_categories": {
+      "status": "released", "label": "Dashboard and categories",
+      "description": "Understand income, spending, and category totals from local calculations.",
+      "grants": ["dashboard"]
+    },
+    "cash_flow_calendar": {
+      "status": "released", "label": "Cash-flow calendar",
+      "description": "See verified money in and money out across time.",
+      "grants": ["cash_flow"]
+    },
+    "budgeting": {
+      "status": "released", "label": "Budgets",
+      "description": "Set category budgets and understand budget pressure.",
+      "grants": ["budgets"]
+    },
+    "goal_tracking": {
+      "status": "released", "label": "Goals and savings updates",
+      "description": "Track opening savings, deposits, withdrawals, and voided entries with history.",
+      "grants": ["goal_contribution_ledger"]
+    },
+    "income_tracking": {
+      "status": "released", "label": "Income sources and reviewed history",
+      "description": "Track dated income sources and confirm suggested past income without guessing.",
+      "grants": ["income_sources"]
+    },
+    "recurring_basics": {
+      "status": "released", "label": "Basic recurring-payment review",
+      "description": "Review recurring patterns and manage subscriptions locally.",
+      "grants": ["recurring_detection"]
+    },
+    "basic_reporting": {
+      "status": "released", "label": "Basic local reports",
+      "description": "Generate core reports from verified local calculations.",
+      "grants": ["basic_reports"]
+    },
+    "ownership_recovery": {
+      "status": "released", "label": "Backup, restore, and core export",
+      "description": "Keep ownership of core data and safety controls on every plan.",
+      "grants": ["data_recovery_export", "csv_export"]
+    },
+    "account_import_automation": {
+      "status": "released", "label": "Multiple accounts and guided batch import",
+      "description": "Track multiple accounts, queue files, and map CSV/XLSX columns with review.",
+      "grants": ["multiple_accounts", "batch_statement_import", "generic_mapped_import"]
+    },
+    "gmail_automation": {
+      "status": "released", "label": "Gmail transaction automation",
+      "description": "Connect Gmail read-only and import supported financial alerts automatically.",
+      "grants": ["gmail_sync"]
+    },
+    "advanced_insights": {
+      "status": "released", "label": "Advanced reports, recurring tools, and reference FX",
+      "description": "Use advanced reports, richer recurring review, reference exchange rates, and reviewed FD/RD goal suggestions.",
+      "grants": ["advanced_reports", "advanced_recurring", "reference_fx", "fd_rd_goal_detection"]
+    },
+    "ai_assistance_suite": {
+      "status": "released", "label": "Optional verified AI assistance",
+      "description": "Use a validated local model or your own provider key for classification help and explanations.",
+      "grants": ["ai_classification", "ai_advisor"]
+    },
+    "personal_classifier_suite": {
+      "status": "released", "label": "Private personal classifier",
+      "description": "Enable a private classifier after enough confirmed corrections exist.",
+      "grants": ["personal_classifier"]
+    },
+    "net_worth_suite": {
+      "status": "released", "label": "Net-worth tracking",
+      "description": "Track local assets, liabilities, quote history, freshness, and provenance.",
+      "grants": ["net_worth"]
+    },
+    "behavior_insight_suite": {
+      "status": "released", "label": "Financial behavior insights",
+      "description": "Use evidence-based, explainable money-behavior insights and reflection prompts.",
+      "grants": ["behavior_insights"]
+    },
+    "tax_pack_suite": {
+      "status": "released", "label": "CA and Indian tax review pack",
+      "description": "Export a review-oriented ZIP with XLSX, CSV, reconciliation data, hashes, and a filing guide.",
+      "grants": ["ca_tax_pack"]
+    }
+  },
+  "features": {
+    "local_sqlite": { "status": "released", "label": "Local data storage", "description": "Ordinary application data stays on this device." },
+    "manual_transactions": { "status": "released", "label": "Transaction management", "description": "Manage ordinary transactions locally." },
+    "manual_import": { "status": "released", "label": "Certified statement import", "description": "Import formats certified in this app build." },
+    "deterministic_classification": { "status": "released", "label": "Rules and merchant memory", "description": "Use explainable local classification layers." },
+    "dashboard": { "status": "released", "label": "Dashboard", "description": "View verified local summaries." },
+    "cash_flow": { "status": "released", "label": "Cash flow", "description": "Review money movement over time." },
+    "budgets": { "status": "released", "label": "Budgets", "description": "Plan category spending." },
+    "goal_contribution_ledger": { "status": "released", "label": "Goal contributions", "description": "Keep auditable savings updates." },
+    "income_sources": { "status": "released", "label": "Income sources", "description": "Track dated income sources and reviewed matches." },
+    "recurring_detection": { "status": "released", "label": "Recurring detection", "description": "Review conservative recurring patterns." },
+    "basic_reports": { "status": "released", "label": "Basic reports", "description": "Generate core local reports." },
+    "data_recovery_export": { "status": "released", "label": "Backup and restore", "description": "Protect and recover local data." },
+    "csv_export": { "status": "released", "label": "Core data export", "description": "Export transaction data without a paid license." },
+    "multiple_accounts": { "status": "released", "label": "Multiple accounts", "description": "Track more than the baseline account." },
+    "batch_statement_import": { "status": "released", "label": "Batch statement queue", "description": "Review and import multiple statement files in one session." },
+    "generic_mapped_import": { "status": "released", "label": "Guided CSV/XLSX mapping", "description": "Map unfamiliar spreadsheet columns with a safe preview." },
+    "gmail_sync": { "status": "released", "label": "Gmail sync", "description": "Import supported alerts through read-only Gmail permission." },
+    "advanced_recurring": { "status": "released", "label": "Advanced recurring tools", "description": "Use richer recurring diagnostics and review tools." },
+    "reference_fx": { "status": "released", "label": "Reference FX", "description": "View verified USD, EUR, and GBP reference rates to INR." },
+    "advanced_reports": { "status": "released", "label": "Advanced reports", "description": "Use advanced locally calculated reports and explanations." },
+    "fd_rd_goal_detection": { "status": "released", "label": "FD/RD goal review", "description": "Review deposit debits before assigning them to goals." },
+    "ai_classification": { "status": "released", "label": "AI classification help", "description": "Use a verified optional model for classification suggestions." },
+    "ai_advisor": { "status": "released", "label": "AI explanations", "description": "Ask a verified optional model to explain local calculations." },
+    "personal_classifier": { "status": "released", "label": "Personal classifier", "description": "Use a private classifier after sufficient corrections." },
+    "net_worth": { "status": "released", "label": "Net worth", "description": "Track local assets, liabilities, and valuation freshness." },
+    "behavior_insights": { "status": "released", "label": "Behavior insights", "description": "Review explainable financial behavior patterns." },
+    "ca_tax_pack": { "status": "released", "label": "CA tax pack", "description": "Export an Indian tax-review package without claiming filing readiness." }
+  },
+  "legacy_feature_sets": {
+    "1": {
+      "pro": [
+        "local_sqlite", "manual_import", "deterministic_classification",
+        "dashboard_budgets", "goal_contribution_ledger", "recurring_detection",
+        "basic_reports", "csv_export", "multi_bank", "ai_classification",
+        "advanced_reports", "ca_tax_pack", "fd_rd_goal_detection"
+      ],
+      "max": [
+        "local_sqlite", "manual_import", "deterministic_classification",
+        "dashboard_budgets", "goal_contribution_ledger", "recurring_detection",
+        "basic_reports", "csv_export", "multi_bank", "ai_classification",
+        "advanced_reports", "ca_tax_pack", "fd_rd_goal_detection",
+        "personal_classifier", "net_worth", "behavior_insights"
+      ]
+    }
+  }
+}

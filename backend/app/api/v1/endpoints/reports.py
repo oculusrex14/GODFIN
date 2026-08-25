@@ -2,26 +2,259 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
+from app.core.csv_security import spreadsheet_safe_mapping, spreadsheet_safe_row
 from app.core.database import get_db
+from app.core.errors import IntegrationUnavailableError
 from app.core.reporting import (
+    DetailedReportUnavailable,
+    generate_ai_financial_insights,
     generate_detailed_pdf,
-    generate_financial_insights,
     generate_summary_pdf,
     prepare_detailed_report,
     prepare_summary_report,
+    set_savings_target_percent,
 )
+from app.core.tax_pack import build_financial_year_tax_pack
+from app.core.transaction_semantics import (
+    is_spending,
+    is_verified_income,
+    semantic_type_for,
+)
+from app.core.llm_privacy import has_hosted_data_consent, is_local_provider
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.models.llm_config import LLMConfiguration
+from app.schemas.financial import YearMonth
 
 router = APIRouter()
+ADVANCED_REPORTS_ENTITLEMENT = require_entitlement("advanced_reports")
+AI_REPORT_ENTITLEMENT = require_entitlement("ai_advisor")
+CA_TAX_PACK_ENTITLEMENT = require_entitlement("ca_tax_pack")
+AI_REPORT_CONSENT_VERSION = "2026-08-02"
+
+
+class AIReportRequest(BaseModel):
+    month: YearMonth | None = None
+    consent: bool
+
+
+class SavingsTargetRequest(BaseModel):
+    target_percent: float = Field(ge=1, le=80)
+
+
+class SavingsTargetResponse(BaseModel):
+    target_percent: float
+    minimum_percent: float
+    maximum_percent: float
+    applies_to: str
+
+
+class TaxPackRequest(BaseModel):
+    start_year: int = Field(ge=2000, le=2100)
+    passphrase: SecretStr
+
+    @field_validator("passphrase")
+    @classmethod
+    def validate_passphrase(cls, value: SecretStr) -> SecretStr:
+        raw = value.get_secret_value()
+        if not 12 <= len(raw) <= 128:
+            raise ValueError("Passphrase must be between 12 and 128 characters")
+        if any(ord(character) < 32 or ord(character) == 127 for character in raw):
+            raise ValueError("Passphrase cannot contain control characters")
+        return value
+
+
+class ReportCategoryResponse(BaseModel):
+    category: str
+    amount: float
+
+
+class ReportHealthComponents(BaseModel):
+    savings_target_progress_percent: int | None = None
+    recorded_savings_rate_percent: float | None = None
+    target_savings_rate_percent: float | None = None
+
+
+class SummaryReportResponse(BaseModel):
+    month: str
+    period_status: str
+    period_start: str
+    period_end_exclusive: str
+    as_of_date: str
+    calculation_version: str
+    total_spend: float
+    total_income: float
+    savings_rate: float | None
+    transaction_count: int
+    avg_transaction: float
+    top_categories: list[ReportCategoryResponse]
+    all_categories: list[ReportCategoryResponse]
+    spending_by_elasticity: dict[str, float]
+    recurring_total: float
+    savings_target_percent: float
+    savings_target_assessment_available: bool
+    target_already_met: bool
+    required_spend_reduction_to_target: float | None
+    actionable_flexible_reduction: float | None
+    remaining_target_gap: float | None
+    financial_health_score: int | None
+    financial_health_label: str
+    financial_health_components: ReportHealthComponents | None
+    financial_health_version: str
+    financial_health_formula: str
+    financial_health_caveat: str
+
+
+class ReportMerchantResponse(BaseModel):
+    merchant: str | None
+    amount: float
+    count: int
+
+
+class ReportDailySpendingResponse(BaseModel):
+    date: str
+    amount: float
+
+
+class ReportCategoryComparisonResponse(BaseModel):
+    category: str
+    current: float
+    average: float
+    sample_months: int
+
+
+class ReportRecurringResponse(BaseModel):
+    merchant: str
+    amount: float
+    monthly_equivalent: float
+    frequency: str
+    category: str | None
+
+
+class ReportIncomeResponse(BaseModel):
+    source: str
+    amount: float
+
+
+class DetailedReportResponse(SummaryReportResponse):
+    top_merchants: list[ReportMerchantResponse]
+    daily_spending: list[ReportDailySpendingResponse]
+    category_comparison: list[ReportCategoryComparisonResponse]
+    category_comparison_sample_size: int
+    category_comparison_months: list[str]
+    category_comparison_caveat: str
+    recurring_list: list[ReportRecurringResponse]
+    income_breakdown: list[ReportIncomeResponse]
+
+
+class InsightSampleSizes(BaseModel):
+    category_comparison_months: int
+    trend_recorded_complete_months: int
+
+
+class InsightSectionResponse(BaseModel):
+    title: str
+    tone: str
+    icon: str
+    content: str
+
+
+class InsightHighlightResponse(BaseModel):
+    label: str
+    value: str
+    tone: str
+    delta: str | None
+
+
+class FinancialInsightsResponse(BaseModel):
+    available: bool
+    source: str
+    calculation_version: str
+    period_status: str
+    sample_sizes: InsightSampleSizes
+    caveat: str | None = None
+    executive_summary: str
+    sections: list[InsightSectionResponse]
+    highlights: list[InsightHighlightResponse]
+    recommendations: list[str]
+
+
+class AIProviderMetadata(BaseModel):
+    provider: str
+    model: str
+
+
+class AIConsentMetadata(BaseModel):
+    provided: bool
+    version: str
+    action: str
+
+
+class AIDataDisclosure(BaseModel):
+    processing: str
+    shared: list[str]
+    not_shared: list[str]
+
+
+class AIReportResponse(BaseModel):
+    month: str
+    insights: FinancialInsightsResponse
+    generated_at: str
+    llm: AIProviderMetadata
+    consent: AIConsentMetadata
+    data_disclosure: AIDataDisclosure
+
+
+class FinancialYearSummaryResponse(BaseModel):
+    transaction_count: int
+    total_spend: float
+    total_income: float
+    net: float
+
+
+class FinancialYearTransactionResponse(BaseModel):
+    id: str
+    date: str | None
+    time: str | None
+    merchant_raw: str | None
+    merchant: str | None
+    raw_text: str
+    amount: float
+    type: str
+    instrument: str
+    account: str
+    account_id: str
+    category: str | None
+    subcategory: str | None
+    confidence: float | None
+    classification_source: str | None
+    status: str
+    is_transfer: bool
+    is_recurring: bool
+    is_income: bool
+    semantic_type: str
+    source: str
+    tags: str | None
+    notes: str | None
+
+
+class FinancialYearExportResponse(BaseModel):
+    financial_year: str
+    start_date: str
+    end_date_exclusive: str
+    generated_at: str
+    summary: FinancialYearSummaryResponse
+    transactions: list[FinancialYearTransactionResponse]
 
 
 def _default_month(db: Session) -> str:
@@ -72,15 +305,20 @@ def _transaction_export_row(
         "is_transfer": transaction.is_transfer,
         "is_recurring": transaction.is_recurring,
         "is_income": transaction.is_income,
+        "semantic_type": semantic_type_for(transaction),
         "source": transaction.source,
         "tags": transaction.tags,
         "notes": transaction.notes,
     }
 
 
-@router.get("/summary")
+@router.get(
+    "/summary",
+    response_model=SummaryReportResponse,
+    response_model_exclude_unset=True,
+)
 def report_summary(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+    month: YearMonth | None = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -89,9 +327,13 @@ def report_summary(
     return prepare_summary_report(db, month)
 
 
-@router.get("/detailed")
+@router.get(
+    "/detailed",
+    response_model=DetailedReportResponse,
+    response_model_exclude_unset=True,
+)
 def report_detailed(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+    month: YearMonth | None = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -100,29 +342,128 @@ def report_detailed(
     return prepare_detailed_report(db, month)
 
 
-@router.get("/insights")
-def report_insights(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+@router.put(
+    "/preferences/savings-target",
+    response_model=SavingsTargetResponse,
+)
+def update_report_savings_target(
+    body: SavingsTargetRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Structured, LLM-authored financial insights for the month.
-    Falls back to a deterministic heuristic report when no LLM is configured."""
-    from app.api.v1.endpoints.license import enforce_feature
+    target = set_savings_target_percent(db, body.target_percent)
+    return {
+        "target_percent": float(target),
+        "minimum_percent": 1.0,
+        "maximum_percent": 80.0,
+        "applies_to": "completed monthly report target comparisons",
+    }
 
-    enforce_feature(db, "advanced_reports")
-    if month is None:
-        month = _default_month(db)
+
+def _ai_report_metadata(llm_config: LLMConfiguration) -> dict:
+    local_provider = is_local_provider(llm_config.provider)
+    return {
+        'generated_at': datetime.now(UTC).isoformat(),
+        'llm': {
+            'provider': llm_config.provider,
+            'model': llm_config.model,
+        },
+        'consent': {
+            'provided': True,
+            'version': AI_REPORT_CONSENT_VERSION,
+            'action': 'generate_ai_financial_report',
+        },
+        'data_disclosure': {
+            'processing': 'on_device' if local_provider else 'hosted_provider',
+            'shared': (
+                [
+                    'exact aggregate totals processed only by the local model',
+                    'category summaries and aggregate trends processed on this device',
+                ]
+                if local_provider
+                else [
+                    'amount bands rather than exact financial amounts',
+                    'ratios, counts, taxonomy categories, and aggregate trend direction',
+                    'the report instructions needed to produce the requested explanation',
+                ]
+            ),
+            'not_shared': [
+                'account or card numbers',
+                'raw transaction descriptions',
+                'merchant names',
+                'exact dates or exact financial amounts for hosted providers',
+                'transaction IDs or account IDs',
+                'PIN, license key, or Gmail credentials',
+            ],
+        },
+    }
+
+
+@router.post(
+    "/ai/insights",
+    dependencies=[Depends(AI_REPORT_ENTITLEMENT)],
+    response_model=AIReportResponse,
+    response_model_exclude_unset=True,
+)
+def report_ai_insights(
+    body: AIReportRequest,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    """Structured, LLM-authored financial insights for the month."""
+    if body.consent is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="Explicit consent is required before data is sent to an AI provider",
+        )
+    llm_config = db.query(LLMConfiguration).filter_by(is_active=True).first()
+    if not llm_config:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Connect an AI in Settings to create a detailed analysis. "
+                "Standard totals and exports remain available without AI."
+            ),
+        )
+    if not has_hosted_data_consent(llm_config):
+        raise HTTPException(
+            status_code=409,
+            detail="Accept the hosted AI data disclosure in Settings before continuing.",
+        )
+    month = body.month or _default_month(db)
     from app.core.reporting import _get_spending_trend
     detailed = prepare_detailed_report(db, month)
     trend = _get_spending_trend(db, month)
-    insights = generate_financial_insights(detailed, trend)
-    return {'month': month, 'insights': insights}
+    try:
+        insights = generate_ai_financial_insights(detailed, trend)
+    except DetailedReportUnavailable as exc:
+        raise IntegrationUnavailableError(
+            code="AI_REPORT_UNAVAILABLE",
+            message="The connected AI did not return a usable report.",
+            hint="Standard totals and exports remain available. Try the analysis again later.",
+        ) from exc
+    metadata = _ai_report_metadata(llm_config)
+    return {
+        'month': month,
+        'insights': insights,
+        **metadata,
+    }
 
 
-@router.get("/pdf/summary")
+@router.get(
+    "/pdf/summary",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Deterministic monthly summary PDF.",
+            "content": {
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}}
+            },
+        }
+    },
+)
 def report_pdf_summary(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+    month: YearMonth | None = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -140,9 +481,18 @@ def report_pdf_summary(
     )
 
 
-@router.get("/csv")
+@router.get(
+    "/csv",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Spreadsheet-safe monthly transaction CSV.",
+            "content": {"text/csv": {"schema": {"type": "string"}}},
+        }
+    },
+)
 def report_csv(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+    month: YearMonth | None = None,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
@@ -150,11 +500,11 @@ def report_csv(
         month = _default_month(db)
 
     year, mon = int(month[:4]), int(month[5:7])
-    start = datetime(year, mon, 1)
+    start = date(year, mon, 1)
     if mon == 12:
-        end = datetime(year + 1, 1, 1)
+        end = date(year + 1, 1, 1)
     else:
-        end = datetime(year, mon + 1, 1)
+        end = date(year, mon + 1, 1)
 
     txns = (
         db.query(Transaction)
@@ -173,16 +523,20 @@ def report_csv(
         'Subcategory', 'Account', 'Is Recurring',
     ])
     for t in txns:
-        writer.writerow([
-            t.date.strftime('%Y-%m-%d') if t.date else '',
-            t.merchant_normalized or t.merchant_raw or '',
-            f'{t.amount:.2f}' if t.amount is not None else '',
-            t.type or '',
-            t.category or '',
-            t.subcategory or '',
-            _account_label(accounts.get(t.account_id)),
-            t.is_recurring,
-        ])
+        writer.writerow(
+            spreadsheet_safe_row(
+                [
+                    t.date.strftime('%Y-%m-%d') if t.date else '',
+                    t.merchant_normalized or t.merchant_raw or '',
+                    f'{t.amount:.2f}' if t.amount is not None else '',
+                    t.type or '',
+                    t.category or '',
+                    t.subcategory or '',
+                    _account_label(accounts.get(t.account_id)),
+                    t.is_recurring,
+                ]
+            )
+        )
 
     csv_bytes = output.getvalue().encode('utf-8')
     return Response(
@@ -194,7 +548,17 @@ def report_csv(
     )
 
 
-@router.get("/fy")
+@router.get(
+    "/fy",
+    dependencies=[Depends(ADVANCED_REPORTS_ENTITLEMENT)],
+    response_model=FinancialYearExportResponse,
+    responses={
+        200: {
+            "description": "Financial-year JSON or spreadsheet-safe CSV.",
+            "content": {"text/csv": {"schema": {"type": "string"}}},
+        }
+    },
+)
 def report_financial_year(
     start_year: int = Query(ge=2000, le=2100),
     format: str = Query(default="csv", pattern=r"^(csv|json)$"),
@@ -202,9 +566,6 @@ def report_financial_year(
     _user: bool = Depends(get_current_user),
 ):
     """Export an Indian financial year (April–March) for a CA."""
-    from app.api.v1.endpoints.license import enforce_feature
-
-    enforce_feature(db, "advanced_reports")
     start = date(start_year, 4, 1)
     end = date(start_year + 1, 4, 1)
     transactions = (
@@ -224,13 +585,13 @@ def report_financial_year(
     if format == "json":
         spend = sum(
             row["amount"]
-            for row in rows
-            if row["type"] == "debit" and not row["is_transfer"]
+            for transaction, row in zip(transactions, rows)
+            if is_spending(transaction)
         )
         income = sum(
             row["amount"]
-            for row in rows
-            if row["is_income"] and not row["is_transfer"]
+            for transaction, row in zip(transactions, rows)
+            if is_verified_income(transaction)
         )
         return {
             "financial_year": label,
@@ -253,11 +614,12 @@ def report_financial_year(
         "id", "date", "time", "merchant_raw", "merchant", "raw_text",
         "amount", "type", "instrument", "account", "account_id", "category",
         "subcategory", "confidence", "classification_source", "status",
-        "is_transfer", "is_recurring", "is_income", "source", "tags", "notes",
+        "is_transfer", "is_recurring", "is_income", "semantic_type", "source",
+        "tags", "notes",
     ]
     writer = csv.DictWriter(output, fieldnames=columns)
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows(spreadsheet_safe_mapping(row) for row in rows)
     return Response(
         content=output.getvalue().encode("utf-8"),
         media_type="text/csv",
@@ -269,16 +631,96 @@ def report_financial_year(
     )
 
 
-@router.get("/pdf/detailed")
-def report_pdf_detailed(
-    month: str = Query(default=None, pattern=r'^\d{4}-\d{2}$'),
+@router.post(
+    "/fy/pack",
+    dependencies=[Depends(CA_TAX_PACK_ENTITLEMENT)],
+    response_class=Response,
+    responses={
+        200: {
+            "description": "AES-256 encrypted Indian financial-year tax pack.",
+            "content": {
+                "application/zip": {"schema": {"type": "string", "format": "binary"}}
+            },
+        }
+    },
+)
+def report_financial_year_pack(
+    body: TaxPackRequest,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    if month is None:
-        month = _default_month(db)
+    """Build an AES-256 encrypted, review-oriented Indian FY tax pack."""
+    content = build_financial_year_tax_pack(
+        db,
+        body.start_year,
+        passphrase=body.passphrase.get_secret_value(),
+    )
+    label = f"fy{body.start_year}-{str(body.start_year + 1)[-2:]}"
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="godfin_ca_tax_pack_{label}.zip"'
+            ),
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
-    pdf_bytes = generate_detailed_pdf(db, month)
+
+@router.post(
+    "/pdf/detailed",
+    dependencies=[Depends(AI_REPORT_ENTITLEMENT)],
+    response_class=Response,
+    responses={
+        200: {
+            "description": "User-requested detailed AI-assisted PDF report.",
+            "content": {
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}}
+            },
+        }
+    },
+)
+def report_pdf_detailed(
+    body: AIReportRequest,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    if body.consent is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="Explicit consent is required before data is sent to an AI provider",
+        )
+    month = body.month or _default_month(db)
+    llm_config = db.query(LLMConfiguration).filter_by(is_active=True).first()
+    if not llm_config:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Connect an AI in Settings before creating the detailed report. "
+                "The standard summary report remains available."
+            ),
+        )
+    if not has_hosted_data_consent(llm_config):
+        raise HTTPException(
+            status_code=409,
+            detail="Accept the hosted AI data disclosure in Settings before continuing.",
+        )
+
+    try:
+        pdf_bytes = generate_detailed_pdf(
+            db,
+            month,
+            ai_metadata=_ai_report_metadata(llm_config),
+        )
+    except DetailedReportUnavailable as exc:
+        raise IntegrationUnavailableError(
+            code="AI_REPORT_UNAVAILABLE",
+            message="The connected AI could not create the detailed report.",
+            hint="The standard summary report remains available.",
+        ) from exc
 
     return Response(
         content=pdf_bytes,

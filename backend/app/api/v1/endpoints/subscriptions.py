@@ -2,108 +2,110 @@
 
 from __future__ import annotations
 
-import logging
-import time
+import asyncio
+import json
 import uuid
 from datetime import date
-from typing import List, Optional
+from typing import Any, List, Literal, Optional
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
+from app.api.v1.entitlements import require_entitlement
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.fx import (
+    FxRateSnapshot,
+    FxRateUnavailable,
+    SUPPORTED_CURRENCIES,
+    apply_snapshot_to_subscription,
+    clear_subscription_fx,
+    get_inr_rates,
+    load_reference_snapshot,
+    saved_subscription_snapshot,
+    store_reference_snapshot,
+    unavailable_fx_metadata,
+)
 from app.core.product_depth import (
     decide_subscription_suggestion,
-    sync_subscription_suggestions,
+    subscription_suggestion_scan_summary,
     upcoming_subscription_reminders,
 )
+from app.core.time import utcnow_naive
 from app.models.subscription import Subscription
+from app.models.recurring_pattern import RecurringPattern
 from app.models.subscription_suggestion import SubscriptionSuggestion
+from app.models.transaction import Transaction
+from app.schemas.financial import (
+    PositiveMoney,
+    SubscriptionDecision,
+    SubscriptionFrequency,
+    SupportedSubscriptionCurrency,
+    reject_explicit_nulls,
+)
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
+REFERENCE_FX_ENTITLEMENT = require_entitlement("reference_fx")
 
-# --- Exchange rate cache (in-memory, refreshes every 6 hours) ---
-_rate_cache: dict = {"rates": {}, "timestamp": 0}
-CACHE_TTL = 6 * 3600  # 6 hours
-
-
-async def _fetch_exchange_rates() -> dict:
-    """Fetch live exchange rates with INR as base. Returns {currency: rate_to_inr}."""
-    now = time.time()
-    if _rate_cache["rates"] and (now - _rate_cache["timestamp"]) < CACHE_TTL:
-        return _rate_cache["rates"]
-
-    # Try multiple free APIs in order of reliability
-    apis = [
-        ("https://open.er-api.com/v6/latest/USD", lambda d: d.get("rates", {})),
-        ("https://api.exchangerate-api.com/v4/latest/USD", lambda d: d.get("rates", {})),
-    ]
-
-    for url, extractor in apis:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(url)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    usd_rates = extractor(data)
-                    if "INR" in usd_rates:
-                        usd_to_inr = float(usd_rates["INR"])
-                        rates = {"INR": 1.0, "USD": usd_to_inr}
-                        # Add EUR if available
-                        if "EUR" in usd_rates and usd_rates["EUR"] > 0:
-                            rates["EUR"] = usd_to_inr / float(usd_rates["EUR"])
-                        if "GBP" in usd_rates and usd_rates["GBP"] > 0:
-                            rates["GBP"] = usd_to_inr / float(usd_rates["GBP"])
-                        _rate_cache["rates"] = rates
-                        _rate_cache["timestamp"] = now
-                        logger.info(f"Exchange rates updated: USD→INR = {usd_to_inr:.2f}")
-                        return rates
-        except Exception as e:
-            logger.warning(f"Exchange rate fetch failed from {url}: {e}")
-            continue
-
-    # Fallback to hardcoded approximate rates if all APIs fail
-    if not _rate_cache["rates"]:
-        _rate_cache["rates"] = {"INR": 1.0, "USD": 85.0, "EUR": 92.0, "GBP": 107.0}
-        _rate_cache["timestamp"] = now - CACHE_TTL + 300  # retry in 5 min
-        logger.warning("Using fallback exchange rates")
-    return _rate_cache["rates"]
+_FX_UNAVAILABLE_MESSAGE = "Verified exchange rates are temporarily unavailable."
 
 
-def _to_inr(amount: float, currency: str, rates: dict) -> float:
-    """Convert amount to INR using exchange rates."""
-    if currency == "INR" or currency not in rates:
-        return amount
-    return amount * rates[currency]
+async def _fetch_exchange_rates(
+    currencies: set[str], *, force_refresh: bool = False
+) -> FxRateSnapshot:
+    """Fetch verified rates off the event loop; only currency codes are sent."""
+
+    return await asyncio.to_thread(
+        get_inr_rates,
+        currencies,
+        force_refresh=force_refresh,
+    )
+
+
+async def _resolve_exchange_rates(
+    currencies: set[str],
+    subscriptions: list[Subscription] | None = None,
+) -> tuple[FxRateSnapshot | None, dict[str, Any]]:
+    try:
+        snapshot = await _fetch_exchange_rates(currencies)
+    except FxRateUnavailable:
+        stored = saved_subscription_snapshot(subscriptions or [])
+        if stored is not None:
+            return stored, stored.metadata(currencies)
+        return None, unavailable_fx_metadata(_FX_UNAVAILABLE_MESSAGE, currencies)
+    return snapshot, snapshot.metadata(currencies)
 
 
 class SubscriptionCreate(BaseModel):
-    name: str
-    amount: float
-    currency: str = "INR"
-    frequency: str = "monthly"
-    category: Optional[str] = None
-    subcategory: Optional[str] = None
-    next_payment_date: Optional[str] = None
-    notes: Optional[str] = None
+    name: str = Field(min_length=1, max_length=100)
+    amount: PositiveMoney
+    currency: SupportedSubscriptionCurrency = "INR"
+    frequency: SubscriptionFrequency = "monthly"
+    category: Optional[str] = Field(default=None, max_length=50)
+    subcategory: Optional[str] = Field(default=None, max_length=50)
+    next_payment_date: Optional[date] = None
+    notes: Optional[str] = Field(default=None, max_length=255)
     is_active: bool = True
 
 
 class SubscriptionUpdate(BaseModel):
-    name: Optional[str] = None
-    amount: Optional[float] = None
-    currency: Optional[str] = None
-    frequency: Optional[str] = None
-    category: Optional[str] = None
-    subcategory: Optional[str] = None
-    next_payment_date: Optional[str] = None
-    notes: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    amount: Optional[PositiveMoney] = None
+    currency: Optional[SupportedSubscriptionCurrency] = None
+    frequency: Optional[SubscriptionFrequency] = None
+    category: Optional[str] = Field(default=None, max_length=50)
+    subcategory: Optional[str] = Field(default=None, max_length=50)
+    next_payment_date: Optional[date] = None
+    notes: Optional[str] = Field(default=None, max_length=255)
     is_active: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self):
+        return reject_explicit_nulls(
+            self,
+            {"name", "amount", "currency", "frequency", "is_active"},
+        )
 
 
 class SubscriptionResponse(BaseModel):
@@ -114,6 +116,11 @@ class SubscriptionResponse(BaseModel):
     amount: float
     currency: str
     amount_inr: Optional[float]
+    conversion_status: str
+    conversion_as_of: Optional[str]
+    conversion_provider: Optional[str]
+    conversion_stale: Optional[bool]
+    conversion_unavailable_reason: Optional[str]
     frequency: str
     category: Optional[str]
     subcategory: Optional[str]
@@ -122,18 +129,121 @@ class SubscriptionResponse(BaseModel):
     notes: Optional[str]
     created_at: str
 
+
 class SubscriptionStatsResponse(BaseModel):
-    total_monthly_cost: float
-    total_annual_projection: float
+    total_monthly_cost: Optional[float]
+    total_annual_projection: Optional[float]
     active_count: int
     inactive_count: int
-    by_category: dict
-    exchange_rates: dict
+    by_category: Optional[dict]
+    exchange_rates: dict[str, float]
+    fx: dict[str, Any]
 
 
 class SubscriptionSuggestionDecision(BaseModel):
-    decision: str
-    snooze_days: int = 7
+    decision: SubscriptionDecision
+    snooze_days: int = Field(default=7, ge=1, le=90)
+
+
+class RecoverableDeletionResponse(BaseModel):
+    id: str
+    status: Literal["deleted", "restored"]
+    affected_records: int
+    deleted_at: Optional[str]
+    recovery: str
+
+
+class FxMetadataResponse(BaseModel):
+    status: str
+    provider: str
+    source_url: str | None
+    as_of: str | None
+    age_days: int | None
+    stale: bool | None
+    rate_direction: str
+    rates_to_inr: dict[str, float]
+    rate_dates: dict[str, str]
+    requested_currencies: list[str]
+    privacy: str
+    unavailable_reason: str | None
+
+
+class ExchangeRatesResponse(BaseModel):
+    rates: dict[str, float]
+    fx: FxMetadataResponse
+
+
+class ExchangeRateRefreshResponse(BaseModel):
+    updated: int
+    fx: FxMetadataResponse
+
+
+class SubscriptionSuggestionResponse(BaseModel):
+    id: str
+    recurring_pattern_id: str
+    merchant: str
+    avg_amount: float
+    frequency: str
+    category: str | None
+    next_expected: str | None
+    status: str
+    snoozed_until: str | None
+    confirmed_subscription_id: str | None
+
+
+class SubscriptionSuggestionScanResponse(BaseModel):
+    transactions_considered: int
+    merchant_groups_scanned: int
+    active_patterns: int
+    candidate_patterns: int
+    created_suggestions: int
+    updated_patterns: int
+    retired_patterns: int
+    already_suggested: int
+    insufficient_evidence: int
+    irregular_interval: int
+    high_amount_variability: int
+    missing_merchant_identity: int
+    excluded_non_spend: int
+
+
+class RecurringCandidateResponse(BaseModel):
+    id: str
+    merchant: str
+    avg_amount: float
+    frequency: str
+    category: str | None
+    confidence: float
+    evidence_count: int
+    next_expected: str | None
+    amount_behavior: Literal["fixed", "variable"]
+    recurring_kind: Literal[
+        "subscription_candidate",
+        "emi",
+        "investment",
+        "insurance",
+    ]
+    payment_rail: str | None
+
+
+class SubscriptionSuggestionDecisionResponse(BaseModel):
+    suggestion: SubscriptionSuggestionResponse
+    subscription_id: str | None
+
+
+class SubscriptionReminderResponse(BaseModel):
+    id: str
+    name: str
+    amount: float
+    currency: str
+    frequency: str
+    due_date: str
+    days_until: int
+
+
+class SubscriptionRemindersResponse(BaseModel):
+    days: int
+    reminders: list[SubscriptionReminderResponse]
 
 
 def _suggestion_response(suggestion: SubscriptionSuggestion) -> dict:
@@ -145,33 +255,98 @@ def _suggestion_response(suggestion: SubscriptionSuggestion) -> dict:
         "frequency": suggestion.frequency,
         "category": suggestion.category,
         "next_expected": (
-            suggestion.next_expected.isoformat()
-            if suggestion.next_expected
-            else None
+            suggestion.next_expected.isoformat() if suggestion.next_expected else None
         ),
         "status": suggestion.status,
         "snoozed_until": (
-            suggestion.snoozed_until.isoformat()
-            if suggestion.snoozed_until
-            else None
+            suggestion.snoozed_until.isoformat() if suggestion.snoozed_until else None
         ),
         "confirmed_subscription_id": suggestion.confirmed_subscription_id,
     }
 
 
-def _to_response(sub: Subscription, rates: dict) -> SubscriptionResponse:
-    currency = getattr(sub, 'currency', None) or 'INR'
-    amount_inr = _to_inr(sub.amount, currency, rates) if currency != 'INR' else None
+def _recurring_kind(pattern: RecurringPattern) -> str:
+    evidence = f"{pattern.merchant_normalized} {pattern.category or ''}".upper()
+    if any(term in evidence for term in ("EMI", "LOAN")):
+        return "emi"
+    if any(term in evidence for term in ("SIP", "MUTUAL FUND", "INVEST")):
+        return "investment"
+    if any(term in evidence for term in ("INSURANCE", "PREMIUM")):
+        return "insurance"
+    return "subscription_candidate"
+
+
+def _candidate_response(db: Session, pattern: RecurringPattern) -> dict:
+    try:
+        transaction_ids = json.loads(pattern.evidence_transaction_ids_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        transaction_ids = []
+    rails = [
+        row[0]
+        for row in db.query(Transaction.instrument)
+        .filter(
+            Transaction.id.in_(transaction_ids[:100]),
+            Transaction.instrument.isnot(None),
+        )
+        .all()
+        if row[0]
+    ]
+    payment_rail = None
+    if rails:
+        payment_rail = max(sorted(set(rails)), key=rails.count)
+    return {
+        "id": pattern.id,
+        "merchant": pattern.merchant_normalized,
+        "avg_amount": float(pattern.avg_amount),
+        "frequency": pattern.frequency,
+        "category": pattern.category,
+        "confidence": pattern.confidence,
+        "evidence_count": pattern.evidence_count,
+        "next_expected": (
+            pattern.next_expected.isoformat() if pattern.next_expected else None
+        ),
+        "amount_behavior": (
+            "fixed" if (pattern.amount_variability or 0) <= 0.05 else "variable"
+        ),
+        "recurring_kind": _recurring_kind(pattern),
+        "payment_rail": payment_rail,
+    }
+
+
+def _to_response(
+    sub: Subscription,
+    snapshot: FxRateSnapshot | None,
+    fx_metadata: dict[str, Any],
+) -> SubscriptionResponse:
+    currency = (getattr(sub, "currency", None) or "INR").upper()
+    amount_inr = None
+    if currency != "INR" and snapshot is not None:
+        amount_inr = snapshot.convert_to_inr(float(sub.amount), currency)
+    conversion_status = "not_required" if currency == "INR" else fx_metadata["status"]
+    conversion_as_of = fx_metadata.get("rate_dates", {}).get(
+        currency, fx_metadata.get("as_of")
+    )
     return SubscriptionResponse(
         id=sub.id,
         name=sub.name,
         amount=sub.amount,
         currency=currency,
         amount_inr=round(amount_inr, 2) if amount_inr is not None else None,
+        conversion_status=conversion_status,
+        conversion_as_of=(conversion_as_of if currency != "INR" else None),
+        conversion_provider=(
+            fx_metadata.get("provider") if currency != "INR" else None
+        ),
+        conversion_stale=(fx_metadata.get("stale") if currency != "INR" else None),
+        conversion_unavailable_reason=(
+            fx_metadata.get("unavailable_reason") if currency != "INR" else None
+        ),
         frequency=sub.frequency,
         category=sub.category,
         subcategory=sub.subcategory,
-        next_payment_date=sub.next_payment_date.isoformat() if sub.next_payment_date else None,
+        next_payment_date=sub.next_payment_date.isoformat()
+        if sub.next_payment_date
+        else None,
         is_active=sub.is_active,
         notes=sub.notes,
         created_at=sub.created_at.isoformat() if sub.created_at else "",
@@ -194,12 +369,13 @@ async def list_subscriptions(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    rates = await _fetch_exchange_rates()
-    query = db.query(Subscription)
+    query = db.query(Subscription).filter(Subscription.deleted_at.is_(None))
     if is_active is not None:
         query = query.filter(Subscription.is_active == is_active)
     items = query.order_by(Subscription.created_at.desc()).all()
-    return [_to_response(s, rates) for s in items]
+    currencies = {(item.currency or "INR").upper() for item in items} or {"INR"}
+    snapshot, fx_metadata = await _resolve_exchange_rates(currencies, items)
+    return [_to_response(item, snapshot, fx_metadata) for item in items]
 
 
 @router.post("", response_model=SubscriptionResponse, status_code=201)
@@ -208,36 +384,30 @@ async def create_subscription(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    valid_frequencies = ["monthly", "quarterly", "annual"]
-    if body.frequency not in valid_frequencies:
-        raise HTTPException(status_code=400, detail=f"Frequency must be one of: {', '.join(valid_frequencies)}")
-
-    valid_currencies = ["INR", "USD", "EUR", "GBP"]
-    currency = (body.currency or "INR").upper()
-    if currency not in valid_currencies:
-        raise HTTPException(status_code=400, detail=f"Currency must be one of: {', '.join(valid_currencies)}")
-
-    next_date = None
-    if body.next_payment_date:
-        next_date = date.fromisoformat(body.next_payment_date)
-
     sub = Subscription(
         id=str(uuid.uuid4()),
         name=body.name,
         amount=body.amount,
-        currency=currency,
+        currency=body.currency,
         frequency=body.frequency,
         category=body.category,
         subcategory=body.subcategory,
-        next_payment_date=next_date,
+        next_payment_date=body.next_payment_date,
         notes=body.notes,
         is_active=body.is_active,
     )
+    currencies = {(sub.currency or "INR").upper()}
+    snapshot, fx_metadata = await _resolve_exchange_rates(currencies, [sub])
+    if snapshot is not None and snapshot.status in {
+        "available",
+        "stale",
+        "not_required",
+    }:
+        apply_snapshot_to_subscription(sub, snapshot)
     db.add(sub)
     db.commit()
     db.refresh(sub)
-    rates = await _fetch_exchange_rates()
-    return _to_response(sub, rates)
+    return _to_response(sub, snapshot, fx_metadata)
 
 
 @router.get("/stats", response_model=SubscriptionStatsResponse)
@@ -245,54 +415,156 @@ async def get_subscription_stats(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    rates = await _fetch_exchange_rates()
-    subs = db.query(Subscription).all()
+    subs = db.query(Subscription).filter(Subscription.deleted_at.is_(None)).all()
     active = [s for s in subs if s.is_active]
     inactive = [s for s in subs if not s.is_active]
+    currencies = {(item.currency or "INR").upper() for item in active} or {"INR"}
+    snapshot, fx_metadata = await _resolve_exchange_rates(currencies, active)
 
-    # Convert all amounts to INR for stats
-    total_monthly = sum(
-        _monthly_equivalent(_to_inr(s.amount, getattr(s, 'currency', 'INR') or 'INR', rates), s.frequency)
-        for s in active
-    )
-
-    by_category = {}
-    for s in active:
-        cat = s.category or "Uncategorized"
-        amt_inr = _to_inr(s.amount, getattr(s, 'currency', 'INR') or 'INR', rates)
-        by_category[cat] = by_category.get(cat, 0) + _monthly_equivalent(amt_inr, s.frequency)
-    by_category = {k: round(v, 2) for k, v in by_category.items()}
+    total_monthly = None
+    by_category = None
+    if snapshot is not None:
+        total_monthly = sum(
+            _monthly_equivalent(
+                snapshot.convert_to_inr(float(item.amount), item.currency),
+                item.frequency,
+            )
+            for item in active
+        )
+        category_totals: dict[str, float] = {}
+        for item in active:
+            category = item.category or "Uncategorized"
+            amount_inr = snapshot.convert_to_inr(float(item.amount), item.currency)
+            category_totals[category] = category_totals.get(
+                category, 0
+            ) + _monthly_equivalent(amount_inr, item.frequency)
+        by_category = {
+            category: round(value, 2) for category, value in category_totals.items()
+        }
 
     return SubscriptionStatsResponse(
-        total_monthly_cost=round(total_monthly, 2),
-        total_annual_projection=round(total_monthly * 12, 2),
+        total_monthly_cost=(
+            round(total_monthly, 2) if total_monthly is not None else None
+        ),
+        total_annual_projection=(
+            round(total_monthly * 12, 2) if total_monthly is not None else None
+        ),
         active_count=len(active),
         inactive_count=len(inactive),
         by_category=by_category,
-        exchange_rates={k: round(v, 2) for k, v in rates.items()},
+        exchange_rates=(
+            {
+                currency: round(rate, 6)
+                for currency, rate in snapshot.rates_to_inr.items()
+            }
+            if snapshot is not None
+            else {}
+        ),
+        fx=fx_metadata,
     )
 
 
-@router.get("/exchange-rates")
+@router.get(
+    "/exchange-rates",
+    response_model=ExchangeRatesResponse,
+    dependencies=[Depends(REFERENCE_FX_ENTITLEMENT)],
+)
 async def get_exchange_rates(
+    db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    """Return current exchange rates (all → INR)."""
-    rates = await _fetch_exchange_rates()
-    return {"rates": {k: round(v, 2) for k, v in rates.items()}}
+    """Return a complete, restart-persistent public reference-rate snapshot."""
+    currencies = set(SUPPORTED_CURRENCIES)
+    try:
+        snapshot = await _fetch_exchange_rates(currencies)
+    except FxRateUnavailable:
+        snapshot = load_reference_snapshot(db)
+        if snapshot is None:
+            return {
+                "rates": {},
+                "fx": unavailable_fx_metadata(_FX_UNAVAILABLE_MESSAGE, currencies),
+            }
+    fx_metadata = snapshot.metadata(currencies)
+    return {
+        "rates": {
+            currency: round(rate, 6)
+            for currency, rate in snapshot.rates_to_inr.items()
+        },
+        "fx": fx_metadata,
+    }
 
 
-@router.post("/suggestions/scan")
+@router.post(
+    "/exchange-rates/refresh",
+    response_model=ExchangeRateRefreshResponse,
+    dependencies=[Depends(REFERENCE_FX_ENTITLEMENT)],
+)
+async def refresh_exchange_rates(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    subscriptions = (
+        db.query(Subscription)
+        .filter(
+            Subscription.is_active.is_(True),
+            Subscription.deleted_at.is_(None),
+            Subscription.currency != "INR",
+        )
+        .all()
+    )
+    currencies = set(SUPPORTED_CURRENCIES)
+    try:
+        snapshot = await _fetch_exchange_rates(currencies, force_refresh=True)
+    except FxRateUnavailable:
+        stored = load_reference_snapshot(db)
+        if stored is not None:
+            return {"updated": 0, "fx": stored.metadata(currencies)}
+        return {
+            "updated": 0,
+            "fx": unavailable_fx_metadata(_FX_UNAVAILABLE_MESSAGE, currencies),
+        }
+    store_reference_snapshot(db, snapshot)
+    for item in subscriptions:
+        apply_snapshot_to_subscription(item, snapshot)
+    db.commit()
+    return {
+        "updated": len(subscriptions),
+        "fx": snapshot.metadata(currencies),
+    }
+
+
+@router.post("/suggestions/scan", response_model=SubscriptionSuggestionScanResponse)
 def scan_subscription_suggestions(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    created = sync_subscription_suggestions(db)
+    summary = subscription_suggestion_scan_summary(db)
     db.commit()
-    return {"created": created}
+    return summary
 
 
-@router.get("/suggestions")
+@router.get(
+    "/suggestions/candidates",
+    response_model=list[RecurringCandidateResponse],
+)
+def list_recurring_candidates(
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    patterns = (
+        db.query(RecurringPattern)
+        .filter(RecurringPattern.detection_status == "candidate")
+        .order_by(
+            RecurringPattern.confidence.desc(),
+            RecurringPattern.evidence_count.desc(),
+        )
+        .limit(100)
+        .all()
+    )
+    return [_candidate_response(db, pattern) for pattern in patterns]
+
+
+@router.get("/suggestions", response_model=list[SubscriptionSuggestionResponse])
 def list_subscription_suggestions(
     include_resolved: bool = False,
     db: Session = Depends(get_db),
@@ -300,9 +572,7 @@ def list_subscription_suggestions(
 ):
     query = db.query(SubscriptionSuggestion)
     if not include_resolved:
-        query = query.filter(
-            SubscriptionSuggestion.status.in_(["pending", "snoozed"])
-        )
+        query = query.filter(SubscriptionSuggestion.status.in_(["pending", "snoozed"]))
     suggestions = query.order_by(SubscriptionSuggestion.created_at.desc()).all()
     today = date.today()
     return [
@@ -315,22 +585,17 @@ def list_subscription_suggestions(
     ]
 
 
-@router.post("/suggestions/{suggestion_id}/decision")
+@router.post(
+    "/suggestions/{suggestion_id}/decision",
+    response_model=SubscriptionSuggestionDecisionResponse,
+)
 def update_subscription_suggestion(
     suggestion_id: str,
     body: SubscriptionSuggestionDecision,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    if body.decision not in {"confirm", "ignore", "snooze"}:
-        raise HTTPException(
-            status_code=400, detail="Decision must be confirm, ignore, or snooze"
-        )
-    if not 1 <= body.snooze_days <= 90:
-        raise HTTPException(status_code=400, detail="Snooze must be 1–90 days")
-    suggestion = (
-        db.query(SubscriptionSuggestion).filter_by(id=suggestion_id).first()
-    )
+    suggestion = db.query(SubscriptionSuggestion).filter_by(id=suggestion_id).first()
     if not suggestion:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     subscription = decide_subscription_suggestion(
@@ -346,7 +611,7 @@ def update_subscription_suggestion(
     }
 
 
-@router.get("/reminders")
+@router.get("/reminders", response_model=SubscriptionRemindersResponse)
 def get_subscription_reminders(
     days: int = 7,
     db: Session = Depends(get_db),
@@ -366,11 +631,12 @@ async def get_subscription(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    sub = db.query(Subscription).filter_by(id=sub_id).first()
+    sub = db.query(Subscription).filter_by(id=sub_id, deleted_at=None).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
-    rates = await _fetch_exchange_rates()
-    return _to_response(sub, rates)
+    currencies = {(sub.currency or "INR").upper()}
+    snapshot, fx_metadata = await _resolve_exchange_rates(currencies, [sub])
+    return _to_response(sub, snapshot, fx_metadata)
 
 
 @router.put("/{sub_id}", response_model=SubscriptionResponse)
@@ -380,41 +646,69 @@ async def update_subscription(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    sub = db.query(Subscription).filter_by(id=sub_id).first()
+    sub = db.query(Subscription).filter_by(id=sub_id, deleted_at=None).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
+    previous_currency = (sub.currency or "INR").upper()
     data = body.model_dump(exclude_unset=True)
-    if "next_payment_date" in data and data["next_payment_date"]:
-        data["next_payment_date"] = date.fromisoformat(data["next_payment_date"])
-
-    if "currency" in data and data["currency"]:
-        data["currency"] = data["currency"].upper()
-        if data["currency"] not in ["INR", "USD", "EUR", "GBP"]:
-            raise HTTPException(status_code=400, detail="Currency must be one of: INR, USD, EUR, GBP")
-
-    if "frequency" in data:
-        valid = ["monthly", "quarterly", "annual"]
-        if data["frequency"] not in valid:
-            raise HTTPException(status_code=400, detail=f"Frequency must be one of: {', '.join(valid)}")
-
     for field, value in data.items():
         setattr(sub, field, value)
 
+    current_currency = (sub.currency or "INR").upper()
+    if current_currency != previous_currency:
+        clear_subscription_fx(sub)
+    currencies = {current_currency}
+    snapshot, fx_metadata = await _resolve_exchange_rates(currencies, [sub])
+    if snapshot is not None and snapshot.status in {
+        "available",
+        "stale",
+        "not_required",
+    }:
+        apply_snapshot_to_subscription(sub, snapshot)
     db.commit()
     db.refresh(sub)
-    rates = await _fetch_exchange_rates()
-    return _to_response(sub, rates)
+    return _to_response(sub, snapshot, fx_metadata)
 
 
-@router.delete("/{sub_id}", status_code=204)
+@router.delete("/{sub_id}", response_model=RecoverableDeletionResponse)
 def delete_subscription(
     sub_id: str,
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    sub = db.query(Subscription).filter_by(id=sub_id).first()
+    sub = db.query(Subscription).filter_by(id=sub_id, deleted_at=None).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
-    db.delete(sub)
+    sub.deleted_at = utcnow_naive()
     db.commit()
+    return RecoverableDeletionResponse(
+        id=sub.id,
+        status="deleted",
+        affected_records=1,
+        deleted_at=sub.deleted_at.isoformat(),
+        recovery="Use Undo to restore this subscription.",
+    )
+
+
+@router.post("/{sub_id}/restore", response_model=RecoverableDeletionResponse)
+def restore_subscription(
+    sub_id: str,
+    db: Session = Depends(get_db),
+    _user: bool = Depends(get_current_user),
+):
+    sub = db.query(Subscription).filter(
+        Subscription.id == sub_id,
+        Subscription.deleted_at.is_not(None),
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Deleted subscription not found")
+    sub.deleted_at = None
+    db.commit()
+    return RecoverableDeletionResponse(
+        id=sub.id,
+        status="restored",
+        affected_records=1,
+        deleted_at=None,
+        recovery="The subscription is visible in your records again.",
+    )

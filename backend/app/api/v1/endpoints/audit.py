@@ -13,6 +13,7 @@ from app.core.audit import (
 )
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.errors import InvalidOperationError, LocalOperationError
 from app.models.audit_session import AuditSession
 
 router = APIRouter()
@@ -21,6 +22,22 @@ router = APIRouter()
 class AuditStartRequest(BaseModel):
     year: int = Field(..., ge=2020, le=2099)
     month: int = Field(..., ge=1, le=12)
+
+
+class AuditSessionResponse(BaseModel):
+    id: str
+    period_year: int
+    period_month: int
+    status: str
+    change_summary: str | None
+    created_at: str | None
+    finalized_at: str | None
+
+
+class AuditMonthStatusResponse(BaseModel):
+    year: int
+    month: int
+    status: str
 
 
 def _session_to_dict(s: AuditSession) -> dict:
@@ -35,7 +52,7 @@ def _session_to_dict(s: AuditSession) -> dict:
     }
 
 
-@router.post("/start", status_code=201)
+@router.post("/start", response_model=AuditSessionResponse, status_code=201)
 def audit_start(
     body: AuditStartRequest,
     db: Session = Depends(get_db),
@@ -45,11 +62,15 @@ def audit_start(
         session = start_audit(db, body.year, body.month)
         db.commit()
         return _session_to_dict(session)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as exc:
+        raise InvalidOperationError(
+            code="AUDIT_START_INVALID",
+            message="This month cannot be opened for review in its current state.",
+            hint="Check the month status and try again.",
+        ) from exc
 
 
-@router.get("/sessions")
+@router.get("/sessions", response_model=list[AuditSessionResponse])
 def list_sessions(
     year: int = None,
     month: int = None,
@@ -65,7 +86,7 @@ def list_sessions(
     return [_session_to_dict(s) for s in sessions]
 
 
-@router.get("/sessions/{session_id}")
+@router.get("/sessions/{session_id}", response_model=AuditSessionResponse)
 def get_session(
     session_id: str,
     db: Session = Depends(get_db),
@@ -77,7 +98,7 @@ def get_session(
     return _session_to_dict(session)
 
 
-@router.post("/{session_id}/finalize")
+@router.post("/{session_id}/finalize", response_model=AuditSessionResponse)
 def audit_finalize(
     session_id: str,
     db: Session = Depends(get_db),
@@ -87,15 +108,23 @@ def audit_finalize(
         session = finalize_audit(db, session_id)
         db.commit()
         return _session_to_dict(session)
-    except ValueError as e:
+    except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+        raise InvalidOperationError(
+            code="AUDIT_FINALIZE_INVALID",
+            message="This review cannot be finalized in its current state.",
+            hint="Finish or resolve the outstanding review items first.",
+        ) from exc
+    except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to finalize audit: {str(e)}")
+        raise LocalOperationError(
+            code="AUDIT_FINALIZE_FAILED",
+            message="GODFIN could not finalize this review.",
+            hint="Your existing data is unchanged. Try again.",
+        ) from exc
 
 
-@router.post("/{session_id}/discard")
+@router.post("/{session_id}/discard", response_model=AuditSessionResponse)
 def audit_discard(
     session_id: str,
     db: Session = Depends(get_db),
@@ -105,15 +134,22 @@ def audit_discard(
         session = discard_audit(db, session_id)
         db.commit()
         return _session_to_dict(session)
-    except ValueError as e:
+    except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+        raise InvalidOperationError(
+            code="AUDIT_DISCARD_INVALID",
+            message="This review cannot be discarded in its current state.",
+        ) from exc
+    except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to discard audit: {str(e)}")
+        raise LocalOperationError(
+            code="AUDIT_DISCARD_FAILED",
+            message="GODFIN could not discard this review.",
+            hint="Your existing data is unchanged. Try again.",
+        ) from exc
 
 
-@router.post("/{session_id}/reopen")
+@router.post("/{session_id}/reopen", response_model=AuditSessionResponse)
 def audit_reopen(
     session_id: str,
     db: Session = Depends(get_db),
@@ -123,15 +159,22 @@ def audit_reopen(
         new_session = reopen_audit(db, session_id)
         db.commit()
         return _session_to_dict(new_session)
-    except ValueError as e:
+    except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+        raise InvalidOperationError(
+            code="AUDIT_REOPEN_INVALID",
+            message="This month cannot be reopened in its current state.",
+        ) from exc
+    except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to reopen audit: {str(e)}")
+        raise LocalOperationError(
+            code="AUDIT_REOPEN_FAILED",
+            message="GODFIN could not reopen this month.",
+            hint="Your finalized data is unchanged. Try again.",
+        ) from exc
 
 
-@router.get("/month-status")
+@router.get("/month-status", response_model=AuditMonthStatusResponse)
 def month_status(
     year: int,
     month: int,
