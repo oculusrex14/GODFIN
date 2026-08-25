@@ -57,6 +57,9 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.match(verifyPackage, /maxRetries: 10/);
   assert.match(verifyPackage, /retryDelay: 250/);
   assert.match(verifyPackage, /setTimeout\(resolve, 20\)/);
+  assert.match(verifyPackage, /async function waitForPortRelease\(timeoutMs = 5_000\)/);
+  assert.match(verifyPackage, /if \(await portIsFree\(\)\) return/);
+  assert.match(verifyPackage, /await waitForPortRelease\(\)/);
 });
 
 test("initial backend startup overlaps Electron readiness without exposing the renderer", () => {

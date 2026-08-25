@@ -228,6 +228,15 @@ async function portIsFree() {
   }
 }
 
+async function waitForPortRelease(timeoutMs = 5_000) {
+  const startedAt = performance.now();
+  while (performance.now() - startedAt < timeoutMs) {
+    if (await portIsFree()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("The packaged backend did not release port 5100 after shutdown.");
+}
+
 async function terminateTree(child, tree) {
   if (process.platform === "win32") {
     spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
@@ -377,6 +386,7 @@ async function launchOnce(executable, userData) {
   const tree = processTree(child.pid);
   const memoryMb = tree.reduce((total, row) => total + row.memoryKb, 0) / 1024;
   await terminateTree(child, tree);
+  await waitForPortRelease();
   return {
     startupMs,
     memoryMb,

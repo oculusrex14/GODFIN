@@ -24,7 +24,6 @@ from app.core.reporting import (
     prepare_summary_report,
     set_savings_target_percent,
 )
-from app.core.tax_pack import build_financial_year_tax_pack
 from app.core.transaction_semantics import (
     is_spending,
     is_verified_income,
@@ -650,6 +649,8 @@ def report_financial_year_pack(
     _user: bool = Depends(get_current_user),
 ):
     """Build an AES-256 encrypted, review-oriented Indian FY tax pack."""
+    from app.core.tax_pack import build_financial_year_tax_pack
+
     content = build_financial_year_tax_pack(
         db,
         body.start_year,
