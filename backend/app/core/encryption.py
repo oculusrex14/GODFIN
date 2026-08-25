@@ -48,6 +48,11 @@ def _key_file_path() -> Path:
     return Path(configured).expanduser() if configured else _DEFAULT_KEY_FILE
 
 
+def _supports_posix_permission_bits() -> bool:
+    """Return whether mode bits can represent the key-file access policy."""
+    return os.name == "posix"
+
+
 def _normalize_key(value: str | bytes) -> bytes:
     """Accept a normal Fernet key and the legacy double-base64 export format."""
     raw = value.encode("ascii") if isinstance(value, str) else value
@@ -139,7 +144,7 @@ def _load_from_file() -> Optional[bytes]:
     if path.is_symlink():
         raise EncryptionError("Encryption key file must not be a symbolic link")
     mode = path.stat().st_mode & 0o777
-    if mode & 0o077:
+    if _supports_posix_permission_bits() and mode & 0o077:
         raise EncryptionError("Encryption key file permissions must be 0600")
     return _normalize_key(path.read_bytes())
 

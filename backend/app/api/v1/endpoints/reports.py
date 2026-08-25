@@ -15,15 +15,6 @@ from app.core.auth import get_current_user
 from app.core.csv_security import spreadsheet_safe_mapping, spreadsheet_safe_row
 from app.core.database import get_db
 from app.core.errors import IntegrationUnavailableError
-from app.core.reporting import (
-    DetailedReportUnavailable,
-    generate_ai_financial_insights,
-    generate_detailed_pdf,
-    generate_summary_pdf,
-    prepare_detailed_report,
-    prepare_summary_report,
-    set_savings_target_percent,
-)
 from app.core.transaction_semantics import (
     is_spending,
     is_verified_income,
@@ -40,6 +31,13 @@ ADVANCED_REPORTS_ENTITLEMENT = require_entitlement("advanced_reports")
 AI_REPORT_ENTITLEMENT = require_entitlement("ai_advisor")
 CA_TAX_PACK_ENTITLEMENT = require_entitlement("ca_tax_pack")
 AI_REPORT_CONSENT_VERSION = "2026-08-02"
+
+
+def _reporting_service():
+    """Defer PDF/chart dependencies until a report is actually requested."""
+    from app.core import reporting
+
+    return reporting
 
 
 class AIReportRequest(BaseModel):
@@ -323,7 +321,7 @@ def report_summary(
 ):
     if month is None:
         month = _default_month(db)
-    return prepare_summary_report(db, month)
+    return _reporting_service().prepare_summary_report(db, month)
 
 
 @router.get(
@@ -338,7 +336,7 @@ def report_detailed(
 ):
     if month is None:
         month = _default_month(db)
-    return prepare_detailed_report(db, month)
+    return _reporting_service().prepare_detailed_report(db, month)
 
 
 @router.put(
@@ -350,7 +348,7 @@ def update_report_savings_target(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
-    target = set_savings_target_percent(db, body.target_percent)
+    target = _reporting_service().set_savings_target_percent(db, body.target_percent)
     return {
         "target_percent": float(target),
         "minimum_percent": 1.0,
@@ -430,12 +428,12 @@ def report_ai_insights(
             detail="Accept the hosted AI data disclosure in Settings before continuing.",
         )
     month = body.month or _default_month(db)
-    from app.core.reporting import _get_spending_trend
-    detailed = prepare_detailed_report(db, month)
-    trend = _get_spending_trend(db, month)
+    reporting = _reporting_service()
+    detailed = reporting.prepare_detailed_report(db, month)
+    trend = reporting._get_spending_trend(db, month)
     try:
-        insights = generate_ai_financial_insights(detailed, trend)
-    except DetailedReportUnavailable as exc:
+        insights = reporting.generate_ai_financial_insights(detailed, trend)
+    except reporting.DetailedReportUnavailable as exc:
         raise IntegrationUnavailableError(
             code="AI_REPORT_UNAVAILABLE",
             message="The connected AI did not return a usable report.",
@@ -469,7 +467,7 @@ def report_pdf_summary(
     if month is None:
         month = _default_month(db)
 
-    pdf_bytes = generate_summary_pdf(db, month)
+    pdf_bytes = _reporting_service().generate_summary_pdf(db, month)
 
     return Response(
         content=pdf_bytes,
@@ -710,13 +708,14 @@ def report_pdf_detailed(
             detail="Accept the hosted AI data disclosure in Settings before continuing.",
         )
 
+    reporting = _reporting_service()
     try:
-        pdf_bytes = generate_detailed_pdf(
+        pdf_bytes = reporting.generate_detailed_pdf(
             db,
             month,
             ai_metadata=_ai_report_metadata(llm_config),
         )
-    except DetailedReportUnavailable as exc:
+    except reporting.DetailedReportUnavailable as exc:
         raise IntegrationUnavailableError(
             code="AI_REPORT_UNAVAILABLE",
             message="The connected AI could not create the detailed report.",

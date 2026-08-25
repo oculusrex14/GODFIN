@@ -27,10 +27,44 @@ def test_encryption_key_survives_restart(tmp_path):
     encrypted = encryption.encrypt("local-secret")
     key_file = tmp_path / ".encryption_key"
     assert key_file.exists()
-    assert key_file.stat().st_mode & 0o777 == 0o600
+    if encryption._supports_posix_permission_bits():
+        assert key_file.stat().st_mode & 0o777 == 0o600
 
     encryption.reset_encryption_state_for_tests()
     assert encryption.decrypt(encrypted) == "local-secret"
+
+
+def test_windows_permission_bits_do_not_reject_a_valid_restart_key(
+    monkeypatch,
+    tmp_path,
+):
+    encrypted = encryption.encrypt("windows-restart-secret")
+    key_file = tmp_path / ".encryption_key"
+    key_file.chmod(0o666)
+    monkeypatch.setattr(
+        encryption,
+        "_supports_posix_permission_bits",
+        lambda: False,
+    )
+
+    encryption.reset_encryption_state_for_tests()
+
+    assert encryption.decrypt(encrypted) == "windows-restart-secret"
+
+
+def test_posix_restart_rejects_a_group_readable_key(monkeypatch, tmp_path):
+    encryption.encrypt("local-secret")
+    key_file = tmp_path / ".encryption_key"
+    key_file.chmod(0o640)
+    monkeypatch.setattr(
+        encryption,
+        "_supports_posix_permission_bits",
+        lambda: True,
+    )
+    encryption.reset_encryption_state_for_tests()
+
+    with pytest.raises(encryption.EncryptionError, match="permissions must be 0600"):
+        encryption.initialize_encryption()
 
 
 def test_keychain_save_uses_stdin_and_an_empty_application_acl(monkeypatch):
