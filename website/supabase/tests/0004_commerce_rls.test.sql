@@ -1,5 +1,5 @@
 begin;
-select plan(33);
+select plan(45);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -93,6 +93,65 @@ select ok(
     'EXECUTE'
   ),
   'anon cannot provision purchases'
+);
+
+select ok(
+  has_table_privilege('authenticated', 'public.licenses', 'SELECT'),
+  'authenticated users can read their RLS-filtered licenses'
+);
+select ok(
+  has_table_privilege('authenticated', 'public.purchases', 'SELECT'),
+  'authenticated users can read their RLS-filtered purchases'
+);
+select ok(
+  has_table_privilege('authenticated', 'public.credit_balances', 'SELECT'),
+  'authenticated users can read their RLS-filtered credit balance'
+);
+select ok(
+  has_table_privilege('authenticated', 'public.license_activations', 'SELECT'),
+  'authenticated users can read their RLS-filtered activations'
+);
+
+select ok(
+  not has_table_privilege('authenticated', 'public.licenses', 'INSERT')
+    and not has_table_privilege('authenticated', 'public.licenses', 'UPDATE')
+    and not has_table_privilege('authenticated', 'public.licenses', 'DELETE'),
+  'authenticated users cannot mutate licenses directly'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.purchases', 'INSERT')
+    and not has_table_privilege('authenticated', 'public.purchases', 'UPDATE')
+    and not has_table_privilege('authenticated', 'public.purchases', 'DELETE'),
+  'authenticated users cannot mutate purchases directly'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.credit_balances', 'INSERT')
+    and not has_table_privilege('authenticated', 'public.credit_balances', 'UPDATE')
+    and not has_table_privilege('authenticated', 'public.credit_balances', 'DELETE'),
+  'authenticated users cannot mutate credit balances directly'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.license_activations', 'INSERT')
+    and not has_table_privilege('authenticated', 'public.license_activations', 'UPDATE')
+    and not has_table_privilege('authenticated', 'public.license_activations', 'DELETE'),
+  'authenticated users cannot mutate activations directly'
+);
+
+select ok(
+  not has_table_privilege('anon', 'public.licenses', 'SELECT'),
+  'anonymous users cannot read licenses'
+);
+select ok(
+  not has_table_privilege('anon', 'public.purchases', 'SELECT'),
+  'anonymous users cannot read purchases'
+);
+select ok(
+  not has_table_privilege('anon', 'public.credit_balances', 'SELECT'),
+  'anonymous users cannot read credit balances'
+);
+select ok(
+  not has_table_privilege('anon', 'public.license_activations', 'SELECT'),
+  'anonymous users cannot read activations'
 );
 
 select set_config(
