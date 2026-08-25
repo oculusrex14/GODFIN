@@ -49,4 +49,8 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.doesNotMatch(verifyPackage, /constants\.X_OK/);
   assert.match(buildAssets, /process\.platform === "win32" && command\.endsWith\("\.cmd"\)/);
   assert.match(buildAssets, /shell: requiresWindowsShell/);
+  assert.match(verifyPackage, /process\.platform === "win32" && command\.endsWith\("\.cmd"\)/);
+  assert.match(verifyPackage, /shell: requiresWindowsShell/);
+  assert.match(verifyPackage, /\/proc\/\$\{pid\}\/smaps_rollup/);
+  assert.match(verifyPackage, /\^Pss:\\s\+\(\\d\+\)\\s\+kB\$/m);
 });

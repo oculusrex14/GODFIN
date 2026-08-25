@@ -4,6 +4,7 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -74,10 +75,11 @@ async function locatePackage() {
 }
 
 function runCheck(command, args, message) {
+  const requiresWindowsShell = process.platform === "win32" && command.endsWith(".cmd");
   const result = spawnSync(command, args, {
     cwd: desktopRoot,
     encoding: "utf8",
-    shell: false,
+    shell: requiresWindowsShell,
   });
   if (result.error || result.status !== 0) {
     throw new Error(
@@ -147,6 +149,17 @@ function verifyFuses(target) {
   }
 }
 
+function proportionalMemoryKb(pid, fallbackKb) {
+  if (process.platform !== "linux") return fallbackKb;
+  try {
+    const rollup = readFileSync(`/proc/${pid}/smaps_rollup`, "utf8");
+    const match = rollup.match(/^Pss:\s+(\d+)\s+kB$/m);
+    return match ? Number(match[1]) : fallbackKb;
+  } catch {
+    return fallbackKb;
+  }
+}
+
 function processRows() {
   if (process.platform === "win32") {
     const script = [
@@ -163,7 +176,7 @@ function processRows() {
     return (Array.isArray(parsed) ? parsed : [parsed]).map((row) => ({
       pid: Number(row.ProcessId),
       ppid: Number(row.ParentProcessId),
-      rssKb: Number(row.WorkingSetSize) / 1024,
+      memoryKb: Number(row.WorkingSetSize) / 1024,
       command: row.Name,
     }));
   }
@@ -179,10 +192,10 @@ function processRows() {
     .map((line) => {
       const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
       return match
-        ? {
+          ? {
             pid: Number(match[1]),
             ppid: Number(match[2]),
-            rssKb: Number(match[3]),
+            memoryKb: proportionalMemoryKb(Number(match[1]), Number(match[3])),
             command: match[4],
           }
         : null;
@@ -349,7 +362,7 @@ async function launchOnce(executable, userData) {
 
   await new Promise((resolve) => setTimeout(resolve, 1_500));
   const tree = processTree(child.pid);
-  const memoryMb = tree.reduce((total, row) => total + row.rssKb, 0) / 1024;
+  const memoryMb = tree.reduce((total, row) => total + row.memoryKb, 0) / 1024;
   await terminateTree(child, tree);
   return {
     startupMs,
