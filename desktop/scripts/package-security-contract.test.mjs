@@ -58,3 +58,18 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.match(verifyPackage, /retryDelay: 250/);
   assert.match(verifyPackage, /setTimeout\(resolve, 20\)/);
 });
+
+test("initial backend startup overlaps Electron readiness without exposing the renderer", () => {
+  const initialBackendStart = main.indexOf("const initialBackendReady");
+  const electronReady = main.indexOf('app.whenReady().then');
+  assert.ok(initialBackendStart > 0);
+  assert.ok(electronReady > initialBackendStart);
+  assert.match(
+    main.slice(initialBackendStart, electronReady),
+    /startBackend\(\);[\s\S]*await waitForBackend\(\);/,
+  );
+  assert.match(
+    main.slice(electronReady),
+    /configureBackendRequestTrust\(\);[\s\S]*await initialBackendReady;[\s\S]*createWindow\(\);/,
+  );
+});

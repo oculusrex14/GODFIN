@@ -580,6 +580,19 @@ function stopBackend() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  // Start the local finance service while Electron finishes initializing.
+  // The renderer is still created only after both Electron and the backend are
+  // ready, so this shortens cold start without relaxing the local API boundary.
+  const initialBackendReady = (async () => {
+    try {
+      startBackend();
+      await waitForBackend();
+      return null;
+    } catch (error) {
+      return error;
+    }
+  })();
+
   app.on("second-instance", () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -596,8 +609,8 @@ if (!app.requestSingleInstanceLock()) {
     configureDesktopBridge();
     registerAppProtocol();
     try {
-      startBackend();
-      await waitForBackend();
+      const startupError = await initialBackendReady;
+      if (startupError) throw startupError;
       createWindow();
       configureUpdater();
     } catch (error) {
