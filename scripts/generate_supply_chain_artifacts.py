@@ -410,7 +410,8 @@ def _build_notices(
         ]
     )
     for path in sorted(INPUT_PATHS):
-        lines.append(f"| `{path.relative_to(ROOT)}` | `{_sha256(path)}` |")
+        relative_path = path.relative_to(ROOT).as_posix()
+        lines.append(f"| `{relative_path}` | `{_sha256(path)}` |")
     lines.extend(
         [
             "",

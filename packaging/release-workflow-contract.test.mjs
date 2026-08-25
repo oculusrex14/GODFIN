@@ -79,6 +79,8 @@ test("native smoke builds are manual, read-only, non-publishing, and evidence-on
 test("repository text artifacts use deterministic LF bytes on every runner", async () => {
   const attributes = await source(".gitattributes");
   assert.match(attributes, /^\* text=auto eol=lf$/m);
+  const generator = await source("scripts/generate_supply_chain_artifacts.py");
+  assert.match(generator, /relative_to\(ROOT\)\.as_posix\(\)/);
 });
 
 test("all GitHub Actions dependencies are pinned to immutable commits", async () => {

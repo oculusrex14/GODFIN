@@ -1,11 +1,9 @@
 import {
-  access,
   mkdtemp,
   readdir,
   rm,
   stat,
 } from "node:fs/promises";
-import { constants } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -67,15 +65,10 @@ async function locatePackage() {
     if (executable) return { executable, fuseTarget: executable };
   }
   if (process.platform === "linux") {
-    const unpacked = files.filter((file) => file.includes(`${path.sep}linux-unpacked${path.sep}`));
-    for (const executable of unpacked) {
-      try {
-        await access(executable, constants.X_OK);
-        if (!path.extname(executable)) return { executable, fuseTarget: executable };
-      } catch {
-        // Continue looking for the Electron executable.
-      }
-    }
+    const executable = files.find((file) =>
+      file.endsWith(`${path.sep}linux-unpacked${path.sep}godfin`)
+    );
+    if (executable) return { executable, fuseTarget: executable };
   }
   throw new Error(`No unpacked GODFIN application was found under ${releaseRoot}.`);
 }
