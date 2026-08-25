@@ -172,7 +172,10 @@ jobs:
                   "backend executable",
               )
           else:
-              app = first_file(list(release.glob("**/linux-unpacked/godfin")), "desktop executable")
+              app = first_file(
+                  list(release.glob("**/linux-unpacked/godfin-desktop")),
+                  "desktop executable",
+              )
               backend = first_file(
                   list(release.glob("**/linux-unpacked/resources/backend/godfin-backend/godfin-backend")),
                   "backend executable",

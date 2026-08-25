@@ -42,11 +42,12 @@ writeFileSync(
 );
 
 function run(command, args, cwd) {
+  const requiresWindowsShell = process.platform === "win32" && command.endsWith(".cmd");
   const result = spawnSync(command, args, {
     cwd,
     env: process.env,
     stdio: "inherit",
-    shell: false,
+    shell: requiresWindowsShell,
   });
   if (result.error) {
     throw new Error(

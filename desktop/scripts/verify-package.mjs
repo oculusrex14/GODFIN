@@ -66,7 +66,7 @@ async function locatePackage() {
   }
   if (process.platform === "linux") {
     const executable = files.find((file) =>
-      file.endsWith(`${path.sep}linux-unpacked${path.sep}godfin`)
+      file.endsWith(`${path.sep}linux-unpacked${path.sep}godfin-desktop`)
     );
     if (executable) return { executable, fuseTarget: executable };
   }

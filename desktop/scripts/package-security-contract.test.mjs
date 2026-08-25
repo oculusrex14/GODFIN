@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const main = readFileSync(path.join(here, "..", "main.cjs"), "utf8");
 const afterPack = readFileSync(path.join(here, "after-pack.cjs"), "utf8");
+const buildAssets = readFileSync(path.join(here, "build-assets.mjs"), "utf8");
 const verifyPackage = readFileSync(path.join(here, "verify-package.mjs"), "utf8");
 const pkg = JSON.parse(readFileSync(path.join(here, "..", "package.json"), "utf8"));
 
@@ -44,6 +45,8 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.match(afterPack, /platform === "linux"/);
   assert.match(afterPack, /context\.packager\.executableName/);
   assert.match(afterPack, /context\.packager\.appInfo\.productFilename/);
-  assert.match(verifyPackage, /linux-unpacked\$\{path\.sep\}godfin/);
+  assert.match(verifyPackage, /linux-unpacked\$\{path\.sep\}godfin-desktop/);
   assert.doesNotMatch(verifyPackage, /constants\.X_OK/);
+  assert.match(buildAssets, /process\.platform === "win32" && command\.endsWith\("\.cmd"\)/);
+  assert.match(buildAssets, /shell: requiresWindowsShell/);
 });
