@@ -14,13 +14,19 @@ from app.core.database import get_db
 from app.core.errors import IntegrationUnavailableError, StateConflictError
 from app.core.advisor_service import chat
 from app.core.advisor_digest import build_weekly_digest, digest_to_html
-from app.core.gmail_service import gmail_service
 from app.models.app_setting import AppSetting
 from app.schemas.financial import ChatRole
 
 router = APIRouter()
 AI_ADVISOR_ENTITLEMENT = require_entitlement("ai_advisor")
 ADVANCED_REPORTS_ENTITLEMENT = require_entitlement("advanced_reports")
+
+
+def _gmail_service():
+    """Load Google's Gmail SDK only for digest status or delivery."""
+    from app.core.gmail_service import gmail_service
+
+    return gmail_service
 
 
 class ChatMessage(BaseModel):
@@ -158,8 +164,8 @@ def get_digest_settings(
         "enabled": enabled == "true",
         "recipient": recipient or None,
         "last_sent": last_sent or None,
-        "gmail_connected": gmail_service.is_connected,
-        "gmail_send_supported": gmail_service.can_send,
+        "gmail_connected": _gmail_service().is_connected,
+        "gmail_send_supported": _gmail_service().can_send,
     }
 
 
@@ -201,7 +207,7 @@ def send_advisor_digest(
         raise HTTPException(status_code=400, detail="Configure a digest recipient first.")
     digest = build_weekly_digest(db)
     try:
-        gmail_service.send_email(
+        _gmail_service().send_email(
             recipient,
             f"GODFIN weekly digest · {digest['period']['end']}",
             digest_to_html(digest),

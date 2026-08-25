@@ -21,10 +21,6 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.entitlements import conditional_entitlement, enforce_feature
 from app.core.auth import get_current_user
-from app.core.account_balances import (
-    balance_at_date,
-    record_verified_statement_controls,
-)
 from app.core.api_errors import APIErrorResponse
 from app.core.audit import FinalizedPeriodError
 from app.core.classifier import classify_transaction
@@ -33,16 +29,6 @@ from app.core.errors import LocalOperationError, StateConflictError
 from app.core.merchant_memory_service import upsert_merchant_memory
 from app.core.manual_income import link_exact_statement_manual_income_matches
 from app.core.import_postprocessing import postprocess_imported_transactions
-from app.core.mapped_import import (
-    GENERIC_MAPPING_VERSION,
-    MappedImportError,
-    inspect_mapped_sheet,
-    mapping_fingerprint,
-    parse_mapped_sheet,
-    sample_rows,
-    suggested_mapping,
-)
-from app.core.parsers import account_requirements, parse_registered_statement
 from app.core.reconciliation import (
     ReconciliationService,
     import_new_transactions,
@@ -78,11 +64,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _account_balance_service():
+    """Load statement-control helpers only during an import or balance check."""
+    from app.core import account_balances
+
+    return account_balances
+
+
+def _parser_service():
+    """Load bank-specific parser dependencies only for statement processing."""
+    from app.core import parsers
+
+    return parsers
+
+
+def _mapped_import_service():
+    """Load spreadsheet libraries only when guided mapping is requested."""
+    from app.core import mapped_import
+
+    return mapped_import
+
+
 # --- Helpers ---
 
 def _resolve_account_id(db: Session, parse_result, account_id: str = None) -> str:
     """Resolve one active account and prove it matches the parsed statement."""
-    bank, account_type = account_requirements(parse_result.statement_type)
+    bank, account_type = _parser_service().account_requirements(
+        parse_result.statement_type
+    )
     if account_id:
         acct = db.query(Account).filter_by(id=account_id, is_active=True).first()
         if not acct:
@@ -145,7 +154,11 @@ def _statement_balance_snapshot(
             "coverage_complete": False,
             "missing_ranges": [],
         }
-    result = balance_at_date(db, account_id, parse_result.period_end)
+    result = _account_balance_service().balance_at_date(
+        db,
+        account_id,
+        parse_result.period_end,
+    )
     computed = float(result.balance) if result.balance is not None else None
     discrepancy = (
         round(float(statement_balance) - computed, 2)
@@ -178,9 +191,12 @@ async def _read_mapped_sheet(file: UploadFile):
         contents_buffer.extend(chunk)
         if len(contents_buffer) > MAX_STATEMENT_BYTES:
             raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+    mapped_import = _mapped_import_service()
     try:
-        return inspect_mapped_sheet(bytes(contents_buffer), file.filename)
-    except MappedImportError as exc:
+        return mapped_import.inspect_mapped_sheet(
+            bytes(contents_buffer), file.filename
+        )
+    except mapped_import.MappedImportError as exc:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -332,7 +348,7 @@ def _statement_parser_worker(
             os.chmod(work_directory, 0o700)
             os.chdir(work_directory)
             try:
-                result = parse_registered_statement(
+                result = _parser_service().parse_registered_statement(
                     contents,
                     file_format,
                     password,
@@ -576,6 +592,7 @@ async def inspect_mapped_import(
     _user: bool = Depends(get_current_user),
 ):
     enforce_feature(db, "generic_mapped_import")
+    mapped_import = _mapped_import_service()
     sheet = await _read_mapped_sheet(file)
     data_rows = sum(
         1
@@ -592,8 +609,8 @@ async def inspect_mapped_import(
             {"index": index, "label": label}
             for index, label in enumerate(sheet.headers)
         ],
-        "sample_rows": sample_rows(sheet),
-        "suggested_mapping": suggested_mapping(sheet.headers),
+        "sample_rows": mapped_import.sample_rows(sheet),
+        "suggested_mapping": mapped_import.suggested_mapping(sheet.headers),
     }
 
 
@@ -613,12 +630,15 @@ async def preview_mapped_import(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
+    mapped_import = _mapped_import_service()
     account = _mapped_account(db, account_id)
     sheet = await _read_mapped_sheet(file)
     mapping = _mapped_mapping(mapping_json)
     try:
-        parsed = parse_mapped_sheet(sheet, mapping, date_format=date_format)
-    except MappedImportError as exc:
+        parsed = mapped_import.parse_mapped_sheet(
+            sheet, mapping, date_format=date_format
+        )
+    except mapped_import.MappedImportError as exc:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -635,14 +655,16 @@ async def preview_mapped_import(
             ParsedStatement.from_statement_result(parsed.statement),
             account.id,
         )
-    mapped_fingerprint = mapping_fingerprint(sheet, mapping, date_format)
+    mapped_fingerprint = mapped_import.mapping_fingerprint(
+        sheet, mapping, date_format
+    )
     return {
         "account_id": account.id,
         "source_fingerprint": sheet.source_fingerprint,
         "mapping_fingerprint": mapped_fingerprint,
         "header_signature": sheet.header_signature,
         "parser_profile": "generic_mapped",
-        "mapping_version": GENERIC_MAPPING_VERSION,
+        "mapping_version": mapped_import.GENERIC_MAPPING_VERSION,
         "total_rows": len(parsed.statement.transactions) + len(parsed.errors),
         "matched_count": (
             len(reconciliation.duplicate_transactions) if reconciliation else 0
@@ -691,6 +713,7 @@ async def import_mapped_spreadsheet(
     db: Session = Depends(get_db),
     _user: bool = Depends(get_current_user),
 ):
+    mapped_import = _mapped_import_service()
     try:
         if not confirm_mapping:
             raise HTTPException(
@@ -700,7 +723,9 @@ async def import_mapped_spreadsheet(
         account = _mapped_account(db, account_id)
         sheet = await _read_mapped_sheet(file)
         mapping = _mapped_mapping(mapping_json)
-        mapped_fingerprint = mapping_fingerprint(sheet, mapping, date_format)
+        mapped_fingerprint = mapped_import.mapping_fingerprint(
+            sheet, mapping, date_format
+        )
         if not secrets.compare_digest(
             accepted_fingerprint.lower(), sheet.source_fingerprint
         ) or not secrets.compare_digest(
@@ -713,7 +738,9 @@ async def import_mapped_spreadsheet(
                     "Preview it again before importing."
                 ),
             )
-        parsed = parse_mapped_sheet(sheet, mapping, date_format=date_format)
+        parsed = mapped_import.parse_mapped_sheet(
+            sheet, mapping, date_format=date_format
+        )
         _validate_mapped_account_identity(account, parsed.identifiers)
         if parsed.errors:
             raise HTTPException(
@@ -741,7 +768,11 @@ async def import_mapped_spreadsheet(
         )
         controls_verified = parsed.statement.reconciliation_status == "passed"
         if controls_verified and not reconciliation.potential_duplicates:
-            record_verified_statement_controls(db, account.id, parsed.statement)
+            _account_balance_service().record_verified_statement_controls(
+                db,
+                account.id,
+                parsed.statement,
+            )
         db.commit()
         balance_snapshot = _statement_balance_snapshot(
             db, account.id, parsed.statement
@@ -773,7 +804,7 @@ async def import_mapped_spreadsheet(
     except HTTPException:
         db.rollback()
         raise
-    except MappedImportError as exc:
+    except mapped_import.MappedImportError as exc:
         db.rollback()
         raise HTTPException(
             status_code=400,
@@ -1105,7 +1136,7 @@ async def import_statement(
             ]
 
         if import_new and not recon_result.potential_duplicates:
-            record_verified_statement_controls(
+            _account_balance_service().record_verified_statement_controls(
                 db,
                 resolved_account_id,
                 parse_result,

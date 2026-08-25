@@ -23,26 +23,64 @@ from app.core.config import settings as app_config
 from app.core.data_deletion import delete_transactions_with_dependents
 from app.core.database import get_db
 from app.core.errors import IntegrationUnavailableError, StateConflictError
-from app.core.gmail_service import (
-    GmailConfigurationError,
-    GmailDisconnectOutcome,
-    GmailError,
-    GmailOAuthStateError,
-    OAUTH_REDIRECT_URI,
-    gmail_service,
-    is_connected,
-    client_config_available,
-)
-from app.core.ingestion import (
-    get_ingestion_history, gmail_coverage_summary, run_ingestion, run_ingestion_with_dates,
-    run_initial_sync,
-)
 from app.core.pin_security import client_ip_from_request, require_current_pin
 from app.models.app_setting import AppSetting
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 GMAIL_SYNC_ENTITLEMENT = require_entitlement("gmail_sync")
+
+
+def _gmail_runtime():
+    """Load Google OAuth and Gmail SDKs only when Gmail is used."""
+    from app.core import gmail_service
+
+    return gmail_service
+
+
+def _ingestion_runtime():
+    """Load Gmail ingestion and parser dependencies only during a sync."""
+    from app.core import ingestion
+
+    return ingestion
+
+
+class _LazyGmailService:
+    """Keep the endpoint's test seam without importing Google's SDK at boot."""
+
+    def __getattr__(self, name: str):
+        return getattr(_gmail_runtime().gmail_service, name)
+
+
+gmail_service = _LazyGmailService()
+
+
+def client_config_available() -> bool:
+    return _gmail_runtime().client_config_available()
+
+
+def is_connected() -> bool:
+    return _gmail_runtime().is_connected()
+
+
+def get_ingestion_history(*args, **kwargs):
+    return _ingestion_runtime().get_ingestion_history(*args, **kwargs)
+
+
+def gmail_coverage_summary(*args, **kwargs):
+    return _ingestion_runtime().gmail_coverage_summary(*args, **kwargs)
+
+
+def run_ingestion(*args, **kwargs):
+    return _ingestion_runtime().run_ingestion(*args, **kwargs)
+
+
+def run_ingestion_with_dates(*args, **kwargs):
+    return _ingestion_runtime().run_ingestion_with_dates(*args, **kwargs)
+
+
+def run_initial_sync(*args, **kwargs):
+    return _ingestion_runtime().run_initial_sync(*args, **kwargs)
 
 
 class GmailAuthURLResponse(BaseModel):
@@ -246,7 +284,7 @@ def get_gmail_auth_url(
         auth_url = gmail_service.get_auth_url(
             db,
             session_token_hash=hash_token(session_token),
-            redirect_uri=OAUTH_REDIRECT_URI,
+            redirect_uri=_gmail_runtime().OAUTH_REDIRECT_URI,
         )
         return {
             "auth_url": auth_url,
@@ -256,7 +294,7 @@ def get_gmail_auth_url(
 
     except HTTPException:
         raise
-    except GmailConfigurationError as exc:
+    except _gmail_runtime().GmailConfigurationError as exc:
         raise IntegrationUnavailableError(
             code="GMAIL_CONFIGURATION_REQUIRED",
             message="Gmail connection is not configured for this GODFIN build yet.",
@@ -295,9 +333,9 @@ def gmail_oauth_callback(
             gmail_service.cancel_auth(
                 db,
                 state=state or "",
-                redirect_uri=OAUTH_REDIRECT_URI,
+                redirect_uri=_gmail_runtime().OAUTH_REDIRECT_URI,
             )
-        except GmailOAuthStateError:
+        except _gmail_runtime().GmailOAuthStateError:
             pass
         return HTMLResponse(
             content=(
@@ -327,7 +365,7 @@ def gmail_oauth_callback(
             db,
             authorization_code=code,
             state=state or "",
-            redirect_uri=OAUTH_REDIRECT_URI,
+            redirect_uri=_gmail_runtime().OAUTH_REDIRECT_URI,
         )
 
         if success:
@@ -350,7 +388,7 @@ def gmail_oauth_callback(
             ),
             status_code=400,
         )
-    except GmailError as exc:
+    except _gmail_runtime().GmailError as exc:
         logger.warning("Gmail OAuth callback rejected: %s", exc.code)
         stale_attempt = exc.code in {
             "expired_state",
@@ -749,7 +787,7 @@ def gmail_disconnect(
             db.commit()
 
         outcome = gmail_service.disconnect()
-        if isinstance(outcome, GmailDisconnectOutcome):
+        if isinstance(outcome, _gmail_runtime().GmailDisconnectOutcome):
             credentials_removed = outcome.local_credentials_removed
             remote_revocation_pending = outcome.remote_revocation_pending
         else:

@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from app.core.config import settings
 from app.core.entitlements import entitlement_manifest
-from app.core.parsers.registry import PARSER_REGISTRY_VERSION
+from app.core.parser_metadata import PARSER_REGISTRY_VERSION
 from app.core.startup_migrations import CURRENT_SCHEMA_REVISION
 
 

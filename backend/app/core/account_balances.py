@@ -13,7 +13,7 @@ from sqlalchemy import BigInteger, case, cast, func
 from sqlalchemy.orm import Session
 
 from app.core.money import MONEY_SCALE, money_decimal
-from app.core.parsers.registry import PARSER_REGISTRY_VERSION
+from app.core.parser_metadata import PARSER_REGISTRY_VERSION
 from app.core.transaction_semantics import active_clause
 from app.models.account import Account
 from app.models.account_balance import (

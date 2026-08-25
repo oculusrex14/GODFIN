@@ -11,13 +11,18 @@ from sqlalchemy.orm import Session
 from app.api.v1.entitlements import conditional_entitlement, enforce_feature
 from app.core.account_mapping import load_sender_mappings, save_sender_mappings
 from app.core.auth import get_current_user
-from app.core.account_balances import balance_at_date
 from app.core.database import get_db
 from app.core.errors import InvalidOperationError
-from app.core.parsers import supported_parser_profiles
 from app.models.account import Account
 
 router = APIRouter()
+
+
+def _supported_parser_profiles() -> list[dict[str, object]]:
+    """Load statement parsers only when account routing needs them."""
+    from app.core.parsers import supported_parser_profiles
+
+    return supported_parser_profiles()
 
 
 class AccountRouting(BaseModel):
@@ -123,7 +128,7 @@ def _apply_account_routing(
     profile = next(
         (
             item
-            for item in supported_parser_profiles()
+            for item in _supported_parser_profiles()
             if item["profile"] == routing.parser_profile
         ),
         None,
@@ -161,7 +166,7 @@ def list_accounts(
 
 @router.get("/parser-profiles", response_model=list[ParserProfileResponse])
 def list_parser_profiles(_user: bool = Depends(get_current_user)):
-    return supported_parser_profiles()
+    return _supported_parser_profiles()
 
 
 @router.get("/sender-mappings", response_model=list[SenderMapping])
@@ -204,6 +209,8 @@ def get_account_balance(
     account = db.query(Account).filter_by(id=account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
+    from app.core.account_balances import balance_at_date
+
     return balance_at_date(
         db,
         account_id,

@@ -9,6 +9,10 @@ const main = readFileSync(path.join(here, "..", "main.cjs"), "utf8");
 const afterPack = readFileSync(path.join(here, "after-pack.cjs"), "utf8");
 const buildAssets = readFileSync(path.join(here, "build-assets.mjs"), "utf8");
 const verifyPackage = readFileSync(path.join(here, "verify-package.mjs"), "utf8");
+const backendSpec = readFileSync(
+  path.join(here, "..", "..", "backend", "godfin-backend.spec"),
+  "utf8",
+);
 const pkg = JSON.parse(readFileSync(path.join(here, "..", "package.json"), "utf8"));
 
 test("updates require separate download and install consent", () => {
@@ -40,6 +44,12 @@ test("local mac packaging cannot emit an unsigned distributable installer", () =
   assert.doesNotMatch(pkg.scripts["dist:mac"], /notarize=false|identity=-/);
 });
 
+test("frozen backend collects only packages with dynamic import behavior", () => {
+  assert.doesNotMatch(backendSpec, /hiddenimports\s*=\s*collect_submodules\("app"\)/);
+  assert.match(backendSpec, /hiddenimports\s*=\s*collect_submodules\("uvicorn"\)/);
+  assert.match(backendSpec, /hiddenimports\s*\+=\s*collect_submodules\("fastembed"\)/);
+});
+
 test("fuse hardening resolves the platform-specific packaged executable", () => {
   assert.match(afterPack, /context\.electronPlatformName/);
   assert.match(afterPack, /platform === "linux"/);
@@ -69,13 +79,16 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.match(verifyPackage, /const coldStartAbsoluteMs = budgets\.budgets\.cold_start_ms\.absolute_max/);
   assert.match(
     verifyPackage,
-    /startupBudgetMs: coldStartBudgetMs,[\s\S]*operationalTimeoutMs: coldStartAbsoluteMs/,
+    /startupBudgetMs: coldStartBudgetMs,[\s\S]*operationalTimeoutMs: PACKAGE_OPERATIONAL_TIMEOUT_MS/,
   );
   assert.match(
     verifyPackage,
     /operationalTimeoutMs: PACKAGE_OPERATIONAL_TIMEOUT_MS/,
   );
   assert.match(verifyPackage, /restart_within_cold_start_absolute_limit/);
+  assert.match(verifyPackage, /\/api\/v1\/accounts\/parser-profiles/);
+  assert.match(verifyPackage, /\/api\/v1\/auth\/gmail\/status/);
+  assert.match(verifyPackage, /request_only_integrations_loaded/);
 });
 
 test("initial backend startup overlaps Electron readiness without exposing the renderer", () => {

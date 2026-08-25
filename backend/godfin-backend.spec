@@ -4,8 +4,11 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
-hiddenimports = collect_submodules("app")
-hiddenimports += collect_submodules("uvicorn")
+# PyInstaller's static analysis follows GODFIN's application imports. Keeping a
+# blanket collect_submodules("app") here forced dead and request-only modules
+# into every cold start. Only packages that perform their own dynamic loading
+# need explicit collection.
+hiddenimports = collect_submodules("uvicorn")
 hiddenimports += collect_submodules("fastembed")
 hiddenimports += [
     "google_auth_oauthlib.flow",

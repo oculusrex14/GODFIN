@@ -7,12 +7,12 @@ from app.core.parsers.hdfc_cc import PARSER as hdfc_cc
 from app.core.parsers.hdfc_savings import PARSER as hdfc_savings
 from app.core.parsers.kotak_savings import PARSER as kotak_savings
 from app.core.parsers.sbi_savings import PARSER as sbi_savings
+from app.core.parser_metadata import PARSER_REGISTRY_VERSION
 from app.core.pdf_extraction import PDFPLUMBER_ENGINE, PdfExtractionError
 from app.core.statement_parser import StatementParseResult
 
 
 MAX_PDF_PAGES = 250
-PARSER_REGISTRY_VERSION = "2026.08.v1"
 
 
 def registered_parsers() -> tuple[StatementParserPlugin, ...]:

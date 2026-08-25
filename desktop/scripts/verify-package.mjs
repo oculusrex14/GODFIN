@@ -396,6 +396,28 @@ async function launchOnce(
     ...trustedHeaders,
     "Authorization": `Bearer ${token}`,
   };
+  const [parserProfiles, gmailStatus] = await Promise.all([
+    fetch("http://127.0.0.1:5100/api/v1/accounts/parser-profiles", {
+      headers: authenticatedHeaders,
+    }),
+    fetch("http://127.0.0.1:5100/api/v1/auth/gmail/status", {
+      headers: authenticatedHeaders,
+    }),
+  ]);
+  if (!parserProfiles.ok || !gmailStatus.ok) {
+    await terminateTree(child, processTree(child.pid));
+    throw new Error("A request-only packaged integration could not be loaded.");
+  }
+  const parserProfileBody = await parserProfiles.json();
+  const gmailStatusBody = await gmailStatus.json();
+  if (
+    !Array.isArray(parserProfileBody)
+    || parserProfileBody.length === 0
+    || typeof gmailStatusBody.connected !== "boolean"
+  ) {
+    await terminateTree(child, processTree(child.pid));
+    throw new Error("A request-only packaged integration returned an invalid contract.");
+  }
   const retiredStatuses = await Promise.all([
     "/api/v1/system/restart",
     "/api/v1/system/backfill-embeddings",
@@ -431,6 +453,7 @@ async function launchOnce(
     processCount: tree.length,
     trustBoundaryEnforced: true,
     maintenanceBoundaryEnforced: true,
+    requestOnlyIntegrationsLoaded: true,
   };
 }
 
@@ -451,7 +474,9 @@ try {
   const coldStartAbsoluteMs = budgets.budgets.cold_start_ms.absolute_max;
   const first = await launchOnce(packaged.executable, userData, {
     startupBudgetMs: coldStartBudgetMs,
-    operationalTimeoutMs: coldStartAbsoluteMs,
+    // Observe long enough to report the true readiness time on a failed
+    // platform without changing the stricter cold-start pass budget above.
+    operationalTimeoutMs: PACKAGE_OPERATIONAL_TIMEOUT_MS,
   });
   const database = path.join(userData, "godfin.db");
   const firstDatabase = await stat(database);
@@ -483,6 +508,7 @@ try {
     database_preserved: secondDatabase.size > 0,
     trust_boundary_enforced: first.trustBoundaryEnforced && second.trustBoundaryEnforced,
     maintenance_boundary_enforced: first.maintenanceBoundaryEnforced && second.maintenanceBoundaryEnforced,
+    request_only_integrations_loaded: first.requestOnlyIntegrationsLoaded && second.requestOnlyIntegrationsLoaded,
   }, null, 2));
 } finally {
   await rm(userData, {
