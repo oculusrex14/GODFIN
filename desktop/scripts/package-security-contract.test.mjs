@@ -60,6 +60,16 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.match(verifyPackage, /async function waitForPortRelease\(timeoutMs = 5_000\)/);
   assert.match(verifyPackage, /if \(await portIsFree\(\)\) return/);
   assert.match(verifyPackage, /await waitForPortRelease\(\)/);
+  assert.match(verifyPackage, /const coldStartLimitMs = effectiveLimit\("cold_start_ms"\)/);
+  assert.match(verifyPackage, /const restartLimitMs = budgets\.budgets\.cold_start_ms\.absolute_max/);
+  assert.match(
+    verifyPackage,
+    /launchOnce\(packaged\.executable, userData, coldStartLimitMs\)/,
+  );
+  assert.match(
+    verifyPackage,
+    /launchOnce\(packaged\.executable, userData, restartLimitMs\)/,
+  );
 });
 
 test("initial backend startup overlaps Electron readiness without exposing the renderer", () => {

@@ -269,7 +269,10 @@ async function terminateTree(child, tree) {
   }
 }
 
-async function launchOnce(executable, userData) {
+async function launchOnce(executable, userData, startupLimitMs) {
+  if (!Number.isFinite(startupLimitMs) || startupLimitMs <= 0) {
+    throw new Error("A positive packaged startup limit is required.");
+  }
   const startedAt = performance.now();
   const launchSecret = randomBytes(32).toString("base64url");
   const child = spawn(executable, [`--user-data-dir=${userData}`], {
@@ -286,7 +289,7 @@ async function launchOnce(executable, userData) {
   });
 
   let healthResponse;
-  while (performance.now() - startedAt < effectiveLimit("cold_start_ms")) {
+  while (performance.now() - startedAt < startupLimitMs) {
     if (child.exitCode !== null) {
       throw new Error(`The packaged desktop process exited with code ${child.exitCode}.`);
     }
@@ -305,7 +308,7 @@ async function launchOnce(executable, userData) {
   if (!healthResponse?.ok) {
     child.kill("SIGTERM");
     throw new Error(
-      `Packaged startup exceeded ${effectiveLimit("cold_start_ms")} ms (observed ${startupMs} ms).`,
+      `Packaged startup exceeded ${startupLimitMs} ms (observed ${startupMs} ms).`,
     );
   }
 
@@ -409,12 +412,14 @@ verifyFuses(packaged.fuseTarget);
 
 const userData = await mkdtemp(path.join(tmpdir(), "godfin-package-smoke-"));
 try {
-  const first = await launchOnce(packaged.executable, userData);
+  const coldStartLimitMs = effectiveLimit("cold_start_ms");
+  const restartLimitMs = budgets.budgets.cold_start_ms.absolute_max;
+  const first = await launchOnce(packaged.executable, userData, coldStartLimitMs);
   const database = path.join(userData, "godfin.db");
   const firstDatabase = await stat(database);
   if (firstDatabase.size === 0) throw new Error("The packaged database is empty after startup.");
 
-  const second = await launchOnce(packaged.executable, userData);
+  const second = await launchOnce(packaged.executable, userData, restartLimitMs);
   const secondDatabase = await stat(database);
   if (secondDatabase.size === 0) throw new Error("The packaged database was not preserved.");
   verifySignature(packaged.fuseTarget);
