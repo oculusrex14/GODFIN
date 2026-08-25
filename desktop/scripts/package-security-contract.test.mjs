@@ -53,4 +53,7 @@ test("fuse hardening resolves the platform-specific packaged executable", () => 
   assert.match(verifyPackage, /shell: requiresWindowsShell/);
   assert.match(verifyPackage, /\/proc\/\$\{pid\}\/smaps_rollup/);
   assert.match(verifyPackage, /\^Pss:\\s\+\(\\d\+\)\\s\+kB\$/m);
+  assert.match(verifyPackage, /child\.once\("exit", finish\)/);
+  assert.match(verifyPackage, /maxRetries: 10/);
+  assert.match(verifyPackage, /retryDelay: 250/);
 });

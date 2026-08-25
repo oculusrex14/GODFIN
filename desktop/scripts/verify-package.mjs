@@ -234,6 +234,19 @@ async function terminateTree(child, tree) {
       stdio: "ignore",
       shell: false,
     });
+    await new Promise((resolve) => {
+      if (child.exitCode !== null) {
+        resolve();
+        return;
+      }
+      const finish = () => {
+        clearTimeout(timeout);
+        child.off("exit", finish);
+        resolve();
+      };
+      const timeout = setTimeout(finish, 2_000);
+      child.once("exit", finish);
+    });
     return;
   }
   child.kill("SIGTERM");
@@ -416,5 +429,10 @@ try {
     maintenance_boundary_enforced: first.maintenanceBoundaryEnforced && second.maintenanceBoundaryEnforced,
   }, null, 2));
 } finally {
-  await rm(userData, { recursive: true, force: true });
+  await rm(userData, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 250,
+  });
 }
