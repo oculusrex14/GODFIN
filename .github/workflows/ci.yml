@@ -108,6 +108,28 @@ jobs:
       - run: npm audit --omit=dev
         working-directory: website
 
+  supabase-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID: local-ci-client.apps.googleusercontent.com
+      SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: local-ci-secret-not-for-production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3.0.0
+        with:
+          version: 2.110.0
+      - name: Start isolated PostgreSQL test service
+        working-directory: website
+        run: supabase start --exclude gotrue,realtime,storage-api,imgproxy,kong,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: Execute migration and pgTAP isolation contracts
+        working-directory: website
+        run: supabase test db
+      - name: Stop isolated PostgreSQL test service
+        if: always()
+        working-directory: website
+        run: supabase stop --no-backup
+
   website-browser-matrix:
     runs-on: ubuntu-latest
     timeout-minutes: 25

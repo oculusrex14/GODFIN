@@ -1,8 +1,10 @@
 begin;
 select plan(5);
 
-select ok(
-  has_column('public', 'purchases', 'email_claimed_at'),
+select has_column(
+  'public',
+  'purchases',
+  'email_claimed_at',
   'Purchases have a server-only email delivery lease'
 );
 select is(
@@ -30,34 +32,30 @@ insert into public.purchases (
   'max', 999900, 'inr', 'cashfree', 'cashfree-email-lease'
 );
 
+with claimed as (
+  update public.purchases
+  set email_claimed_at = now()
+  where provider_order_id = 'cashfree-email-lease'
+    and email_sent_at is null
+    and email_claimed_at is null
+  returning id
+)
 select is(
-  (
-    with claimed as (
-      update public.purchases
-      set email_claimed_at = now()
-      where provider_order_id = 'cashfree-email-lease'
-        and email_sent_at is null
-        and email_claimed_at is null
-      returning id
-    )
-    select count(*) from claimed
-  ),
+  (select count(*) from claimed),
   1::bigint,
   'The first delivery worker acquires the lease'
 );
 
+with claimed as (
+  update public.purchases
+  set email_claimed_at = now()
+  where provider_order_id = 'cashfree-email-lease'
+    and email_sent_at is null
+    and email_claimed_at is null
+  returning id
+)
 select is(
-  (
-    with claimed as (
-      update public.purchases
-      set email_claimed_at = now()
-      where provider_order_id = 'cashfree-email-lease'
-        and email_sent_at is null
-        and email_claimed_at is null
-      returning id
-    )
-    select count(*) from claimed
-  ),
+  (select count(*) from claimed),
   0::bigint,
   'A concurrent delivery worker cannot acquire an active lease'
 );
@@ -66,21 +64,19 @@ update public.purchases
 set email_claimed_at = now() - interval '11 minutes'
 where provider_order_id = 'cashfree-email-lease';
 
-select is(
-  (
-    with claimed as (
-      update public.purchases
-      set email_claimed_at = now()
-      where provider_order_id = 'cashfree-email-lease'
-        and email_sent_at is null
-        and (
-          email_claimed_at is null
-          or email_claimed_at < now() - interval '10 minutes'
-        )
-      returning id
+with claimed as (
+  update public.purchases
+  set email_claimed_at = now()
+  where provider_order_id = 'cashfree-email-lease'
+    and email_sent_at is null
+    and (
+      email_claimed_at is null
+      or email_claimed_at < now() - interval '10 minutes'
     )
-    select count(*) from claimed
-  ),
+  returning id
+)
+select is(
+  (select count(*) from claimed),
   1::bigint,
   'A crashed worker lease becomes safely retryable after ten minutes'
 );
