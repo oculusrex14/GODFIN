@@ -1,134 +1,161 @@
 # GODFIN production remediation report
 
-Evidence date: 16 August 2026 (Asia/Kolkata)
+Evidence date: 25 August 2026 (Asia/Kolkata)
 
 ## Verdict
 
-The repository is a private release-candidate implementation, not an authorized public release. All code-level Critical and High corruption/security paths identified by the supplied audit have either been verified or reduced to a precise external/native-platform acceptance gate. The current working register contains 64 items: 31 `Verified` and 33 `Partially verified`; none remain `Open`.
+GODFIN is a private release candidate, not an authorized public release. The
+repository has no unclassified or `Open` finding. The current register contains
+67 findings: 31 `Verified` and 36 `Partially verified` after closure of the
+Supabase database/RLS finding.
 
-The correct readiness statement is:
+The defensible readiness statement is:
 
-> The repository is code-complete for release-candidate evaluation, subject to the external gates in `EXTERNAL_RELEASE_GATES.md`.
+> Application source, deterministic finance behavior, hosted CI, clean and
+> linked Supabase migration/RLS execution, and repository privacy are verified.
+> Payment-provider, Gmail-soak, signed-native, independent-review, recovery,
+> and explicit launch-authority gates remain.
 
-Public launch, installer promotion, update-feed promotion, and a public repository remain unauthorized.
+Public launch, checkout enablement, installer publication, and update-feed
+promotion remain unauthorized.
 
-## Baseline and scope
+## Candidate identity
 
-- Starting source commit: `5900e984e516b181ce98475261349a7187d621b4`
-- Ending source commit represented by this report: `8dce936` plus the documentation commit containing this file
-- Branch: `codex/godfin-production-v5`
+- Starting remediation source: `5900e984e516b181ce98475261349a7187d621b4`
+- Exact current source candidate: `b2dcaeccd237f5ae4e2076ca4959e5e329df72fe`
+- Branch: `codex/godfin-production-v6`
 - Remote: private `oculusrex14/GODFIN`
 - Host evidence: macOS arm64, Python 3.12.13
-- Baseline backend: 327 passing tests
-- Current backend: 883 passing tests
+- Backend baseline: 327 tests
+- Current backend: 1,008 tests
+- Hosted CI: run `32800966419`, all seven jobs passed
 - Audit sources: immutable files under `docs/GODFIN_FINAL_AUDIT_PACKAGE/`
 
-The stable-ID disposition, exact evidence, changed files, tests, residual risk, external action, and implementation commit are authoritative in `REMEDIATION_FINDINGS_REGISTER.csv`.
+The finding register remains authoritative for stable IDs, implementation
+history, residual risk, and assignment. This report records the latest
+candidate-wide evidence.
 
-## Architecture changes
+## Current architecture and controls
 
 ### Financial correctness
 
-- Shared transaction semantics now exclude confirmed transfers, reversals, refunds, reimbursements, and non-income credits consistently from authoritative totals.
-- Finalized periods are enforced at every current ingress path.
-- Monetary values use exact integer minor units or field-specific scaled integers with Decimal-facing ORM behavior. Compatibility shadows remain guarded until every supported private installation migrates.
-- Statement parsing is strict, bank/format explicit, reconciled, fingerprint-bound, size-limited, process-isolated, and fail-closed.
-- Dashboard, reports, behavior metrics, subscriptions, goals, recurring detection, net worth, FX, and tax outputs have deterministic invariant coverage.
+- Shared transaction semantics consistently exclude confirmed transfers,
+  reversals, refunds, reimbursements, and non-income credits from authoritative
+  totals.
+- Finalized periods are protected at every current ingress path.
+- Monetary values use exact integer minor units or field-specific scaled
+  integers with Decimal-facing ORM behavior.
+- Golden-ledger acceptance uses an independent standard-library oracle for
+  dashboard, cash flow, reports, CA pack, income, subscriptions, goals, net
+  worth, audit, and AI non-authority controls.
+- Owner-supplied private PDFs reconcile exactly to SBI 29, HDFC 306, and Kotak
+  497 rows; only hashes and aggregates are retained as evidence.
 
-Relevant IDs: `GF-FIN-001`, `GF-AUD-001`, `GF-DATA-002`, `GF-DB-001`, `GF-PARSE-001`, `GF-PARSE-002`, `GF-NW-001`, `GF-SUB-001`, `GF-VAL-001`, `GF-PERF-002`.
+### Local data lifecycle
 
-### Local data lifecycle and recovery
-
-- One ordered SQLite registry owns schema revisions through revision 19.
-- Every migration is restart-safe, idempotent, guarded by pre/postconditions, and preceded by a verified online backup.
-- Backups use unique private temporary paths, SQLite online backup, integrity and foreign-key checks, fsync, and atomic publication.
-- Restore stages and validates a candidate before replacement, checks schema/financial/encryption/settings/license controls, preserves the failed active database, and rolls back automatically.
-- Update rollback restores the immediate-predecessor database snapshot; older binaries never open a newer schema directly.
-
-Relevant IDs: `GF-BKP-001`, `GF-DATA-001`, `GF-MIG-001`, `GF-REL-002`, `GF-OPS-002`.
+- The ordered SQLite registry is current through revision 22.
+- Migrations are additive, restart-safe, preconditioned, postconditioned, and
+  preceded by a verified online backup.
+- Restore validates a staged candidate before replacement and preserves the
+  failed active database.
+- Binary rollback is bound to the immediate predecessor and its exact recovery
+  journal; older builds fail closed on newer schemas.
 
 ### Authentication, local boundary, and privacy
 
-- Sensitive settings are typed and allowlisted; generic mutation cannot change PIN, license, schema, encryption, first-run, or internal state.
-- PIN verification uses a shared durable device/IP throttle, versioned 600,000-round PBKDF2, rehash-on-success, weak-PIN rejection, and a separate random encryption key.
-- Renderer bearer state is memory-only and legacy storage keys are purged.
-- Packaged FastAPI is loopback-only by default, accepts the exact `godfin://app` origin, and requires an Electron per-launch secret. LAN mode is explicit and constrained.
-- Unsafe pickle deserialization is removed.
-- Hosted-AI consent, minimization, redaction, typed results, taxonomy validation, and prompt-input boundaries are centralized. Deterministic reports never silently call an LLM.
-
-Relevant IDs: `GF-AUTH-001`, `GF-AUTH-002`, `GF-AUTH-003`, `GF-NET-001`, `GF-PRIV-001`, `GF-REP-001`, `GF-SEC-001`, `GF-SEC-002`, `GF-ERR-001`, `GF-SYS-001`.
+- PIN verification uses durable device/IP throttling, versioned PBKDF2,
+  rehash-on-success, weak-PIN rejection, and a separate random encryption key.
+- Renderer bearer state is memory-only and legacy stored tokens are removed.
+- Packaged FastAPI is loopback-only by default, accepts the exact trusted app
+  origin, and requires the Electron per-launch secret.
+- Hosted-AI consent, minimization, redaction, typed results, taxonomy
+  validation, and non-authoritative explanation boundaries are centralized.
+- Ordinary financial data remains in local SQLite.
 
 ### Gmail
 
-- OAuth uses an installed-app client, fixed loopback callback, random single-use expiring state, session binding, PKCE, and private atomic token storage.
-- The callback alone may arrive without Electron's per-launch secret; Host/Origin checks and OAuth state remain mandatory.
-- Pagination, partial results, cursor safety, refresh/revocation states, idempotency, savepoints, background leases, and Gmail-only deletion are covered.
-- The owner installation completed live OAuth and a first safe sync on 16 August 2026.
-- Same-sender HDFC alerts now route from explicit message semantics and the account/card ending, not an unreliable sender-only assumption. Future no-match logs contain no mailbox identifiers.
-- Persisted OAuth expiry values are normalized to the exact UTC form expected by Google Auth, so a successful Gmail connection reloads after a complete desktop/backend restart.
-
-Relevant IDs: `OWNER-GMAIL-SETUP-001`, `GF-GMAIL-001`, `GF-GMAIL-002`, `GF-GMAIL-003`, `GF-OAUTH-001`.
+- Installed-app OAuth uses fixed loopback callback, signed random single-use
+  state, launch binding, PKCE, expiry, and private atomic token storage.
+- Pagination, cursor safety, idempotency, partial failure, refresh/revocation,
+  durable jobs, and Gmail-only deletion are automated.
+- Historical owner OAuth/sync evidence exists. A fresh packaged-candidate
+  connection, restart, reconnect, and seven-day soak remain mandatory.
 
 ### Licensing, commerce, and website
 
-- Paid access requires a versioned Ed25519 entitlement bound to the random installation ID and exact released feature manifest. Writable SQLite tier/status flags cannot unlock paid routes.
-- The three-device limit remains server-authoritative with deactivation and bounded offline grace.
-- Stripe runtime checkout was superseded by Cashfree. The website creates a server-priced Cashfree order, verifies timestamp-plus-raw-body HMAC webhooks, re-fetches provider order/payment state, and records idempotent payment/refund/dispute events.
-- Migration `0006_cashfree_commerce.sql` keeps historical provider rows while adding Cashfree IDs and deterministic suspension/revocation/restoration.
-- Lifetime Pro and Max include zero recurring hosted-AI credits. Checkout/PPP remain fail-closed until provider and tax gates pass.
-- Canonical website/domain configuration is `https://godfin.dev`, with `https://godfin.vercel.app` retained as the deployment fallback; general contact is `hello@godfin.dev`.
+- Paid access requires a versioned Ed25519 entitlement bound to the random
+  installation ID and the released feature manifest.
+- Three-device enforcement and deactivation remain server-authoritative.
+- Cashfree replaced Stripe. Server-owned prices, bounded raw-body HMAC,
+  authoritative provider re-fetch, idempotent event state, refunds, disputes,
+  and in-place lifetime upgrades are implemented.
+- Pro and Max are lifetime purchases and include zero recurring hosted-AI
+  credits. Checkout and PPP stay fail-closed.
+- Canonical website configuration is `https://godfin.dev`; the Vercel domain is
+  the fallback and `hello@godfin.dev` is the public contact.
 
-Relevant IDs: `GF-COM-001`, `GF-CONTENT-001`, `GF-LIC-002`, `GF-PAY-001`, `GF-PRICE-001`, `GF-RLS-001`, `GF-WEB-001`.
+### Supabase database closure
+
+- All 11 ordered migrations through
+  `20260825021500_grant_authenticated_rls_reads.sql` align on the linked project.
+- A clean CI database and the linked project each pass all 107 pgTAP assertions.
+- Assertions cover anon/authenticated/service-role grants, two-user own-row
+  isolation, SECURITY DEFINER execution boundaries, device caps, abuse limits,
+  Cashfree ordering/refund/dispute state, upgrades, and email leasing.
+- The clean database gate found and prevented a missing authenticated `SELECT`
+  grant. The additive fix grants read-only access on the four own-row account
+  tables while keeping anonymous and authenticated writes denied.
+- Managed backup/PITR, a restore drill, Auth leaked-password protection, and a
+  real second-account browser flow remain release gates.
 
 ### UX, AI, jobs, performance, and release
 
-- Shared dialogs, focus trapping/restoration, skip links, live regions, reduced motion, accessible labels, and destructive-action recovery are implemented.
-- Local-AI registry digests are signed and fail-closed. Downloads use durable jobs, cancellation, recovery, resource checks, and activation only after exact-digest benchmark acceptance.
-- Durable SQLite jobs use atomic claims, leases, heartbeats, backoff, bounded concurrency, cancellation, support-safe results, and restart recovery.
-- Request IDs, readiness, local aggregate metrics, privacy-redacted logs, and support-safe diagnostics are present without telemetry.
-- Performance budgets are tied to tests; measured 100,000-row dashboard/report operations remain below 340 ms on the recorded arm64 host.
-- CI and release workflows are immutable-action-pinned, privacy-check packages, emit checksums/SBOM/provenance, and enforce staged promotion and immediate-predecessor rollback.
-- Website Playwright now defines Chromium, Firefox, and WebKit projects; native Safari/provider evidence remains external.
-
-Relevant IDs: `GF-UX-001`, `GF-A11Y-001`, `GF-BROWSER-001`, `GF-AI-001`, `GF-AI-002`, `GF-COR-002`, `GF-JOB-001`, `GF-OBS-001`, `GF-PERF-001`, `GF-REL-001`, `GF-OPS-001`.
-
-## Database migrations
-
-- Local SQLite: authoritative revisions 11–19, with current revision 19.
-- Supabase: ordered migrations through `0006_cashfree_commerce.sql`.
-- Owner-database rehearsal: an isolated online copy reached revision 19 with `quick_check=ok`, zero foreign-key errors, unchanged financial controls, verified backup, and idempotent second run. The live database was not used as a migration test target.
-- Remote Supabase migration execution remains an external gate; source parsing is not misreported as deployed execution.
-
-See `MIGRATION_AND_ROLLBACK.md` and `DISASTER_RECOVERY_RUNBOOK.md`.
+- Shared dialog/focus, skip-link, live-region, reduced-motion, accessible-label,
+  information-bubble, and destructive-recovery contracts are implemented.
+- Local-model registry digests are signed and fail closed; model work is
+  cancellable, resource-checked, and never authoritative for finance totals.
+- Durable SQLite jobs use atomic claims, leases, heartbeats, retry/backoff,
+  bounded concurrency, cancellation, and restart recovery.
+- Performance budgets are executable; 100,000-row dashboard and report paths
+  remain within their recorded arm64 baseline.
+- Release workflows pin actions, verify package privacy, and bind exact bytes to
+  checksums, SBOM, notices, and provenance.
 
 ## Verification snapshot
 
-| Surface | Result |
+| Surface | Current result |
 | --- | --- |
-| Backend | 883 passed in 65.63 seconds |
-| Focused Gmail/parser/routing/restart | 97 passed |
-| Frontend | lint and Vite production build passed at current production baseline |
-| Website | Cashfree tests, contracts, lint, dependency audit, and Next.js production build passed at current production baseline |
-| Desktop | privacy/integrity and update/release tests passed at current production baseline |
-| Database SQL | all Supabase SQL parsed; pgTAP authored but not executed without PostgreSQL/Docker |
-| Secret scanning | staged and full-history scans report no leak in the production repository |
-| Dependency audits | npm reports zero known vulnerabilities; pip-audit reports no unexcepted findings and one documented temporary exception (`PYSEC-2026-3552`, cryptography 49.0.0) because GODFIN does not use the affected PKCS#7 decrypt APIs and the assigned 50.0.0 fix is not yet available |
-| macOS arm64 private package | 3.376 s first start, 1.229 s restart, 607 MiB max idle, data preserved, package privacy passed; corrected Gmail-restart build installed |
-| Other native platforms | not executed; CI build paths exist and external clean-machine evidence is assigned |
+| Backend | 1,008 passed on exact SHA `b2dcaec` |
+| Frontend | lint, accessibility/content/auth contracts, controls, and Vite build passed |
+| Website | contracts, 11 unit tests, migration hashes, Next.js build, and audit passed |
+| Browser/e2e | production smoke and Chromium/Firefox/WebKit matrices passed |
+| Supabase clean DB | 11 migrations and 107 pgTAP assertions passed |
+| Supabase linked DB | 11 migrations aligned and 107 pgTAP assertions passed |
+| Desktop source audit | privacy/integrity, update/release, dependency audit, and syntax passed |
+| Secret scanning | complete 166-commit history passed before temporary CI visibility |
+| Dependency audits | Python and npm surfaces report no accepted vulnerability; cryptography is on fixed 50.x |
+| Repository visibility | GitHub API reports `PRIVATE` after run `32800966419` |
+| macOS arm64 package | older ad-hoc private candidate passed; exact current candidate is not signed/notarized |
+| Other native platforms | not executed |
 
-Exact commands and current results are in `VERIFICATION_MATRIX.md`.
+## Residual release blockers
 
-## Residual Critical/High risk
-
-No Critical/High item remains open without classification. The remaining Critical/High partial statuses are limited to:
-
-- lawful real-statement corpus breadth (`GF-PARSE-001`, `GF-PARSE-002`);
-- clean native migration/restore/update/package evidence (`GF-DATA-002`, `GF-DB-001`, `GF-BKP-001`, `GF-MIG-001`, `GF-REL-001`, `GF-REL-002`, `GF-PERF-002`);
-- qualified legal/privacy/tax and truthful deployed-content review (`GF-CONTENT-001`);
-- live Supabase/Cashfree/signing/provider evidence and GitHub-hosted runner availability (`GF-LIC-002`, `GF-PAY-001`, `GF-PRICE-001`, `GF-OPS-001`).
-
-These do not authorize public launch. They are assigned in `EXTERNAL_RELEASE_GATES.md`.
+- Supabase backup/PITR/restore evidence and leaked-password protection.
+- Cashfree KYC, credentials, purchase/refund/dispute/upgrade sandbox matrix, and
+  qualified tax/refund/PPP decisions.
+- Fresh packaged Gmail OAuth/restart/reconnect and seven-day soak.
+- Resend domain and SPF/DKIM/DMARC/delivery evidence.
+- Signed/notarized macOS arm64/x64, Authenticode Windows, Linux package, clean
+  install/update/rollback/uninstall, and R2 staged-update evidence.
+- Native assistive-technology and every-control signed-package acceptance.
+- Qualified dependency-license, legal/privacy, tax, and accessibility review.
+- Independent parser fuzzing and full penetration test.
+- Explicit written public-launch authorization tied to immutable artifacts.
 
 ## Final recommendation
 
-Keep the repository and releases private. Exact-source GitHub Actions run `32787609617` is green on application commit `3a26090`, and the repository API reports `PRIVATE`. Use the current code only for private release-candidate evaluation. Complete the Supabase/Cashfree, DNS/email, signing/notarization, clean-platform, lawful parser-corpus, qualified review, native browser/assistive-technology, and independent pentest matrices; require explicit written owner authorization before any public website promotion, installer publication, or update-feed promotion.
+Keep the repository, releases, checkout, and update channel private/disabled.
+Use candidate `b2dcaec` only for private release-candidate evaluation. Complete
+the assigned external gates in `EXTERNAL_RELEASE_GATES.md` and the owner
+runbook. No source-level success is a substitute for provider, signed-package,
+qualified-review, or owner-launch evidence.

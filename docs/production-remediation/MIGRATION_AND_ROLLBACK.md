@@ -15,7 +15,7 @@ The desktop app keeps ordinary user data only in local SQLite. Supabase stores w
 7. Startup validates `PRAGMA quick_check`, foreign keys, revision, migration postconditions, encrypted data, and financial controls before readiness.
 8. A second start must perform no destructive migration and must retain identical controls.
 
-Current local schema revision: 19.
+Current local schema revision: 22.
 
 ## Required upgrade acceptance
 
@@ -46,13 +46,22 @@ Activity after the pre-upgrade snapshot is retained in the safety backup but is 
 
 ## Supabase/Cashfree migration
 
-Current ordered website migration boundary: `0006_cashfree_commerce.sql`.
+Current ordered website migration boundary:
+`20260825021500_grant_authenticated_rls_reads.sql` (11 migrations).
+
+On 25 August 2026 all 11 migrations were aligned on the linked Supabase
+project. The five live pgTAP suites passed 107 assertions covering least-
+privilege grants, own-row RLS, anon/service-role boundaries, abuse controls,
+Cashfree event state, upgrades, device caps, and the email-delivery lease. See
+`SUPABASE_REMOTE_EVIDENCE_2026-08-25.md`.
 
 1. Disable checkout, PPP checkout, and public purchase messaging.
 2. Export/backup licensing, purchases, activations, payment events, status history, waitlist, and migration evidence.
 3. Verify checked-in migration hashes.
 4. Run `supabase db reset`, `supabase db lint --local --fail-on error`, and `supabase test db` on a disposable local PostgreSQL/Supabase stack.
-5. Apply to a non-production project first.
+5. Apply to a non-production project first. The linked project currently has
+   database-level evidence, but managed backup/PITR and a restore drill remain
+   mandatory before checkout.
 6. Verify function ownership, empty `search_path`, grants, RLS, two-user isolation, service-role-only mutation, three-device behavior, and fourth-device rejection.
 7. Record the exact migration SHA-256 in `godfin_migration_evidence`.
 8. Replay Cashfree sandbox success, duplicates, out-of-order refunds, partial/full refunds, and disputes.

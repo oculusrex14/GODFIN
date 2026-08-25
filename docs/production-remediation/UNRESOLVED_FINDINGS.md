@@ -14,7 +14,7 @@ No finding is currently unclassified or `Open`. The items below remain `Partiall
 | `GF-MIG-001` | One lifecycle is complete; signed historical/native fixtures are unavailable | Immediate-predecessor upgrade/rollback on every supported platform |
 | `GF-REL-002` | Data-aware rollback is complete; native signed updater/R2 behavior is not proven | Staged signed predecessor/candidate interruption and rollback drill |
 | `GF-CONTENT-001` | Public claims are engineering-aligned but not legally approved/deployed | Qualified review, verified mailbox, deployed browser evidence |
-| `GF-LIC-002` | Signed entitlements are complete; remote signer/Supabase/native rotation is pending | Applied migration, protected signer, live signed response, cross-platform rotation/tamper tests |
+| `GF-LIC-002` | Signed entitlements and hosted migrations are complete; protected live signer and native rotation evidence are pending | Protected signer, live signed response, cross-platform rotation/tamper tests |
 | `GF-PAY-001` | Cashfree contracts are complete; provider/db-runtime delivery is pending | pgTAP plus Cashfree sandbox purchase/refund/dispute replay |
 | `GF-PRICE-001` | Server pricing and fail-closed review are complete; KYC/tax/regional proof is pending | Cashfree sandbox/regional/tax matrix and qualified approval |
 | `GF-PERF-002` | Bounded streaming/process isolation is complete; native throughput/corpus evidence is pending | Signed native parser timeout/crash/throughput matrix |
@@ -33,7 +33,10 @@ No finding is currently unclassified or `Open`. The items below remain `Partiall
 - `GF-NET-001`: packaged LAN/firewall/browser matrix on supported platforms.
 - `GF-SYS-001`: packaged cancellation/interruption and durable-job evidence.
 - `GF-GMAIL-003`: Google public consent/verification decision; private owner connection is complete.
-- `GF-RLS-001`: Supabase PostgreSQL/RLS/function-owner execution and deployed two-user isolation.
+- Supabase database/RLS execution is closed: all 11 migrations align remotely
+  and 107 assertions pass on clean CI and the linked project. Supabase
+  backup/PITR, HIBP leaked-password protection, and a real second-account
+  browser flow remain release gates rather than unexecuted database claims.
 - `GF-WEB-001`: deployed WAF/abuse/CSP/provider-browser evidence.
 - `GF-A11Y-001`: native browser, screen-reader, zoom, touch, contrast, and reduced-motion matrix.
 - `GF-BROWSER-001`: first private CI three-engine result and native Safari/provider flows.

@@ -24,7 +24,7 @@ npm run build
 
 `verify:a11y` parses every JSX/TSX source file and checks the current control/dialog inventory. It fails for an unnamed icon button, an unlabelled raw field, a dialog that bypasses `DialogSurface`, a missing skip/route-focus contract, missing notification semantics, missing reduced-motion support, or loss of the focus/inert/return behavior in the shared primitive.
 
-The Playwright accessibility suite adds serious/critical axe checks, PIN touch targets, skip-link behavior, route-heading focus, modal Tab wrapping, Shift+Tab wrapping, inert background, Escape close, trigger focus return, reduced motion, and 400% text scaling. GitHub Actions run [`32787609617`](https://github.com/oculusrex14/GODFIN/actions/runs/32787609617) passed this suite in Chromium, Firefox, and WebKit on exact source SHA `3a26090a52531d39481b7cdff305d3d6a7812542`.
+The Playwright accessibility suite adds serious/critical axe checks, PIN touch targets, skip-link behavior, route-heading focus, modal Tab wrapping, Shift+Tab wrapping, inert background, Escape close, trigger focus return, reduced motion, and 400% text scaling. GitHub Actions run [`32800966419`](https://github.com/oculusrex14/GODFIN/actions/runs/32800966419) passed this suite in Chromium, Firefox, and WebKit on exact source SHA `b2dcaeccd237f5ae4e2076ca4959e5e329df72fe`.
 
 ## Final manual and automated browser matrix
 
