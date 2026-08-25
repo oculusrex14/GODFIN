@@ -28445,6 +28445,43 @@
       "version": "0.4.6"
     },
     {
+      "bom-ref": "pkg:pypi/coloredlogs@15.0.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "612ee75c546f53e92e70049c9dbfcc18c935a2b9a53b66085ce9ef6a6e5c0934"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "7c991aa71a4577af2f82600d8f8f3a89f936baeaf9b50a9c197da014e5bf16b0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "coloredlogs",
+      "properties": [
+        {
+          "name": "godfin:dependency:surfaces",
+          "value": "python-build,python-runtime,python-test"
+        },
+        {
+          "name": "godfin:dependency:scopes",
+          "value": "build,runtime,test"
+        },
+        {
+          "name": "godfin:dependency:markers",
+          "value": "python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'darwin'"
+        }
+      ],
+      "purl": "pkg:pypi/coloredlogs@15.0.1",
+      "scope": "required",
+      "type": "library",
+      "version": "15.0.1"
+    },
+    {
       "bom-ref": "pkg:pypi/contourpy@1.3.3",
       "hashes": [
         {
@@ -30622,6 +30659,43 @@
       "version": "1.28.0"
     },
     {
+      "bom-ref": "pkg:pypi/humanfriendly@10.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "humanfriendly",
+      "properties": [
+        {
+          "name": "godfin:dependency:surfaces",
+          "value": "python-build,python-runtime,python-test"
+        },
+        {
+          "name": "godfin:dependency:scopes",
+          "value": "build,runtime,test"
+        },
+        {
+          "name": "godfin:dependency:markers",
+          "value": "python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'darwin'"
+        }
+      ],
+      "purl": "pkg:pypi/humanfriendly@10.0",
+      "scope": "required",
+      "type": "library",
+      "version": "10.0"
+    },
+    {
       "bom-ref": "pkg:pypi/idna@3.19",
       "hashes": [
         {
@@ -32642,6 +32716,43 @@
       "version": "5.2.1"
     },
     {
+      "bom-ref": "pkg:pypi/mpmath@1.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "mpmath",
+      "properties": [
+        {
+          "name": "godfin:dependency:surfaces",
+          "value": "python-build,python-runtime,python-test"
+        },
+        {
+          "name": "godfin:dependency:scopes",
+          "value": "build,runtime,test"
+        },
+        {
+          "name": "godfin:dependency:markers",
+          "value": "python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'darwin'"
+        }
+      ],
+      "purl": "pkg:pypi/mpmath@1.3.0",
+      "scope": "required",
+      "type": "library",
+      "version": "1.3.0"
+    },
+    {
       "bom-ref": "pkg:pypi/numpy@2.5.2",
       "hashes": [
         {
@@ -32964,6 +33075,123 @@
       "version": "3.3.1"
     },
     {
+      "bom-ref": "pkg:pypi/onnxruntime@1.23.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0be6a37a45e6719db5120e9986fcd30ea205ac8103fd1fb74b6c33348327a0cc"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "0f9b4ae77f8e3c9bee50c27bc1beede83f786fe1d52e99ac85aa8d65a01e9b77"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "162f4ca894ec3de1a6fd53589e511e06ecdc3ff646849b62a9da7489dee9ce95"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "1f9cc0a55349c584f083c1c076e611a7c35d5b867d5d6e6d6c823bf821978088"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "218295a8acae83905f6f1aed8cacb8e3eb3bd7513a13fe4ba3b2664a19fc4a6b"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "25de5214923ce941a3523739d34a520aac30f21e631de53bba9174dc9c004435"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "2ff531ad8496281b4297f32b83b01cdd719617e2351ffe0dba5684fb283afa1f"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "45d127d6e1e9b99d1ebeae9bcd8f98617a812f53f46699eafeb976275744826b"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "4ca88747e708e5c67337b0f65eed4b7d0dd70d22ac332038c9fc4635760018f7"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "6f91d2c9b0965e86827a5ba01531d5b669770b01775b23199565d6c1f136616c"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "76ff670550dc23e58ea9bc53b5149b99a44e63b34b524f7b8547469aaa0dcb8c"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "87d8b6eaf0fbeb6835a60a4265fde7a3b60157cf1b2764773ac47237b4d48612"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "8bace4e0d46480fbeeb7bbe1ffe1f080e6663a42d1086ff95c1551f2d39e7872"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "8f7d1fe034090a1e371b7f3ca9d3ccae2fabae8c1d8844fb7371d1ea38e8e8d2"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "902c756d8b633ce0dedd889b7c08459433fbcf35e9c38d1c03ddc020f0648c6e"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "9d2385e774f46ac38f02b3a91a91e30263d41b2f1f4f26ae34805b2a9ddef466"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "a7730122afe186a784660f6ec5807138bf9d792fa1df76556b27307ea9ebcbe3"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "b28740f4ecef1738ea8f807461dd541b8287d5650b5be33bca7b474e3cbd1f36"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "b8f029a6b98d3cf5be564d52802bb50a8489ab73409fa9db0bf583eabb7c2321"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "bbfd2fca76c855317568c1b36a885ddea2272c13cb0e395002c402f2360429a6"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "da44b99206e77734c5819aa2142c69e64f3b46edc3bd314f6a45a932defc0b3e"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "e2b9233c4947907fd1818d0e581c049c41ccc39b2856cc942ff6d26317cee145"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "onnxruntime",
+      "properties": [
+        {
+          "name": "godfin:dependency:surfaces",
+          "value": "python-build,python-runtime,python-test"
+        },
+        {
+          "name": "godfin:dependency:scopes",
+          "value": "build,runtime,test"
+        },
+        {
+          "name": "godfin:dependency:markers",
+          "value": "python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'darwin'"
+        }
+      ],
+      "purl": "pkg:pypi/onnxruntime@1.23.2",
+      "scope": "required",
+      "type": "library",
+      "version": "1.23.2"
+    },
+    {
       "bom-ref": "pkg:pypi/onnxruntime@1.29.0",
       "hashes": [
         {
@@ -33077,6 +33305,10 @@
         {
           "name": "godfin:dependency:scopes",
           "value": "build,runtime,test"
+        },
+        {
+          "name": "godfin:dependency:markers",
+          "value": "python_full_version >= '3.14' or platform_machine != 'x86_64' or sys_platform != 'darwin'"
         }
       ],
       "purl": "pkg:pypi/onnxruntime@1.29.0",
@@ -36450,6 +36682,43 @@
       "version": "1.6.0"
     },
     {
+      "bom-ref": "pkg:pypi/sympy@1.14.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "sympy",
+      "properties": [
+        {
+          "name": "godfin:dependency:surfaces",
+          "value": "python-build,python-runtime,python-test"
+        },
+        {
+          "name": "godfin:dependency:scopes",
+          "value": "build,runtime,test"
+        },
+        {
+          "name": "godfin:dependency:markers",
+          "value": "python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'darwin'"
+        }
+      ],
+      "purl": "pkg:pypi/sympy@1.14.0",
+      "scope": "required",
+      "type": "library",
+      "version": "1.14.0"
+    },
+    {
       "bom-ref": "pkg:pypi/thefuzz@0.22.1",
       "hashes": [
         {
@@ -38434,6 +38703,7 @@
         "pkg:pypi/charset-normalizer@3.5.1",
         "pkg:pypi/click@8.4.2",
         "pkg:pypi/colorama@0.4.6",
+        "pkg:pypi/coloredlogs@15.0.1",
         "pkg:pypi/contourpy@1.3.3",
         "pkg:pypi/cryptography@50.0.0",
         "pkg:pypi/cycler@0.12.1",
@@ -38460,14 +38730,17 @@
         "pkg:pypi/httptools@0.8.0",
         "pkg:pypi/httpx@0.28.1",
         "pkg:pypi/huggingface-hub@1.28.0",
+        "pkg:pypi/humanfriendly@10.0",
         "pkg:pypi/idna@3.19",
         "pkg:pypi/kiwisolver@1.5.0",
         "pkg:pypi/loguru@0.7.3",
         "pkg:pypi/lxml@6.1.2",
         "pkg:pypi/matplotlib@3.11.1",
         "pkg:pypi/mmh3@5.2.1",
+        "pkg:pypi/mpmath@1.3.0",
         "pkg:pypi/numpy@2.5.2",
         "pkg:pypi/oauthlib@3.3.1",
+        "pkg:pypi/onnxruntime@1.23.2",
         "pkg:pypi/onnxruntime@1.29.0",
         "pkg:pypi/openpyxl@3.1.5",
         "pkg:pypi/packaging@26.3",
@@ -38498,6 +38771,7 @@
         "pkg:pypi/soupsieve@2.9.2",
         "pkg:pypi/sqlalchemy@2.0.52",
         "pkg:pypi/starlette@1.6.0",
+        "pkg:pypi/sympy@1.14.0",
         "pkg:pypi/thefuzz@0.22.1",
         "pkg:pypi/tokenizers@0.23.1",
         "pkg:pypi/tqdm@4.70.0",
@@ -38532,7 +38806,7 @@
     "properties": [
       {
         "name": "godfin:input:fingerprint:sha256",
-        "value": "eacac9b1ee875e2687bf17ef859257d74f1ce98fa68525431fa0bb3791dc8581"
+        "value": "6028fb52fe34bc3e76276b15729e68126d52a8b2a262c218cb74dd73c81864f7"
       },
       {
         "name": "godfin:public-promotion",
@@ -38549,7 +38823,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:423c3e7d-2d0c-5773-8ce7-160ea1298910",
+  "serialNumber": "urn:uuid:6165e5e6-5f21-5d02-b4ed-bf926e453daf",
   "specVersion": "1.6",
   "version": 1
 }

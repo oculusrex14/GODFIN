@@ -76,6 +76,11 @@ test("native smoke builds are manual, read-only, non-publishing, and evidence-on
   assert.doesNotMatch(workflow, /desktop\/release\/\*\.(?:dmg|zip|exe|AppImage|deb)/);
 });
 
+test("repository text artifacts use deterministic LF bytes on every runner", async () => {
+  const attributes = await source(".gitattributes");
+  assert.match(attributes, /^\* text=auto eol=lf$/m);
+});
+
 test("all GitHub Actions dependencies are pinned to immutable commits", async () => {
   for (const path of [
     ".github/workflows/ci.yml",

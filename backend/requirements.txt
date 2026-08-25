@@ -17,6 +17,10 @@ google-auth-oauthlib>=1.0.0
 google-api-python-client>=2.0.0
 # ONNX-based local embeddings. The ~90 MB model downloads only when enabled.
 fastembed==0.8.0
+# ONNX Runtime 1.29 has no Intel-macOS wheel. Keep the newer runtime everywhere
+# else and use FastEmbed-compatible 1.23.2 only on that supported legacy target.
+onnxruntime==1.23.2 ; sys_platform == "darwin" and platform_machine == "x86_64" and python_version < "3.14"
+onnxruntime==1.29.0 ; sys_platform != "darwin" or platform_machine != "x86_64" or python_version >= "3.14"
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
 pdfplumber>=0.10.0

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const main = readFileSync(path.join(here, "..", "main.cjs"), "utf8");
+const afterPack = readFileSync(path.join(here, "after-pack.cjs"), "utf8");
 const pkg = JSON.parse(readFileSync(path.join(here, "..", "package.json"), "utf8"));
 
 test("updates require separate download and install consent", () => {
@@ -35,4 +36,11 @@ test("backup restore is main-frame-only, one-at-a-time, and token-bound", () => 
 test("local mac packaging cannot emit an unsigned distributable installer", () => {
   assert.match(pkg.scripts["dist:mac:local"], /--dir/);
   assert.doesNotMatch(pkg.scripts["dist:mac"], /notarize=false|identity=-/);
+});
+
+test("fuse hardening resolves the platform-specific packaged executable", () => {
+  assert.match(afterPack, /context\.electronPlatformName/);
+  assert.match(afterPack, /platform === "linux"/);
+  assert.match(afterPack, /context\.packager\.executableName/);
+  assert.match(afterPack, /context\.packager\.appInfo\.productFilename/);
 });

@@ -4,8 +4,8 @@
 
 ## Inventory summary
 
-- Exact unique components: 1035
-- Components used by a runtime surface: 424
+- Exact unique components: 1040
+- Components used by a runtime surface: 429
 - Components requiring conditional-license review: 35
 - Application license: PolyForm Noncommercial 1.0.0
 
@@ -965,6 +965,7 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | charset-normalizer | 3.5.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | click | 8.4.2 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | colorama | 0.4.6 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| coloredlogs | 15.0.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | contourpy | 1.3.3 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | cryptography | 50.0.0 | PyPI | Apache-2.0 OR BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | cycler | 0.12.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
@@ -994,6 +995,7 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | httpx2 | 2.12.0 | PyPI | BSD-3-Clause | test | python-test |
 | httpx | 0.28.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | huggingface-hub | 1.28.0 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
+| humanfriendly | 10.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | idna | 3.19 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | iniconfig | 2.3.0 | PyPI | MIT | test | python-test |
 | kiwisolver | 1.5.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
@@ -1002,8 +1004,10 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | macholib | 1.16.4 | PyPI | MIT | build | python-build |
 | matplotlib | 3.11.1 | PyPI | PSF-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | mmh3 | 5.2.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
+| mpmath | 1.3.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | numpy | 2.5.2 | PyPI | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | build, runtime, test | python-build, python-runtime, python-test |
 | oauthlib | 3.3.1 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| onnxruntime | 1.23.2 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | onnxruntime | 1.29.0 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | openpyxl | 3.1.5 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | packaging | 26.3 | PyPI | Apache-2.0 OR BSD-2-Clause | build, runtime, test | python-build, python-runtime, python-test |
@@ -1042,6 +1046,7 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 | soupsieve | 2.9.2 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | sqlalchemy | 2.0.52 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | starlette | 1.6.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
+| sympy | 1.14.0 | PyPI | BSD-3-Clause | build, runtime, test | python-build, python-runtime, python-test |
 | thefuzz | 0.22.1 | PyPI | MIT | build, runtime, test | python-build, python-runtime, python-test |
 | tokenizers | 0.23.1 | PyPI | Apache-2.0 | build, runtime, test | python-build, python-runtime, python-test |
 | tqdm | 4.70.0 | PyPI | MPL-2.0 AND MIT | build, runtime, test | python-build, python-runtime, python-test |
@@ -1063,14 +1068,14 @@ The authoritative machine-readable inventory is `sbom/godfin.cdx.json`. Dependen
 
 | Input | SHA-256 |
 |---|---|
-| `backend/requirements-build-lock.txt` | `9f230b923154eecb1db58c0658b619dddd30870d2185b7e88534d39ab20e7f31` |
-| `backend/requirements-lock.txt` | `67418e529d4b089a8ceaf2dd4ab933e7ca80f61294c4d98516fa874a5807d512` |
-| `backend/requirements-test-lock.txt` | `546c8be397cbadb38a81e3e0e1c54c7a9dfa6b56e8f53d5d87e82364957a60a3` |
+| `backend/requirements-build-lock.txt` | `eab9d09c54c7b17e698af7d6fd33ab6f2130a1ba57f28ded146bfd25fb9b3114` |
+| `backend/requirements-lock.txt` | `ecb0535a2346b3c3637ed4e1d5efe168310b3d4d78f69133f12cd251316549ee` |
+| `backend/requirements-test-lock.txt` | `f4eca107746c1819b7047b471cab8ba9aa906489b05d4bd1c971b4b34ceb595e` |
 | `desktop/package-lock.json` | `6cd31437a7a8279d2e7fac6ab3afb1fa2933863834f215330207d191f6386cc6` |
 | `frontend/package-lock.json` | `ee10cbf9af687f03ba291edad9f46f250ea1cc3f76e423ab81a479c81c8c9829` |
 | `playwright-tests/package-lock.json` | `de7d47eede06c4e557e72816924d371c0993405a30fb79a12618f5136a66d43b` |
 | `supply-chain/license-policy.json` | `695825706d9c47fb6645a503a03b10433695dcd8c027d77f5445a608e3fc72eb` |
-| `supply-chain/python-license-review.json` | `5bd358251ff195fd899d7a3ecc04ad702ec6f4f81624e30a7c8494422cb6c7cd` |
+| `supply-chain/python-license-review.json` | `786db769d05729f300869b13ea0e592ad9a2d3900732e58c117f3247aad34813` |
 | `website/package-lock.json` | `710415f21da2f095b1761617bc714f3634002d65423c4cd7d10ec512794eaff9` |
 
 ## Release rule

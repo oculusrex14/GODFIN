@@ -51,8 +51,8 @@ def _canonicalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _lock_packages(path: Path) -> dict[str, str]:
-    packages: dict[str, str] = {}
+def _lock_packages(path: Path) -> dict[str, set[str]]:
+    packages: dict[str, set[str]] = {}
     text = path.read_text(encoding="utf-8")
     for match in re.finditer(
         r"^([A-Za-z0-9_.-]+)==([^ ;\\\n]+)(?:[^\n]*)\\\n"
@@ -61,9 +61,7 @@ def _lock_packages(path: Path) -> dict[str, str]:
         flags=re.MULTILINE,
     ):
         name = _canonicalize(match.group(1))
-        if name in packages and packages[name] != match.group(2):
-            raise RuntimeError(f"{path.name} pins {name} more than once")
-        packages[name] = match.group(2)
+        packages.setdefault(name, set()).add(match.group(2))
 
     declared = {
         _canonicalize(match.group(1))
@@ -161,10 +159,11 @@ def main() -> int:
         if BUILD_ONLY & runtime.keys():
             raise RuntimeError("build-only packages entered the runtime lock")
 
-        for name, version in runtime.items():
-            if test.get(name) != version or build.get(name) != version:
+        for name, versions in runtime.items():
+            if test.get(name) != versions or build.get(name) != versions:
                 raise RuntimeError(
-                    f"{name}=={version} is not identical across inherited locks"
+                    f"{name} versions {sorted(versions)} are not identical "
+                    "across inherited locks"
                 )
     except RuntimeError as exc:
         print(f"Dependency boundary verification failed: {exc}", file=sys.stderr)

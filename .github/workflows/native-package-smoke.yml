@@ -162,19 +162,19 @@ jobs:
                   "desktop executable",
               )
               backend = first_file(
-                  list(release.glob("**/GODFIN.app/Contents/Resources/backend/godfin-backend")),
+                  list(release.glob("**/GODFIN.app/Contents/Resources/backend/godfin-backend/godfin-backend")),
                   "backend executable",
               )
           elif platform.system() == "Windows":
               app = first_file(list(release.glob("**/win-unpacked/GODFIN.exe")), "desktop executable")
               backend = first_file(
-                  list(release.glob("**/win-unpacked/resources/backend/godfin-backend.exe")),
+                  list(release.glob("**/win-unpacked/resources/backend/godfin-backend/godfin-backend.exe")),
                   "backend executable",
               )
           else:
               app = first_file(list(release.glob("**/linux-unpacked/godfin")), "desktop executable")
               backend = first_file(
-                  list(release.glob("**/linux-unpacked/resources/backend/godfin-backend")),
+                  list(release.glob("**/linux-unpacked/resources/backend/godfin-backend/godfin-backend")),
                   "backend executable",
               )
 
