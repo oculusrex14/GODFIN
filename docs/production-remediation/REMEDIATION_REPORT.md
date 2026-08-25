@@ -131,4 +131,4 @@ These do not authorize public launch. They are assigned in `EXTERNAL_RELEASE_GAT
 
 ## Final recommendation
 
-Keep the repository and releases private. Use the current code only for private release-candidate evaluation. Restore GitHub Actions billing, then complete the Supabase/Cashfree, DNS/email, signing/notarization, clean-platform, lawful parser-corpus, qualified review, and final native browser matrices; require explicit written owner authorization before any public website promotion, installer publication, or update-feed promotion.
+Keep the repository and releases private. Exact-source GitHub Actions run `32787609617` is green on application commit `3a26090`, and the repository API reports `PRIVATE`. Use the current code only for private release-candidate evaluation. Complete the Supabase/Cashfree, DNS/email, signing/notarization, clean-platform, lawful parser-corpus, qualified review, native browser/assistive-technology, and independent pentest matrices; require explicit written owner authorization before any public website promotion, installer publication, or update-feed promotion.

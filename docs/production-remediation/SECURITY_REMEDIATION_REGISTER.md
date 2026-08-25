@@ -2,7 +2,9 @@
 
 Status date: 2026-08-25
 
-Application-code candidate: `b62946e5958af1d37a00ff63ca7258805e59c357`
+Application-code candidate: `3a26090a52531d39481b7cdff305d3d6a7812542`
+
+Hosted source verification: GitHub Actions run `32787609617` passed all six jobs on this exact SHA on 25 August 2026. The repository API then confirmed `oculusrex14/GODFIN` is `PRIVATE`. Signed native-package, provider, independent pentest, legal, and public-launch gates below remain open.
 
 Release posture: **NO-GO until the owner actions and independent final pentest are complete**
 

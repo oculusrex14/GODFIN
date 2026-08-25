@@ -467,7 +467,7 @@ def build_document() -> Document:
     metadata.paragraph_format.space_after = Pt(42)
     set_run_font(
         metadata.add_run(
-            "Version 2.9  •  25 August 2026  •  oculusrex14/GODFIN\n"
+            "Version 3.0  •  25 August 2026  •  oculusrex14/GODFIN\n"
             "Production branch: codex/godfin-production-v5"
         ),
         size=10,
@@ -504,16 +504,16 @@ def build_document() -> Document:
     add_callout(
         document,
         "ENGINEERING BASELINE",
-        "Production code candidate b62946e5958af1d37a00ff63ca7258805e59c357 is pushed on codex/godfin-production-v5. The clean Python 3.12 baseline is 1,008 passing backend tests. All 182 API operations publish an explicit success or intentional terminal status, a non-empty media-specific success schema, and the shared error contract. Frontend lint, accessibility, authentication, content, and production-build gates pass; the generated inventory covers 422 interactive controls across 19 route scopes. Five Cashfree contract tests, three webhook-body security tests, three lifetime-upgrade tests, the website production build, 12 desktop release/update tests, and 11 package-privacy tests pass.",
+        "Production code candidate 3a26090a52531d39481b7cdff305d3d6a7812542 is pushed on codex/godfin-production-v5. GitHub Actions run 32787609617 completed successfully against that exact commit on 25 August 2026. Its six green jobs include the complete 1,008-test Python 3.12 backend suite, dependency and full-history secret audits, frontend and website production gates, desktop privacy/update audits, production smoke tests, and Chromium/Firefox/WebKit accessibility and website matrices. All 182 API operations publish an explicit success or intentional terminal status, a non-empty media-specific success schema, and the shared error contract.",
         tone="good",
     )
     for item in (
-        "Production repository URL: https://github.com/oculusrex14/GODFIN. GitHub currently reports PUBLIC; the privacy gate is open.",
+        "Production repository URL: https://github.com/oculusrex14/GODFIN. The GitHub API reports PRIVATE as of 25 August 2026; no public repository or release was created.",
         "Canonical production website: https://godfin.dev. The apex resolves to Vercel over HTTPS; https://godfin.vercel.app remains an operational fallback.",
         "Supabase project: GODFIN (ap-south-1). The repository verifies 10 ordered migration hashes through 20260824211115_cashfree_email_delivery_claim.sql. Migration 0006 adds provider-neutral Cashfree purchase/event fields and replay-safe provisioning; migration 0007 adds in-place lifetime upgrades; the later migrations repair public rate-limit arithmetic and add an atomic email-delivery claim. Remote application and pgTAP evidence remain required.",
         "Deprecated source is preserved only in private, read-only repository oculusrex14/GODFIN-OPUS46-ARCHIVE. Its 35-commit rewritten history and archival tag pass secret scanning; the obsolete local source/build workspace was moved to Trash while active Application Support data was preserved.",
         "PIN access recovery, portal-positioned calculation help, collapsible App Settings, external pricing navigation, auditable goal contributions, corrected goal simulation, recurring re-detection, atomic account routing, package privacy assertions, and the AY 2026–27 CA tax pack are implemented and tested.",
-        "The website product tour uses real React application captures generated only from synthetic data, muted WebM/MP4 media with reduced-motion fallbacks, and build-time checks that prevent unreleased features from being advertised. godfin.dev is the final canonical domain and godfin.vercel.app is the fallback. The older source commit 3a44f00 is still the deployed production website; checkout remains deliberately disabled. Candidate b62946e is not deployed and must not be promoted until all 10 migrations and the provider sandbox tests pass.",
+        "The website product tour uses real React application captures generated only from synthetic data, muted WebM/MP4 media with reduced-motion fallbacks, and build-time checks that prevent unreleased features from being advertised. godfin.dev is the final canonical domain and godfin.vercel.app is the fallback. The older source commit 3a44f00 is still the deployed production website; checkout remains deliberately disabled. Candidate 3a26090 is not deployed and must not be promoted until all 10 migrations and the provider sandbox tests pass.",
         "Production acceptance on 30 July 2026: website Playwright 4/4; Lighthouse performance 99, accessibility 100, SEO 100, LCP 1.73 seconds, CLS 0; required CSP, HSTS, frame, MIME, referrer, and permissions headers are present.",
         "Vercel already contains the Supabase public/server variables and LICENSE_SIGNING_SECRET. Values are encrypted and are intentionally not reproduced here.",
         "Google OAuth is active. The owner-controlled GODFIN Website project uses the rotated web client named GODFIN Website Rotated; the provider requests only openid/email/profile, the original client is revoked, and production sign-in returned successfully to /account twice on 30 July 2026.",
@@ -522,10 +522,10 @@ def build_document() -> Document:
         "The deterministic CycloneDX 1.6 SBOM contains 1,035 unique components with zero unresolved license identifiers. Third-party notices list all conditional licenses. Final human legal clearance is intentionally fail-closed and remains pending in supply-chain/legal-clearance.json.",
         "A fresh local macOS arm64 package was built, verified, installed, and relaunched from repository commit 3a44f001fed2b3bc72e9aae7c98d8e0564568d31 using the locked toolchain. It starts in 2.997 seconds on first launch and 1.033 seconds on restart, preserves its database, auto-starts the bundled local backend, enforces the local trust and maintenance boundaries, and remains below the 700 MB idle-memory budget at 602.9 MB across five processes. The private DMG SHA-256 is f960c103a8c584a9d45e31d39258a7149ae509dac35a6cb02914c52e6057b36b and the ZIP SHA-256 is 00b91ea7ce3ed5fbad5dc62bff03deae312a95ea962956fe9dc18651b57e4e0a. This is an ad-hoc local test signature, not an Apple-notarized customer release.",
         "Release workflows require exact tag, commit, and package-version agreement; refuse an existing GitHub Release; publish deterministic SBOM, notices, checksums, and provenance; use immutable action SHAs; and require staged promotion plus a reviewed rollback path.",
-        "Application-code evidence is current through immutable commit b62946e5958af1d37a00ff63ca7258805e59c357 on codex/godfin-production-v5. That commit is pushed. GitHub currently reports the repository PUBLIC and has not created an Actions run for the pushed SHA; this is an unresolved privacy/CI blocker, not a pass. Make it PRIVATE immediately after retaining the required exact-candidate CI evidence, and do not publish or promote any release in the meantime.",
-        "Desktop Gmail recovery is implemented in candidate source b62946e but is not yet installed as a candidate package. Its exact external-browser callback uses a short-lived signed handoff bound to the active desktop launch; ordinary routes still require the launch secret. After packaging, the owner must start a completely fresh Connect Gmail attempt; an old callback tab or stale OAuth state cannot be reused. oculusrexai@gmail.com and naraharikripa14@gmail.com are the intended Google test users. Connected status, first sync, restart, reauthorization, and the seven-day soak must be evidenced before this gate is complete.",
+        "Application-code evidence is current through immutable commit 3a26090a52531d39481b7cdff305d3d6a7812542 on codex/godfin-production-v5. GitHub Actions run 32787609617 passed all six jobs on that exact SHA, including all 1,008 backend tests and the three-engine browser matrices. The repository was then returned to PRIVATE and verified through the GitHub API. This closes the source-level hosted-CI and repository-privacy gates; it does not authorize a tag, installer, deployment, payment acceptance, update promotion, or public launch.",
+        "Desktop Gmail recovery is implemented in candidate source 3a26090 but is not yet installed as a candidate package. Its exact external-browser callback uses a short-lived signed handoff bound to the active desktop launch; ordinary routes still require the launch secret. After packaging, the owner must start a completely fresh Connect Gmail attempt; an old callback tab or stale OAuth state cannot be reused. oculusrexai@gmail.com and naraharikripa14@gmail.com are the intended Google test users. Connected status, first sync, restart, reauthorization, and the seven-day soak must be evidenced before this gate is complete.",
         "The local database upgraded from schema revision 21 to 22 with automatic pre-migration backup godfin_backup_20260824_034907_983690_e24b194b5f24.db. Integrity and foreign-key checks pass, and 100 reviewed canonical public-brand merchant aliases are indexed locally. The 24-partition synthetic enrichment benchmark reports 100% semantic accuracy, safety precision, UNKNOWN abstention, merchant auto-accept precision, relationship precision/recall, and balance-control accuracy, with approximately 1 ms p95 enrichment latency.",
-        "Public Gmail consent-screen review, the fresh Gmail recovery/soak, Cashfree KYC/sandbox/live tests, remote application of all 10 Supabase migrations, Resend/DNS, final Google/Supabase canonical redirect verification, Apple/Windows certificates, R2, cross-platform clean-system evidence, dependency-license approval, independent parser/full pentesting, GitHub Actions execution, repository privacy restoration, and public-launch authorization are not yet complete.",
+        "Public Gmail consent-screen review, the fresh Gmail recovery/soak, Cashfree KYC/sandbox/live tests, remote application of all 10 Supabase migrations, Resend/DNS, final Google/Supabase canonical redirect verification, Apple/Windows certificates, R2, cross-platform clean-system evidence, dependency-license approval, independent parser/full pentesting, native assistive-technology checks, and public-launch authorization are not yet complete.",
         "Reward pilot, sponsor card, PPP checkout, and OpenDataLoader shipping remain safely feature-gated where applicable.",
     ):
         add_list_item(document, item, bullet_num)
@@ -536,7 +536,7 @@ def build_document() -> Document:
         document,
         ["Blocker", "Why blocked", "Your intervention", "Completion evidence"],
         [
-            ["GitHub Actions + repository privacy", "No Actions run was created for pushed code SHA b62946e, and GitHub currently reports the repository PUBLIC.", "Follow Section 13.1 to enable runner usage and manually dispatch CI. After the exact run is green, change visibility to PRIVATE before any tag or release action.", "The exact candidate run is green and the API reports PRIVATE."],
+            ["GitHub Actions + repository privacy", "Closed on 25 August 2026 for source candidate 3a26090.", "Keep the repository private and rerun CI after any later code or evidence change.", "Actions run 32787609617 is green on exact SHA 3a26090; GitHub API reports PRIVATE."],
             ["Dependency legal review", "Automated license inventory is complete; human approval is not.", "Review conditional licenses and sign legal-clearance.json without changing evidence hashes.", "Release gate reports approved and the signed record is archived."],
             ["Cashfree India", "Repository integration and local contracts exist; KYC, credentials, webhook, hosted migrations, and sandbox evidence are absent.", "Complete KYC; apply all 10 ordered migrations; configure sandbox keys and required webhook events.", "Replay-safe purchase, upgrade, refund, dispute, rate-limit, and one-email flows pass."],
             ["Resend + DNS", "No sending key/domain verification.", "Verify godfin.dev and add the production key.", "SPF, DKIM, DMARC and two inbox tests pass."],
@@ -544,7 +544,7 @@ def build_document() -> Document:
             ["Signing", "No GitHub signing secrets are configured.", "Complete Apple and Windows signing enrollment.", "Notarized/signed installers verify."],
             ["R2 updates", "No release bucket or releases.godfin.dev.", "Create R2, DNS, and least-privilege secrets.", "Immutable assets and updater metadata resolve."],
             ["Clean systems", "Only local macOS arm64 packaging is evidenced.", "Provide clean supported VMs/hardware.", "Install/upgrade/recovery matrix is signed."],
-            ["Browser matrix", "Twelve Chromium, Firefox, and WebKit cases enumerate locally, but hosted jobs cannot start until GitHub Actions billing is restored.", "Fix Actions billing first; then run CI plus supported Chrome, Safari, Firefox, and Edge acceptance flows.", "Green run, screenshots, traces, accessibility, and isolation evidence are archived."],
+            ["Native browser and assistive technology", "Hosted Chromium, Firefox, and WebKit suites are green; native Safari/Edge and VoiceOver/NVDA/Orca acceptance still require supported systems.", "Run the manual native browser, keyboard, zoom, and screen-reader matrix on the exact signed packages.", "Screenshots, traces, accessibility results, and isolation evidence are archived."],
             ["Public launch", "Owner authorization has not been issued.", "Complete final gate and sign Section 16.", "Written authorization and release IDs."],
         ],
         [1500, 2100, 3000, 2760],
@@ -612,7 +612,7 @@ def build_document() -> Document:
     add_callout(
         document,
         "IF YOU SAW MISSING_LAUNCH_TRUST",
-        "Fully quit GODFIN, reopen /Applications/GODFIN.app, and begin a fresh Connect Gmail attempt from Settings. Do not reuse or refresh an old Google callback tab. Candidate b62946e uses a short-lived signed, nonce-bearing OAuth handoff bound to the active desktop launch; every ordinary backend route still requires the active launch secret. Because b62946e is not yet packaged, complete this check only on a new package built from that exact candidate or a later documentation-only descendant.",
+        "Fully quit GODFIN, reopen /Applications/GODFIN.app, and begin a fresh Connect Gmail attempt from Settings. Do not reuse or refresh an old Google callback tab. Candidate 3a26090 uses a short-lived signed, nonce-bearing OAuth handoff bound to the active desktop launch; every ordinary backend route still requires the active launch secret. Because 3a26090 is not yet packaged, complete this check only on a new package built from that exact candidate or a later documentation-only descendant.",
         tone="info",
     )
     for item in (
@@ -753,7 +753,7 @@ def build_document() -> Document:
     add_callout(
         document,
         "CURRENT DOMAIN CHECK",
-        "On 24 August 2026, older source commit 3a44f00 was deployed to Vercel production as deployment dpl_HjwgU9aBfaBvdcFH8aiR981mgVDY. https://godfin.dev and https://godfin.vercel.app return HTTP 200; https://www.godfin.dev permanently redirects to the apex; HSTS and the Cashfree-only CSP are present; hello@godfin.dev is the only public contact; and checkout fails closed with HTTP 503. This verifies the domain and safe-disable posture only—not candidate b62946e, Cashfree credentials, all 10 migrations, or payment acceptance.",
+        "On 24 August 2026, older source commit 3a44f00 was deployed to Vercel production as deployment dpl_HjwgU9aBfaBvdcFH8aiR981mgVDY. https://godfin.dev and https://godfin.vercel.app return HTTP 200; https://www.godfin.dev permanently redirects to the apex; HSTS and the Cashfree-only CSP are present; hello@godfin.dev is the only public contact; and checkout fails closed with HTTP 503. This verifies the domain and safe-disable posture only—not candidate 3a26090, Cashfree credentials, all 10 migrations, or payment acceptance.",
         tone="good",
     )
     for item in (
@@ -764,7 +764,7 @@ def build_document() -> Document:
         "Open Terminal and run: cd /Users/oculus/Projects/GODFIN/GODFIN_PRODUCTION/website. Then run: vercel whoami. If it asks you to sign in, run vercel login, complete the browser approval yourself, and return to Terminal.",
         "Run: vercel link. Select the existing GODFIN team/account and the existing godfin project. Do not create a second Vercel project.",
         "Run: vercel env ls. The public domain/email variables, Supabase variables, LICENSE_SIGNING_SECRET, CASHFREE_ENVIRONMENT=sandbox, CHECKOUT_ENABLED=false, PPP_CHECKOUT_ENABLED=false, and CASHFREE_GLOBAL_PAYMENTS_APPROVED=false are already present. Add the still-missing ABUSE_HASH_SECRET, CASHFREE_CLIENT_ID, CASHFREE_CLIENT_SECRET, LICENSE_ENTITLEMENT_ACTIVE_KEY_VERSION, LICENSE_ENTITLEMENT_PRIVATE_KEYS_JSON, RESEND_API_KEY, and RESEND_FROM_EMAIL only through Vercel's encrypted environment UI or prompt; never print or commit their values.",
-        "The 3a44f00 production deployment is intentionally fail-closed and predates candidate b62946e. After any provider-variable change, keep CHECKOUT_ENABLED=false, deploy a preview from the exact candidate, and test account sign-in, pricing, disabled checkout behavior, waitlist, privacy, terms, and license verification.",
+        "The 3a44f00 production deployment is intentionally fail-closed and predates candidate 3a26090. After any provider-variable change, keep CHECKOUT_ENABLED=false, deploy a preview from the exact candidate, and test account sign-in, pricing, disabled checkout behavior, waitlist, privacy, terms, and license verification.",
         "After all 10 Supabase migrations and the Cashfree sandbox matrix pass, run the repository website checks again and deploy the exact tested SHA to production. A production deployment does not authorize public marketing or customer checkout.",
         "Verify HTTPS, HSTS, CSP, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy, sitemap.xml, robots.txt, and a deliberate 404.",
         "Set immutable signed download URLs only after Section 12 clean-system validation. Do not point download buttons at unsigned local builds.",
@@ -972,15 +972,15 @@ def build_document() -> Document:
     document.add_page_break()
     document.add_heading("13. Security, privacy, payment, and recovery evidence", level=1)
     for item in (
-        "Backend: 1,008 tests pass under clean Python 3.12 in 82.99 seconds on candidate b62946e, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, local trust, Gmail coverage/restart handling, exact response contracts for all 182 API operations, certified statement parsers, hostile-file preflight, goal/simulation/recurring behavior, CA tax pack, classification memory, performance, net worth, behavior insights, reward-pilot redaction, and UTC finance-fetch regressions.",
+        "Backend: all 1,008 tests passed in GitHub Actions run 32787609617 under clean Python 3.12 on exact candidate 3a26090, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, local trust, Gmail coverage/restart handling, exact response contracts for all 182 API operations, certified statement parsers, hostile-file preflight, goal/simulation/recurring behavior, CA tax pack, classification memory, performance, net worth, behavior insights, reward-pilot redaction, and UTC finance-fetch regressions.",
         "Independent finance oracle: golden_ledger_v1.json is evaluated by a standard-library-only oracle that imports no application calculation code. Dashboard, transactions, cash flow, FY reports, encrypted CA pack, income, profile, subscriptions, goals, net worth, audit aggregates, and AI non-authority agree with the independently expected values.",
         "Private parser fixtures: owner-supplied SBI, HDFC, and Kotak PDFs are recognized as sbi_savings, hdfc_savings, and kotak_savings and reconcile exactly to 29, 306, and 497 rows. Only hashes and aggregate evidence are retained; the PDFs are not copied into the repository.",
-        "Frontend: lint, static accessibility/contrast, memory-only authentication, build-identity, secure-password, tier-navigation, and production-build gates pass. The deterministic inventory records 422 controls across 19 route scopes. The three-engine Playwright matrix is configured but was not executed locally under the owner's no-computer-use preference.",
+        "Frontend: lint, static accessibility/contrast, memory-only authentication, build-identity, secure-password, tier-navigation, and production-build gates pass. The deterministic inventory records 422 controls across 19 route scopes. GitHub Actions run 32787609617 also passed the production smoke and accessibility suites in Chromium, Firefox, and WebKit; native screen-reader and signed-package interaction remain separate gates.",
         "Website: entitlement/payment contract verification, five Cashfree tests, three strict webhook-body tests, three lifetime-upgrade tests, 10 ordered migration hashes, production build, real-app product chapters, reduced-motion fallbacks, lifetime/no-bundled-credit pricing, security headers, checkout safe-disable behavior, and dependency audit pass. The previously measured production URL scored Lighthouse performance 99, accessibility 100, and SEO 100, with LCP 1.73 seconds and CLS 0; repeat this measurement after deploying the exact final SHA.",
         "Dependencies: runtime, test, and build Python locks are separated and hash-locked; frontend, website, desktop, and Playwright workspaces use npm ci. Audits report zero unaccepted known vulnerabilities. The Gmail API client is explicit in runtime requirements.",
         "Supply chain: deterministic CycloneDX 1.6 SBOM and third-party notices cover 1,035 unique components with zero unresolved license identifiers. Human review of conditional licenses remains a required fail-closed release gate.",
         "Release engineering: 12/12 desktop update/release workflow tests and 11/11 package privacy checks pass. All GitHub Actions are pinned to verified 40-character commit SHAs, checksum-pinned Gitleaks is installed in CI, and release provenance binds the exact commit, tag, package version, SBOM, notices, and checksums.",
-        "Local packaging: the older 3a44f00 macOS arm64 build passed package verification with first start 2.997 seconds, restart 1.033 seconds, idle memory 602.9 MB across five processes, database preservation, local trust boundary, maintenance boundary, bundled-backend auto-start, and Gmail callback-path checks. DMG SHA-256: f960c103a8c584a9d45e31d39258a7149ae509dac35a6cb02914c52e6057b36b. ZIP SHA-256: 00b91ea7ce3ed5fbad5dc62bff03deae312a95ea962956fe9dc18651b57e4e0a. This evidence does not cover b62946e; a new signed/notarized package is required.",
+        "Local packaging: the older 3a44f00 macOS arm64 build passed package verification with first start 2.997 seconds, restart 1.033 seconds, idle memory 602.9 MB across five processes, database preservation, local trust boundary, maintenance boundary, bundled-backend auto-start, and Gmail callback-path checks. DMG SHA-256: f960c103a8c584a9d45e31d39258a7149ae509dac35a6cb02914c52e6057b36b. ZIP SHA-256: 00b91ea7ce3ed5fbad5dc62bff03deae312a95ea962956fe9dc18651b57e4e0a. This evidence does not cover 3a26090; a new signed/notarized package is required.",
         "Secrets: Gitleaks scanned the complete cleaned 154-commit history and the staged remediation diff with no leaks. No real statements, databases, tokens, keys, or customer screenshots are tracked.",
         "Recovery: empty database bootstrap, schema-revision backup, retained daily/weekly backups, restore-on-copy, upgrade, rollback, and license offline-grace tests pass.",
         "Payment: test-mode replay, amount/currency mismatch, invalid signature, unauthenticated checkout, device limit, deactivation, and resend behavior pass after provider credentials are available.",
@@ -990,21 +990,20 @@ def build_document() -> Document:
     add_callout(
         document,
         "CI RELEASE GATE",
-        "Do not tag a candidate until the CI run for the exact commit is green. No workflow run was created for pushed code SHA b62946e. A manual workflow-dispatch trigger is now available, but GitHub account/Actions availability must be repaired first. A local pass is necessary but not sufficient.",
-        tone="warn",
+        "Source candidate 3a26090 passed all six jobs in GitHub Actions run 32787609617, including the full backend suite, supply-chain and secret checks, desktop audits, website/browser matrices, and Chromium/Firefox/WebKit app accessibility. The repository API then confirmed PRIVATE. Any later code change requires a new exact-SHA green run before tagging; source CI does not replace signed-package, provider, legal, or launch authorization gates.",
+        tone="good",
     )
-    document.add_heading("13.1 Restore GitHub Actions in plain language", level=2)
+    document.add_heading("13.1 Preserve the verified private CI gate", level=2)
     for item in (
-        "Open https://github.com/settings/billing in the GitHub account that owns oculusrex14/GODFIN. Sign in and complete password or two-factor checks yourself.",
-        "Open Payment information. If GitHub shows a failed, expired, or missing payment method, add or correct it. Do not share card details, billing address, one-time passwords, or screenshots containing them.",
-        "Open Budgets and alerts. Find a GitHub Actions budget for the personal account or this repository. If it stops usage at zero or at a reached limit, raise it to a small monthly amount you are comfortable with, or disable only the stop-usage control. Keep email alerts enabled.",
-        "Return to https://github.com/oculusrex14/GODFIN/actions. Open CI, choose Run workflow, select codex/godfin-production-v5, and confirm. If the Run workflow button is unavailable, verify Actions are enabled for the repository and that the workflow exists on the selected branch; do not create another code change merely to trigger it.",
-        "A successful repair is obvious: backend, frontend, website, website-browser-matrix, desktop-audit, and e2e show real steps instead of failing instantly. Wait until all six are green, then copy only the run URL into the evidence field below.",
-        "If GitHub still creates no run after payment, budget, and Actions-policy checks, wait up to 15 minutes, sign out/in, and contact GitHub Support. Do not tag, publish, or promote a release. As soon as the exact run is green, change Settings → General → Danger Zone → Change repository visibility to PRIVATE and confirm the API reports PRIVATE.",
+        "Retain https://github.com/oculusrex14/GODFIN/actions/runs/32787609617 as exact-source evidence for commit 3a26090a52531d39481b7cdff305d3d6a7812542. All six jobs completed successfully on 25 August 2026.",
+        "Keep oculusrex14/GODFIN PRIVATE. Confirm visibility before every tag or draft-release operation; do not paste repository credentials or billing information into evidence.",
+        "If any application code, workflow, dependency lock, generated asset, or verification contract changes, push the cohesive change and wait for a new all-green run on that exact SHA.",
+        "Check that backend, frontend, website, website-browser-matrix, desktop-audit, and e2e all execute real steps. A skipped or cancelled required job is not a pass.",
+        "Keep checkout, deployment promotion, release publishing, and update-feed promotion disabled until their separate provider, signed-package, legal, and owner gates are complete.",
     ):
         add_list_item(document, item, decimal_num)
-    add_source(document, "GitHub Actions billing", "https://docs.github.com/en/billing/concepts/product-billing/github-actions")
-    add_source(document, "GitHub budgets and alerts", "https://docs.github.com/en/billing/concepts/budgets-and-alerts")
+    add_source(document, "Exact candidate CI run", "https://github.com/oculusrex14/GODFIN/actions/runs/32787609617")
+    add_source(document, "GitHub repository visibility", "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility")
     add_owner_fields(document, ["Release commit", "CI run URL", "Security scan evidence", "Completed by / date"])
 
     document.add_heading("14. Prepare the private draft release", level=1)
@@ -1070,7 +1069,7 @@ def build_document() -> Document:
         [
             ["Google OAuth callback", "Codex", "☒", "Production callback passed twice on 30 Jul 2026; rotated client active; original client revoked."],
             ["Second-account isolation", "", "☐", "Repeat with a distinct Google test account before public launch."],
-            ["Desktop Gmail OAuth + sync", "Owner", "☐", "Build/install b62946e or a documentation-only descendant, then complete fresh read-only authorization, sync, restart, disconnect, reconnect, and seven-day soak."],
+            ["Desktop Gmail OAuth + sync", "Owner", "☐", "Build/install 3a26090 or a documentation-only descendant, then complete fresh read-only authorization, sync, restart, disconnect, reconnect, and seven-day soak."],
             ["Dependency license clearance", "", "☐", "Human approval of conditional licenses with unchanged SBOM/notices hashes."],
             ["Cashfree + webhook + refund/tax", "", "☐", ""],
             ["Resend + DNS + support inboxes", "", "☐", ""],
@@ -1078,10 +1077,10 @@ def build_document() -> Document:
             ["License custody + three devices", "", "☐", ""],
             ["macOS/Windows signing", "", "☐", ""],
             ["R2 updates + rollback", "", "☐", ""],
-            ["Exact-candidate macOS arm64 package proof", "", "☐", "Older 3a44f00 evidence exists, but b62946e or a documentation-only descendant must be rebuilt, privacy-verified, and notarized."],
+            ["Exact-candidate macOS arm64 package proof", "", "☐", "Older 3a44f00 evidence exists, but 3a26090 or a documentation-only descendant must be rebuilt, privacy-verified, and notarized."],
             ["Cross-platform clean-system matrix", "", "☐", "macOS x64, Windows 10/11 x64, and Ubuntu 22.04 x64 remain external gates."],
             ["Browser-family matrix", "", "☐", "Chrome, Safari, Firefox, and Edge acceptance evidence remains deferred."],
-            ["GitHub Actions + repository privacy", "", "☐", "Run the exact candidate through manual dispatch; retain all-green evidence; then verify oculusrex14/GODFIN is PRIVATE."],
+            ["GitHub Actions + repository privacy", "Codex", "☒", "Run 32787609617 passed on exact SHA 3a26090; GitHub API verified oculusrex14/GODFIN is PRIVATE on 25 Aug 2026."],
             ["Security/privacy/recovery matrix", "", "☐", ""],
             ["Legal/tax/privacy review", "", "☐", ""],
             ["Private draft + screenshots + demo", "", "☐", ""],

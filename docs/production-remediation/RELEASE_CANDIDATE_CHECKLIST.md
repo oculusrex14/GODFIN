@@ -4,7 +4,7 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 ## Repository and source
 
-- [ ] Production repository is private. GitHub reports PUBLIC on 25 Aug 2026; this must be corrected before tagging or release work.
+- [x] Production repository is private. GitHub API/CLI reported `PRIVATE` on 25 Aug 2026 after exact-candidate CI passed.
 - [x] Deprecated archive is private, clearly deprecated, and archived/read-only.
 - [x] PolyForm Noncommercial 1.0.0 is the repository license.
 - [x] Full-history secret scan passes.
@@ -14,15 +14,15 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 ## Deterministic app correctness
 
-- [x] Complete backend regression passes (1,008 on application-code candidate `b62946e`).
+- [x] Complete backend regression passes (all 1,008 in GitHub Actions run `32787609617` on exact application-code candidate `3a26090`).
 - [x] Exact money, shared semantics, finalized periods, parser failure, report reconciliation, transfer, net-worth, subscription, goal, and behavior invariants pass.
 - [x] Backup, restore, migration, update-recovery, and destructive-reset tests pass.
 - [x] Gmail OAuth/state/trust/sync/restart automated tests pass.
-- [ ] Fresh owner OAuth, first sync, restart, disconnect/reconnect, and seven-day soak pass on a package built from `b62946e` or a documentation-only descendant.
+- [ ] Fresh owner OAuth, first sync, restart, disconnect/reconnect, and seven-day soak pass on a package built from `3a26090` or a documentation-only descendant.
 - [x] Frontend lint/build/access-policy contracts pass at the current production baseline.
 - [x] Website contracts/lint/build and Cashfree unit tests pass at the current production baseline.
 - [x] Desktop privacy/integrity and release/update contract tests pass at the current production baseline.
-- [ ] Repeat every automated gate on the exact final commit and retain logs/checksums.
+- [x] Every source-level automated gate passed on exact application-code commit `3a26090`; run URL and job results are retained.
 
 ## SQLite and recovery
 
@@ -63,13 +63,14 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 - [x] General contact defaults to `hello@godfin.dev`.
 - [x] App/website entitlement manifest rejects unreleased feature claims.
 - [x] Three-engine Playwright CI matrix is configured.
-- [ ] Resolve GitHub Actions account billing/spending-limit block and retain a successful private CI run.
+- [x] GitHub Actions run `32787609617` completed successfully with all six required jobs on exact SHA `3a26090`.
 - [x] Website Google OAuth is configured with the exact Supabase callback and the owner account returns to `/account`.
 - [ ] Repeat website Google OAuth with a distinct second user and retain account-isolation evidence.
 - [x] `godfin.dev` DNS, HTTPS, apex/`www` redirects, CSP, sitemap, robots, and checkout safe-disable behavior are verified on the currently deployed older website.
 - [ ] Repeat domain/security-header acceptance after deploying the exact final website SHA.
 - [ ] Verify Resend domain, SPF, DKIM, DMARC, sender, delivery, and reply handling.
-- [ ] Review private Chromium/Firefox/WebKit CI results and native Safari behavior.
+- [x] Review private Chromium/Firefox/WebKit CI results; all hosted suites passed on exact SHA `3a26090`.
+- [ ] Review native Safari behavior and manual assistive-technology flows on a signed candidate.
 - [ ] Obtain qualified legal/privacy/terms/accessibility review of exact deployed pages.
 
 ## Desktop packages
@@ -88,13 +89,14 @@ No checkbox in the public-launch section may be completed by assumption. Attach 
 
 - [x] Release, promotion, and rollback workflows use pinned actions and protected confirmation gates.
 - [x] Public promotion requires exact legal-clearance/SBOM evidence.
-- [ ] Confirm GitHub Actions jobs can start; no workflow run was created for pushed SHA `b62946e`. Use the added manual workflow dispatch after account/policy repair.
+- [x] Confirm GitHub Actions jobs start and complete: run `32787609617` passed all six jobs on exact SHA `3a26090`.
 - [ ] Configure protected R2 release environment and immutable storage.
 - [ ] Create a private draft release only.
 - [ ] Exercise 5%, 25%, 50%, and 100% staged promotion with health review on a private channel.
 - [ ] Exercise immediate-predecessor rollback and interrupted rollback.
 - [ ] Complete independent penetration test and close findings.
-- [ ] Change `oculusrex14/GODFIN` back to PRIVATE, then recheck privacy and full-history secret scan immediately before tagging.
+- [x] Change `oculusrex14/GODFIN` back to PRIVATE and verify through the GitHub API after exact-source CI.
+- [ ] Recheck repository privacy and the full-history secret scan immediately before tagging.
 
 ## Public launch authorization
 
