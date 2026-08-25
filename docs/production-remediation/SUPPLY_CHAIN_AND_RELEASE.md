@@ -45,10 +45,10 @@ require qualified human review. `supply-chain/legal-clearance.json` remains
 
 ## Exact-source CI
 
-GitHub Actions run `32800966419` passed all seven jobs on exact source SHA
-`b2dcaeccd237f5ae4e2076ca4959e5e329df72fe`:
+GitHub Actions run `32827447450` passed all seven jobs on exact application
+source SHA `5ee71fabfe8c7f28726bf625b75801cb254b23a1`:
 
-- 1,008 backend tests and Python dependency audits;
+- 1,011 backend tests and Python dependency audits;
 - frontend lint, accessibility/content/auth contracts, controls, build, audit;
 - website contracts, 11 unit tests, build, audit;
 - Chromium/Firefox/WebKit app and website matrices;
@@ -58,17 +58,23 @@ GitHub Actions run `32800966419` passed all seven jobs on exact source SHA
 
 The repository was returned to `PRIVATE` immediately after the run.
 
-## Existing macOS arm64 private package evidence
+## Exact-candidate native smoke evidence
 
-The retained package proof predates the exact current source candidate. It is a
-local ad-hoc hardened-runtime build, not a customer release. It verified bundled
-backend auto-start, loopback trust, package privacy, database preservation,
-restart behavior, and the recorded performance budget. Gatekeeper correctly
-rejects it because it is neither Developer ID signed nor notarized.
+Native GitHub Actions run `32823401864` built and launched unpacked packages
+from exact application SHA `5ee71fa` on macOS arm64, Windows x64, and Linux x64.
+All three required jobs passed. First-start times were 2.098 s, 3.886 s, and
+3.224 s respectively; restart times were 2.440 s, 2.390 s, and 2.360 s; peak
+idle measurements were 529.2 MB, 488.1 MB, and 498.5 MB. Each verifier created
+and preserved an isolated synthetic database, enforced local trust and
+maintenance boundaries, and exercised the request-only parser/account/Gmail
+module boundary after startup.
 
-No current-source signed/native claim is made from that historical artifact.
-The exact current candidate must be rebuilt, signed, notarized where required,
-and tested on clean supported systems.
+The retained JSON files also bind the desktop/backend executable hashes and the
+verification-log hash to the exact run. The workflow deliberately did not
+upload installers; `signed`, `installer_uploaded`, and `published` are all
+false. This is native smoke evidence, not a signed customer-release claim.
+macOS x64/Intel is owner-deferred and must be reopened before Intel support is
+advertised or released.
 
 ## Release provenance and immutability
 
@@ -81,9 +87,10 @@ rollback.
 ## Remaining external release gates
 
 - Qualified dependency-license and public legal review.
-- Apple Developer ID signing/notarization for macOS arm64/x64.
+- Apple Developer ID signing/notarization for macOS arm64; macOS x64 is
+  explicitly deferred for this pass.
 - Windows Authenticode/SmartScreen evidence.
-- Linux AppImage/deb clean-system evidence.
+- Linux AppImage/deb clean-system installer evidence.
 - Exact-current-source install, upgrade, rollback, uninstall/data-retention,
   offline, non-ASCII-path, endpoint-security, and Ollama matrices.
 - R2 immutable release storage and staged health/rollback drills.

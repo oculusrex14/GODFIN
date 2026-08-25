@@ -19,7 +19,7 @@ No finding is currently unclassified or `Open`. The items below remain `Partiall
 | `GF-PRICE-001` | Server pricing and fail-closed review are complete; KYC/tax/regional proof is pending | Cashfree sandbox/regional/tax matrix and qualified approval |
 | `GF-PERF-002` | Bounded streaming/process isolation is complete; native throughput/corpus evidence is pending | Signed native parser timeout/crash/throughput matrix |
 | `GF-OPS-001` | Repository/runbook evidence is complete; mandatory launch gates remain | All external gates plus written owner launch authorization |
-| `GF-REL-001` | Reproducible workflows and one arm64 private package exist; supported native artifacts are incomplete | Signed/notarized macOS, signed Windows, native Linux, update/rollback/uninstall evidence |
+| `GF-REL-001` | Exact-source unpacked smoke packages pass on macOS arm64, Windows x64, and Linux x64; signed installers and lifecycle evidence are incomplete | Signed/notarized macOS arm64, signed Windows, Linux installer, update/rollback/uninstall evidence; reopen owner-deferred macOS x64 before any Intel claim |
 
 ## Medium, Low, and informational
 
@@ -48,4 +48,4 @@ No finding is currently unclassified or `Open`. The items below remain `Partiall
 
 ## Deferred with owner rationale
 
-Interactive browser/computer-control work is intentionally moved to the last acceptance tranche. The repository provides automated source/contract coverage and a three-engine CI matrix; the owner follows `GODFIN_OWNER_COMPLETION_RUNBOOK.docx` and `EXTERNAL_RELEASE_GATES.md` for provider dashboards and native browser checks.
+Interactive browser/computer-control work is intentionally moved to the last acceptance tranche. The repository provides automated source/contract coverage and a three-engine CI matrix; the owner follows `GODFIN_OWNER_COMPLETION_RUNBOOK.docx` and `EXTERNAL_RELEASE_GATES.md` for provider dashboards and native browser checks. The owner has separately deferred macOS x64/Intel validation; it must be reopened before Intel support is advertised or released.

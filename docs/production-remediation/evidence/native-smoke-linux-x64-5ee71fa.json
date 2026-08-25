@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "candidate_commit": "5ee71fabfe8c7f28726bf625b75801cb254b23a1",
+  "matrix": "Linux x64",
+  "runner": {
+    "operating_system": "Linux",
+    "architecture": "x86_64"
+  },
+  "github_actions": {
+    "run_id": "32823401864",
+    "job_id": "97726176502",
+    "run_attempt": "1",
+    "verified_at_utc": "2026-08-25T07:50:58Z",
+    "conclusion": "success"
+  },
+  "package_verification": {
+    "first_start_ms": 3224,
+    "restart_ms": 2360,
+    "restart_within_eight_second_limit": true,
+    "max_idle_memory_mb": 498.5,
+    "process_count": 8,
+    "database_preserved": true,
+    "trust_boundary_enforced": true,
+    "maintenance_boundary_enforced": true,
+    "request_only_integrations_loaded": true
+  },
+  "hashes": {
+    "desktop_executable_sha256": "0964b3610aebdf4a1f28376daba34f949a0ff9c216eca926a9532d840525e34d",
+    "backend_executable_sha256": "5728447711299f2aeb347f503fb0a5e54cc784dde65928e7566388c8a4206e76",
+    "verification_log_sha256": "ca09849416e3674070af0b468dc1cd556218eeb30444f59ee028ee59931bc8ec"
+  },
+  "installer_uploaded": false,
+  "signed": false,
+  "published": false,
+  "public_release_authorized": false
+}

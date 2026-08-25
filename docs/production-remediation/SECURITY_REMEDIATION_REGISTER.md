@@ -2,9 +2,9 @@
 
 Status date: 2026-08-25
 
-Application-code candidate: `b2dcaeccd237f5ae4e2076ca4959e5e329df72fe`
+Application-code candidate: `5ee71fabfe8c7f28726bf625b75801cb254b23a1`
 
-Hosted source verification: GitHub Actions run `32800966419` passed all seven jobs on this exact SHA on 25 August 2026. The repository API then confirmed `oculusrex14/GODFIN` is `PRIVATE`. The new database job applies all 11 migrations to a clean stack and passes 107 pgTAP assertions. The linked project also aligns all 11 migrations and passes the same 107 assertions. Signed native-package, provider, independent pentest, legal, and public-launch gates below remain open.
+Hosted source verification: GitHub Actions run `32827447450` passed all seven jobs and all 1,011 backend tests on this exact SHA on 25 August 2026. Native run `32823401864` passed exact-SHA unpacked build/launch smoke on macOS arm64, Windows x64, and Linux x64. The repository API then confirmed `oculusrex14/GODFIN` is `PRIVATE`. The database job applies all 11 migrations to a clean stack and passes 107 pgTAP assertions. The linked project also aligns all 11 migrations and passes the same 107 assertions. Signed-installer, provider, independent pentest, legal, and public-launch gates below remain open; macOS x64/Intel is owner-deferred.
 
 Release posture: **NO-GO until the owner actions and independent final pentest are complete**
 

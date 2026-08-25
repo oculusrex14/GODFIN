@@ -12,9 +12,10 @@ Supabase database/RLS finding.
 The defensible readiness statement is:
 
 > Application source, deterministic finance behavior, hosted CI, clean and
-> linked Supabase migration/RLS execution, and repository privacy are verified.
-> Payment-provider, Gmail-soak, signed-native, independent-review, recovery,
-> and explicit launch-authority gates remain.
+> linked Supabase migration/RLS execution, repository privacy, and exact-source
+> native unpacked smoke execution on Apple Silicon, Windows x64, and Linux x64
+> are verified. Payment-provider, Gmail-soak, signed-installer,
+> independent-review, recovery, and explicit launch-authority gates remain.
 
 Public launch, checkout enablement, installer publication, and update-feed
 promotion remain unauthorized.
@@ -22,14 +23,15 @@ promotion remain unauthorized.
 ## Candidate identity
 
 - Starting remediation source: `5900e984e516b181ce98475261349a7187d621b4`
-- Exact current source candidate: `b2dcaeccd237f5ae4e2076ca4959e5e329df72fe`
+- Exact application source candidate: `5ee71fabfe8c7f28726bf625b75801cb254b23a1`
 - Branch: `codex/godfin-production-v6`
 - Remote: private `oculusrex14/GODFIN`
 - Host evidence: macOS arm64, Python 3.12.13
 - Backend baseline: 327 tests
-- Current backend: 1,008 tests
-- Hosted CI: run `32800966419`, all seven jobs passed
-- Audit sources: immutable files under `docs/GODFIN_FINAL_AUDIT_PACKAGE/`
+- Current backend: 1,011 tests
+- Hosted `main` CI: run `32827447450`, all seven jobs passed
+- Native smoke CI: run `32823401864`; macOS arm64, Windows x64, and Linux x64 passed
+- Audit sources: current records under `docs/production-remediation/`
 
 The finding register remains authoritative for stable IDs, implementation
 history, residual risk, and assignment. This report records the latest
@@ -125,18 +127,20 @@ candidate-wide evidence.
 
 | Surface | Current result |
 | --- | --- |
-| Backend | 1,008 passed on exact SHA `b2dcaec` |
+| Backend | 1,011 passed on exact SHA `5ee71fa` |
 | Frontend | lint, accessibility/content/auth contracts, controls, and Vite build passed |
 | Website | contracts, 11 unit tests, migration hashes, Next.js build, and audit passed |
 | Browser/e2e | production smoke and Chromium/Firefox/WebKit matrices passed |
 | Supabase clean DB | 11 migrations and 107 pgTAP assertions passed |
 | Supabase linked DB | 11 migrations aligned and 107 pgTAP assertions passed |
 | Desktop source audit | privacy/integrity, update/release, dependency audit, and syntax passed |
-| Secret scanning | complete 166-commit history passed before temporary CI visibility |
+| Secret scanning | complete Git history passed before temporary CI visibility |
 | Dependency audits | Python and npm surfaces report no accepted vulnerability; cryptography is on fixed 50.x |
-| Repository visibility | GitHub API reports `PRIVATE` after run `32800966419` |
-| macOS arm64 package | older ad-hoc private candidate passed; exact current candidate is not signed/notarized |
-| Other native platforms | not executed |
+| Repository visibility | GitHub API reports `PRIVATE` after run `32827447450` |
+| macOS arm64 exact-source package smoke | passed: 2.098 s first start, 2.440 s restart, 529.2 MB, database preserved, boundaries enforced |
+| Windows x64 exact-source package smoke | passed: 3.886 s first start, 2.390 s restart, 488.1 MB, database preserved, boundaries enforced |
+| Linux x64 exact-source package smoke | passed: 3.224 s first start, 2.360 s restart, 498.5 MB, database preserved, boundaries enforced |
+| macOS x64/Intel | owner-deferred; no support/release claim is made |
 
 ## Residual release blockers
 
@@ -145,8 +149,10 @@ candidate-wide evidence.
   qualified tax/refund/PPP decisions.
 - Fresh packaged Gmail OAuth/restart/reconnect and seven-day soak.
 - Resend domain and SPF/DKIM/DMARC/delivery evidence.
-- Signed/notarized macOS arm64/x64, Authenticode Windows, Linux package, clean
+- Signed/notarized macOS arm64, Authenticode Windows, Linux installer, clean
   install/update/rollback/uninstall, and R2 staged-update evidence.
+- macOS x64/Intel validation before any future Intel support claim; explicitly
+  deferred by the owner for this pass.
 - Native assistive-technology and every-control signed-package acceptance.
 - Qualified dependency-license, legal/privacy, tax, and accessibility review.
 - Independent parser fuzzing and full penetration test.
@@ -155,7 +161,8 @@ candidate-wide evidence.
 ## Final recommendation
 
 Keep the repository, releases, checkout, and update channel private/disabled.
-Use candidate `b2dcaec` only for private release-candidate evaluation. Complete
+Use application candidate `5ee71fa` only for private release-candidate
+evaluation. Complete
 the assigned external gates in `EXTERNAL_RELEASE_GATES.md` and the owner
 runbook. No source-level success is a substitute for provider, signed-package,
 qualified-review, or owner-launch evidence.

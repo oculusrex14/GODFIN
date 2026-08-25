@@ -1,31 +1,57 @@
 # GODFIN platform verification matrix
 
-Status vocabulary is restricted to `Passed`, `Failed`, `Partially verified`, `Not executed`, and `Not applicable`. Source/config review is not presented as native execution.
+Recorded: 25 August 2026 (Asia/Kolkata)
 
-| Requirement | macOS arm64 | macOS x64 | Windows x64 | Linux x64 | Evidence | Status | External blocker | Owner action |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Source build | Passed | Partially verified | Partially verified | Partially verified | Python/Node builds plus native-runner CI definitions | Partially verified | Non-arm64 native runners | Retain green native CI artifacts |
-| Package build | Passed | Not executed | Not executed | Not executed | Private DMG/ZIP evidence at commit `25fd5f7` | Partially verified | Native machines/signing | Build exact final commit on each native runner |
-| Launch | Passed | Not executed | Not executed | Not executed | Private arm64 app first start 3.0 s | Partially verified | Clean native systems | Run clean-install smoke |
-| Backend startup | Passed | Not executed | Not executed | Not executed | Packaged PyInstaller backend, loopback readiness, backend auto-launch | Partially verified | Native packages | Verify port ownership/readiness on each platform |
-| Database creation | Passed | Not executed | Not executed | Not executed | Fresh-lifecycle tests and arm64 package | Partially verified | Native packages | Start with empty user-data directory |
-| Database upgrade | Passed | Not executed | Not executed | Not executed | Revision-22 fixture and isolated owner-copy rehearsal | Partially verified | Prior signed binaries/native packages | Run each supported predecessor fixture |
-| Database restore | Passed | Not executed | Not executed | Not executed | Restore/rollback tests and packaged maintenance contract | Partially verified | Native failure/interruption matrix | Run corruption, permission, and power-loss drills |
-| Secure storage | Passed | Not executed | Not executed | Not executed | macOS Keychain plus private-file fallback tests | Partially verified | Windows Credential Manager/Linux keyring package evidence | Verify locked/unlocked and unavailable-keyring cases |
-| Statement import | Passed | Not executed | Not executed | Not executed | Strict parser tests and packaged local backend | Partially verified | Lawful real-layout corpus/native throughput | Run approved redacted corpus |
-| Reports | Passed | Not executed | Not executed | Not executed | Deterministic report/tax-pack tests | Partially verified | Native PDF/font/pixel evidence | Render and reconcile on each native package |
-| Local AI | Partially verified | Not executed | Not executed | Not executed | Signed registry and durable lifecycle tests; no final Ollama package matrix | Partially verified | Official Ollama/native hardware | Run install/cancel/crash/digest/benchmark matrix |
-| Gmail flow | Passed | Not executed | Not executed | Not executed | Live packaged owner OAuth and initial sync | Partially verified | Google publication and other native packages | Keep private test user; later verify public consent requirements |
-| License activation | Partially verified | Not executed | Not executed | Not executed | Signed local entitlement/three-device tests; owner-test path | Partially verified | Deployed signer/Supabase final evidence | Apply migrations and run clean three/four-device test |
-| Update | Partially verified | Not executed | Not executed | Not executed | Update/recovery contracts and local private package | Partially verified | Signed immutable release/R2 | Exercise previous-to-candidate signed update |
-| Rollback | Partially verified | Not executed | Not executed | Not executed | Immediate-predecessor snapshot restore tests | Partially verified | Signed predecessor/candidate pair | Exercise interrupted and completed rollback |
-| Uninstall | Partially verified | Not executed | Not executed | Not executed | Data-preservation policy/package test; no clean uninstall UI evidence | Partially verified | Native installers | Uninstall/reinstall and verify Application Support retention |
-| Data preservation | Passed | Not executed | Not executed | Not executed | Arm64 package verification and update/restore tests | Partially verified | Native installer matrix | Compare database/key/license/Gmail state before/after |
-| Signing | Partially verified | Not executed | Not executed | Not applicable | Ad-hoc hardened-runtime signature only | Partially verified | Apple Developer ID and Windows certificate | Acquire identities; sign exact artifacts |
-| Notarization | Not executed | Not executed | Not applicable | Not applicable | No Apple notarization credentials | Not executed | Apple Developer account/identity | Notarize and staple both Mac architectures |
-| Checksums | Passed | Not executed | Not executed | Not executed | DMG/ZIP SHA-256 plus release workflow contracts | Partially verified | Exact native artifacts | Generate and independently verify final checksums |
-| Package privacy | Passed | Not executed | Not executed | Not executed | Seven package privacy/integrity tests; inspected arm64 package | Partially verified | Native artifacts | Prove no DB/backups/OAuth/real statements in each package |
+Status vocabulary is restricted to `Passed`, `Failed`, `Partially verified`,
+`Not executed`, and `Not applicable`. Source/config review is not presented as
+native execution. The owner has explicitly deferred macOS x64/Intel acceptance;
+it is not a required gate for this private candidate pass.
 
-## Supported release decision
+The exact application candidate is
+`5ee71fabfe8c7f28726bf625b75801cb254b23a1`. Native GitHub Actions run
+`32823401864` built and launched unpacked packages on hosted native runners.
+Evidence JSON is retained under `docs/production-remediation/evidence/`.
 
-Only macOS arm64 has native private-package execution evidence, and even that artifact is ad-hoc signed and not authorized for public distribution. No Windows, Linux, macOS x64, notarization, or signed-update claim may be upgraded to `Passed` without retaining exact immutable artifact evidence.
+| Requirement | macOS arm64 | macOS x64 | Windows x64 | Linux x64 | Evidence / limitation |
+| --- | --- | --- | --- | --- | --- |
+| Source build | Passed | Not executed (owner-deferred) | Passed | Passed | Exact-SHA native run plus seven-job `main` run `32827447450` |
+| Unpacked package build | Passed | Not executed (owner-deferred) | Passed | Passed | Native run `32823401864`; no installer was uploaded or published |
+| Unpacked launch | Passed: 2.098 s CI; 0.991 s owner Mac | Not executed (owner-deferred) | Passed: 3.886 s | Passed: 3.224 s | All are below the 8 s cold-start budget |
+| Restart | Passed: 2.440 s CI; 0.822 s owner Mac | Not executed (owner-deferred) | Passed: 2.390 s | Passed: 2.360 s | Exact-SHA package verifier |
+| Idle memory | Passed: 529.2 MB | Not executed (owner-deferred) | Passed: 488.1 MB | Passed: 498.5 MB | All are below the 700 MB budget |
+| Backend startup | Passed | Not executed (owner-deferred) | Passed | Passed | Bundled backend reached loopback readiness on every required platform |
+| Database creation and relaunch preservation | Passed | Not executed (owner-deferred) | Passed | Passed | Isolated synthetic user-data directory; preservation flag is true |
+| Local trust / maintenance boundary | Passed | Not executed (owner-deferred) | Passed | Passed | Package verifier exercised trusted and rejected paths |
+| Lazy request-only integrations | Passed | Not executed (owner-deferred) | Passed | Passed | Parser/account/Gmail request boundaries loaded after startup |
+| Package executable hashes | Passed | Not executed (owner-deferred) | Passed | Passed | Desktop/backend SHA-256 values are retained in the evidence JSON |
+| Database upgrade / restore | Partially verified | Not executed (owner-deferred) | Partially verified | Partially verified | Automated migration/restore suites pass; native interruption drills remain |
+| Secure OS storage | Partially verified | Not executed (owner-deferred) | Partially verified | Partially verified | Unit/contracts pass; locked/unavailable OS-keyring cases remain manual-native |
+| Statement import and reports | Partially verified | Not executed (owner-deferred) | Partially verified | Partially verified | Backend paths are packaged and regression-tested; native picker/font/real-layout acceptance remains |
+| Local AI / Ollama | Partially verified | Not executed (owner-deferred) | Partially verified | Partially verified | Signed registry and lifecycle tests pass; native hardware/download lifecycle remains |
+| Gmail OAuth | Partially verified | Not executed (owner-deferred) | Partially verified | Partially verified | Packaged callback code is present; fresh owner authorization and seven-day soak remain |
+| License activation | Partially verified | Not executed (owner-deferred) | Partially verified | Partially verified | Signed entitlement/three-device contracts pass; clean three/four-device owner acceptance remains |
+| Installer install/uninstall | Not executed | Not executed (owner-deferred) | Not executed | Not executed | Smoke workflow intentionally retained no installer artifact |
+| Signed update/rollback | Not executed | Not executed (owner-deferred) | Not executed | Not executed | Requires signing identities, R2, immutable predecessor/candidate pair, and owner approval |
+| Signing | Partially verified | Not executed (owner-deferred) | Not executed | Not applicable | macOS smoke package is ad-hoc only; Windows Authenticode identity is absent |
+| Notarization | Not executed | Not executed (owner-deferred) | Not applicable | Not applicable | Apple Developer ID/notarization credentials are absent |
+
+## Evidence files
+
+- `native-smoke-macos-arm64-5ee71fa.json`
+- `native-smoke-windows-x64-5ee71fa.json`
+- `native-smoke-linux-x64-5ee71fa.json`
+- `owner-macos-arm64-smoke-5ee71fa.json`
+
+Each file records the exact commit, Actions run/job, runner OS/architecture,
+launch and restart timing, idle memory, privacy-boundary results, executable
+hashes, and the explicit facts that the package was unsigned, unpublished, and
+not uploaded as an installer.
+
+## Supported private-candidate decision
+
+Apple Silicon, Windows x64, and Linux x64 now have exact-candidate native
+unpacked-build and launch evidence. This closes the requested three-platform
+smoke gate; it does not close signing, notarization, installer, update,
+rollback, uninstall, real-provider, assistive-technology, or clean-owner-system
+acceptance. macOS x64/Intel is explicitly deferred by the owner and must be
+reopened before Intel support is advertised or released.

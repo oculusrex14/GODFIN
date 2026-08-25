@@ -6,9 +6,9 @@ public launch.
 
 ## Exact source and hosted CI
 
-- Candidate: `b2dcaeccd237f5ae4e2076ca4959e5e329df72fe`
+- Application candidate: `5ee71fabfe8c7f28726bf625b75801cb254b23a1`
 - Branch: `codex/godfin-production-v6`
-- GitHub Actions: `32800966419`
+- GitHub Actions: `32827447450`
 - Result: all seven jobs passed, including the new isolated `supabase-db` job.
 - Repository state after CI: `PRIVATE`, verified through the GitHub API.
 - Full-history Gitleaks scan before the temporary CI visibility window: 166

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "candidate_commit": "5ee71fabfe8c7f28726bf625b75801cb254b23a1",
+  "matrix": "macOS arm64",
+  "runner": {
+    "operating_system": "Darwin",
+    "architecture": "arm64"
+  },
+  "github_actions": {
+    "run_id": "32823401864",
+    "job_id": "97726176364",
+    "run_attempt": "1",
+    "verified_at_utc": "2026-08-25T07:51:48Z",
+    "conclusion": "success"
+  },
+  "package_verification": {
+    "first_start_ms": 2098,
+    "restart_ms": 2440,
+    "restart_within_eight_second_limit": true,
+    "max_idle_memory_mb": 529.2,
+    "process_count": 5,
+    "database_preserved": true,
+    "trust_boundary_enforced": true,
+    "maintenance_boundary_enforced": true,
+    "request_only_integrations_loaded": true
+  },
+  "hashes": {
+    "desktop_executable_sha256": "62740ad15f2b6345650c52bfb8e3d51dbdaaed41a258ba1676532d7bbd88bfc2",
+    "backend_executable_sha256": "77a76659f63145f5f7c97c0afc04942c1e0607dd701bc2db955165799e15edc9",
+    "verification_log_sha256": "048515b3c3a805bb777e13f350a4d2ab9b0aacc9b79b2710bc7f5c8ef4a0ae42"
+  },
+  "installer_uploaded": false,
+  "signed": false,
+  "published": false,
+  "public_release_authorized": false
+}
