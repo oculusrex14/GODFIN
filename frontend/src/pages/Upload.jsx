@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
@@ -63,12 +63,40 @@ function automaticQueueEntry(file) {
     reconcileData: null,
     importResult: null,
     error: '',
+    progress: 0,
+    progressLabel: '',
   };
 }
 
 function automaticAccountLabel(account) {
   return account.nickname
     || `${account.bank} ${account.account_type.replaceAll('_', ' ')} ••••${account.last_4_digits}`;
+}
+
+function StatementProgress({ value = 0, label, detail }) {
+  return (
+    <div
+      className="mt-3 rounded-[14px] border border-cyan-400/[0.12] bg-cyan-400/[0.04] p-3"
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin="0"
+      aria-valuemax="100"
+      aria-valuenow={Math.round(value)}
+    >
+      <div className="mb-2 flex items-center justify-between gap-3 text-[0.7rem]">
+        <span className="text-cyan-100">{label}</span>
+        <span className="tabular-nums text-ink-muted">{Math.round(value)}%</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
+        <motion.div
+          className="h-full rounded-full bg-gradient-to-r from-cyan-500/70 to-teal-300/80"
+          animate={{ width: `${Math.max(2, value)}%` }}
+          transition={{ duration: 0.35, ease: 'easeOut' }}
+        />
+      </div>
+      {detail && <p className="mt-2 text-[0.64rem] leading-relaxed text-ink-muted">{detail}</p>}
+    </div>
+  );
 }
 
 export default function UploadPage() {
@@ -86,6 +114,26 @@ export default function UploadPage() {
   const password = activeAutomatic?.password || '';
   const reconcileData = activeAutomatic?.reconcileData || null;
   const importResult = activeAutomatic?.importResult || null;
+  const activeStatus = activeAutomatic?.status || 'waiting';
+
+  useEffect(() => {
+    const progressCaps = {
+      parsing: 28,
+      reconciling: 58,
+      importing: 94,
+    };
+    const cap = progressCaps[activeStatus];
+    if (!activeAutomaticId || !cap) return undefined;
+    const timer = window.setInterval(() => {
+      setAutomaticQueue(current => current.map((item) => {
+        if (item.id !== activeAutomaticId) return item;
+        const progress = Number(item.progress || 0);
+        if (progress >= cap) return item;
+        return { ...item, progress: Math.min(cap, progress + 2) };
+      }));
+    }, 700);
+    return () => window.clearInterval(timer);
+  }, [activeAutomaticId, activeStatus]);
 
   // Review panel state
   const [expandedReviewId, setExpandedReviewId] = useState(null);
@@ -119,14 +167,25 @@ export default function UploadPage() {
       entry.password || null,
       entry.accountId || null,
     ),
-    onMutate: entry => updateAutomatic(entry.id, { status: 'parsing', error: '' }),
+    onMutate: entry => updateAutomatic(entry.id, {
+      status: 'parsing',
+      error: '',
+      progress: 8,
+      progressLabel: 'Reading and checking the statement',
+    }),
     onSuccess: (_, entry) => {
-      updateAutomatic(entry.id, { step: 2, status: 'reconciling' });
+      updateAutomatic(entry.id, {
+        step: 2,
+        status: 'reconciling',
+        progress: 32,
+        progressLabel: 'Comparing with transactions already in GODFIN',
+      });
       // Auto-trigger reconcile
       reconcileMutation.mutate(entry);
     },
     onError: (error, entry) => updateAutomatic(entry.id, {
       status: 'failed',
+      progress: 0,
       error: error?.message || 'GODFIN could not read this statement.',
     }),
   });
@@ -141,6 +200,8 @@ export default function UploadPage() {
     onSuccess: (data, entry) => updateAutomatic(entry.id, {
       step: 2,
       status: 'reviewed',
+      progress: 60,
+      progressLabel: 'Review complete',
       reconcileData: data,
       accountId: data.account_id || entry.accountId,
       error: '',
@@ -148,6 +209,7 @@ export default function UploadPage() {
     onError: (error, entry) => updateAutomatic(entry.id, {
       step: 2,
       status: 'failed',
+      progress: 0,
       error: error?.message || 'GODFIN could not reconcile this statement.',
     }),
   });
@@ -161,12 +223,19 @@ export default function UploadPage() {
       confirmReconciled: true,
       acceptedFingerprint: entry.reconcileData?.parse_fingerprint,
     }),
-    onMutate: entry => updateAutomatic(entry.id, { status: 'importing', error: '' }),
+    onMutate: entry => updateAutomatic(entry.id, {
+      status: 'importing',
+      error: '',
+      progress: 68,
+      progressLabel: 'Saving transactions and updating balances',
+    }),
     onSuccess: (data, entry) => {
       updateAutomatic(entry.id, {
         importResult: data,
         step: 3,
         status: 'complete',
+        progress: 100,
+        progressLabel: 'Statement finished',
       });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
@@ -175,6 +244,7 @@ export default function UploadPage() {
     },
     onError: (error, entry) => updateAutomatic(entry.id, {
       status: 'reviewed',
+      progress: 60,
       error: error?.message || 'No transactions were imported.',
     }),
   });
@@ -249,6 +319,8 @@ export default function UploadPage() {
       reconcileData: null,
       importResult: null,
       error: '',
+      progress: 0,
+      progressLabel: '',
     });
   }
 
@@ -541,6 +613,14 @@ export default function UploadPage() {
                   </GlassButton>
                 </div>
 
+                {activeAutomatic?.status === 'parsing' && (
+                  <StatementProgress
+                    value={activeAutomatic.progress}
+                    label={activeAutomatic.progressLabel}
+                    detail="GODFIN is reading the statement on this computer. You can leave this page; the rest of the app remains available."
+                  />
+                )}
+
                 {activeAutomatic?.status === 'failed' && activeAutomatic?.error && (
                   <div className="mt-3 p-3 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px]">
                     <p className="text-rose-200 text-[0.8rem]">{activeAutomatic.error}</p>
@@ -568,9 +648,16 @@ export default function UploadPage() {
                 </div>
 
                 {reconcileMutation.isPending ? (
-                  <div className="flex flex-col items-center gap-3 py-8">
-                    <Loader2 size={28} className="animate-spin text-cyan-200" />
-                    <p className="text-ink-muted text-[0.85rem]">Reconciling against existing records...</p>
+                  <div className="py-5">
+                    <div className="flex items-center gap-3">
+                      <Loader2 size={24} className="animate-spin text-cyan-200" />
+                      <p className="text-ink-muted text-[0.85rem]">Checking which transactions are new or already present…</p>
+                    </div>
+                    <StatementProgress
+                      value={activeAutomatic?.progress}
+                      label={activeAutomatic?.progressLabel || 'Comparing transactions'}
+                      detail="No changes are being made yet. GODFIN will show the review before saving anything."
+                    />
                   </div>
                 ) : activeAutomatic?.status === 'failed' ? (
                   <div className="p-4 bg-rose-400/[0.06] border border-rose-400/[0.12] rounded-[12px]">
@@ -669,27 +756,19 @@ export default function UploadPage() {
 
                     {/* Import button / progress */}
                     {importMutation.isPending ? (
-                      <div className="mt-2 p-4 bg-cyan-400/[0.04] rounded-[14px] border border-cyan-400/[0.12]">
-                        <div className="flex items-center gap-3 mb-3">
-                          <Loader2 size={20} className="animate-spin text-cyan-200" />
-                          <div>
-                            <p className="text-ink-secondary text-[0.85rem]" style={{ fontWeight: 500 }}>Importing transactions...</p>
-                            <p className="text-ink-muted text-[0.7rem]">Classifying and deduplicating {reconcileData.new_count} transactions</p>
-                          </div>
-                        </div>
-                        <div className="w-full bg-white/[0.06] rounded-full h-1.5 overflow-hidden">
-                          <div className="h-full bg-cyan-400/50 rounded-full animate-pulse" style={{ width: '60%' }} />
-                        </div>
-                        <p className="text-ink-muted text-[0.65rem] mt-2">This may take a moment. Other tabs remain usable.</p>
-                      </div>
+                      <StatementProgress
+                        value={activeAutomatic?.progress}
+                        label={activeAutomatic?.progressLabel || 'Saving the reviewed statement'}
+                        detail={`GODFIN is updating ${reconcileData.new_count} new transaction${reconcileData.new_count === 1 ? '' : 's'}, the review queue, matching, and the verified account balance. Other tabs remain usable.`}
+                      />
                     ) : (
                       <GlassButton
                         onClick={() => importMutation.mutate(activeAutomatic)}
-                        disabled={reconcileData.new_count === 0 || (reviewAllFirst && !allAutomaticReviewed)}
+                        disabled={reviewAllFirst && !allAutomaticReviewed}
                         className="w-full justify-center mt-2"
                       >
                         {reconcileData.new_count === 0 ? (
-                          <>No new transactions to import</>
+                          <><CheckCircle size={15} /> Verify Statement Balance</>
                         ) : reviewAllFirst && !allAutomaticReviewed ? (
                           <>Review the remaining queued files first</>
                         ) : (

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import re
 from bisect import bisect_left, bisect_right
 from datetime import date, timedelta
 from typing import Any
@@ -88,11 +89,32 @@ def cash_flow_calendar(db: Session, month: str) -> dict[str, Any]:
     }
 
 
+def _credit_card_payment_last4(transaction: Transaction) -> str | None:
+    candidate = (transaction.counterparty_candidate or "").strip().lower()
+    match = re.fullmatch(r"credit_card_last4:(\d{4})", candidate)
+    if match:
+        return match.group(1)
+    raw_text = " ".join(
+        str(value or "")
+        for value in (
+            transaction.raw_text,
+            transaction.merchant_raw,
+            transaction.merchant_normalized,
+        )
+    ).upper()
+    match = re.search(
+        r"HDFC(?:4U|5X)-[A-Z0-9X*]*(\d{4})(?!\d)",
+        raw_text,
+    )
+    return match.group(1) if match else None
+
+
 def scan_transfer_candidates(
     db: Session,
     *,
     max_date_gap_days: int = 3,
     amount_tolerance_percent: float = 0.005,
+    transaction_ids: set[str] | None = None,
 ) -> int:
     existing_pairs = {
         (row.debit_transaction_id, row.credit_transaction_id)
@@ -103,7 +125,10 @@ def scan_transfer_candidates(
         .filter(
             Transaction.type == "debit",
             Transaction.status != "deleted",
-            Transaction.is_transfer.is_(False),
+            or_(
+                Transaction.is_transfer.is_(False),
+                Transaction.semantic_detail == "credit_card_payment",
+            ),
         )
         .order_by(Transaction.date.desc())
         .all()
@@ -113,7 +138,10 @@ def scan_transfer_candidates(
         .filter(
             Transaction.type == "credit",
             Transaction.status != "deleted",
-            Transaction.is_transfer.is_(False),
+            or_(
+                Transaction.is_transfer.is_(False),
+                Transaction.semantic_detail == "credit_card_payment",
+            ),
         )
         .order_by(Transaction.date.desc())
         .all()
@@ -125,13 +153,31 @@ def scan_transfer_candidates(
         key=lambda item: item[0],
     )
     credit_amounts = [item[0] for item in credits_by_amount]
+    accounts_by_id = {
+        account.id: account for account in db.query(Account).all()
+    }
     for debit in debits:
+        target_card_last4 = _credit_card_payment_last4(debit)
         tolerance = max(1.0, float(debit.amount) * amount_tolerance_percent)
         lower = bisect_left(credit_amounts, float(debit.amount) - tolerance)
         upper = bisect_right(credit_amounts, float(debit.amount) + tolerance)
         for _, credit in credits_by_amount[lower:upper]:
+            if (
+                transaction_ids is not None
+                and debit.id not in transaction_ids
+                and credit.id not in transaction_ids
+            ):
+                continue
             if debit.account_id == credit.account_id:
                 continue
+            if target_card_last4:
+                credit_account = accounts_by_id.get(credit.account_id)
+                if (
+                    credit_account is None
+                    or credit_account.account_type != "credit_card"
+                    or credit_account.last_4_digits != target_card_last4
+                ):
+                    continue
             gap = abs((debit.date - credit.date).days)
             if gap > max_date_gap_days:
                 continue
@@ -143,7 +189,15 @@ def scan_transfer_candidates(
                 continue
             amount_score = max(0.0, 1 - amount_gap / max(tolerance, 1.0))
             date_score = max(0.0, 1 - gap / (max_date_gap_days + 1))
-            confidence = round(0.7 * amount_score + 0.3 * date_score, 3)
+            confidence = round(
+                min(
+                    1.0,
+                    0.7 * amount_score
+                    + 0.3 * date_score
+                    + (0.08 if target_card_last4 else 0.0),
+                ),
+                3,
+            )
             db.add(
                 TransferMatch(
                     debit_transaction_id=debit.id,

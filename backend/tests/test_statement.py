@@ -12,12 +12,14 @@ from app.core.reconciliation import (
     import_new_transactions,
 )
 from app.core.statement_parser import (
+    StatementParseResult,
     StatementTransaction,
     ParsedTransaction,
     _parse_amount,
     _parse_statement_date,
 )
 from app.models.income_source import IncomeSource
+from app.models.account_balance import AccountStatementCoverage
 from app.models.audit_session import AuditSession
 from app.models.transaction import Transaction
 from app.seed import CC_ACCOUNT_ID, SAVINGS_ACCOUNT_ID
@@ -330,6 +332,92 @@ def test_statement_import_endpoint_returns_409_for_finalized_period(
         .count()
         == 0
     )
+
+
+def test_verified_statement_records_balance_when_existing_email_row_needs_review(
+    auth_client,
+    db_session,
+    monkeypatch,
+):
+    from app.api.v1.endpoints import statement as statement_endpoint
+
+    existing = Transaction(
+        id=str(uuid.uuid4()),
+        date=date(2026, 4, 2),
+        raw_text="Synthetic email alert",
+        merchant_raw="SYNTHETIC MERCHANT",
+        merchant_normalized="SYNTHETIC MERCHANT",
+        amount=100.0,
+        type="debit",
+        instrument="bank",
+        account_id=SAVINGS_ACCOUNT_ID,
+        source="gmail",
+        status="settled",
+    )
+    db_session.add(existing)
+    db_session.commit()
+    statement_transaction = StatementTransaction(
+        date=date(2026, 4, 2),
+        description="SYNTHETIC MERCHANT PURCHASE",
+        amount=100.0,
+        txn_type="debit",
+        closing_balance=900.0,
+    )
+    parse_result = StatementParseResult(
+        transactions=[statement_transaction],
+        statement_type="hdfc_savings",
+        parser_profile="hdfc_savings",
+        recognized=True,
+        reconciliation_status="passed",
+        reconciliation_method="explicit_columns_and_running_balance",
+        source_digest="8" * 64,
+        period_start=date(2026, 4, 1),
+        period_end=date(2026, 4, 30),
+        opening_balance=1000.0,
+        closing_balance=900.0,
+        total_debits=100.0,
+        total_credits=0.0,
+        account_last4="0000",
+    )
+
+    async def fake_read_and_parse(*_args, **_kwargs):
+        return parse_result
+
+    parsed_transaction = ParsedTransaction.from_statement_transaction(
+        statement_transaction
+    )
+    monkeypatch.setattr(
+        statement_endpoint,
+        "_read_and_parse",
+        fake_read_and_parse,
+    )
+    monkeypatch.setattr(
+        statement_endpoint.ReconciliationService,
+        "reconcile",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            matches=[],
+            new_transactions=[],
+            duplicate_transactions=[],
+            potential_duplicates=[(parsed_transaction, existing)],
+            total_parsed=1,
+        ),
+    )
+
+    response = auth_client.post(
+        "/api/v1/ingest/upload/import",
+        files={"file": ("statement.pdf", b"%PDF-synthetic")},
+        data={
+            "confirm_reconciled": "true",
+            "accepted_fingerprint": "8" * 64,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["new_imported"] == 0
+    assert response.json()["possible"] == 1
+    assert response.json()["balance_status"] == "verified"
+    assert response.json()["computed_balance"] == 900.0
+    assert db_session.query(AccountStatementCoverage).count() == 1
 
 # --- Income source CRUD ---
 

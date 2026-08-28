@@ -268,6 +268,45 @@ def test_dispatcher_never_runs_more_than_the_configured_concurrency(job_runtime)
         raise AssertionError("bounded worker did not finish queued work")
 
 
+def test_dispatcher_recovers_after_one_unexpected_claim_failure(
+    job_runtime,
+    monkeypatch,
+):
+    calls = []
+    register_job_handler(
+        "test_dispatcher_recovery",
+        lambda _context, _payload: calls.append("ran") or {},
+    )
+    queued = enqueue_job(
+        "test_dispatcher_recovery",
+        active_key="dispatcher-recovery",
+    )
+    real_claim = background_jobs._claim_next_job
+    claim_attempts = 0
+
+    def flaky_claim():
+        nonlocal claim_attempts
+        claim_attempts += 1
+        if claim_attempts == 1:
+            raise RuntimeError("synthetic dispatcher cycle failure")
+        return real_claim()
+
+    monkeypatch.setattr(background_jobs, "_claim_next_job", flaky_claim)
+    background_jobs.start_background_job_worker()
+
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline:
+        if _job(job_runtime, queued.job_id).status == "completed":
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("dispatcher did not recover after a failed cycle")
+
+    assert calls == ["ran"]
+    assert background_jobs._dispatcher is not None
+    assert background_jobs._dispatcher.is_alive()
+
+
 def test_claimed_job_waits_out_a_short_sqlite_read_lock(job_runtime):
     calls = []
     register_job_handler(

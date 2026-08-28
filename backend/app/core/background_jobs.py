@@ -541,25 +541,40 @@ def _execute_job(job_id: str) -> None:
 def _dispatcher_loop() -> None:
     next_recovery = time.monotonic() + DEFAULT_LEASE_SECONDS
     while not _worker_stop.is_set():
-        with _worker_lock:
-            active_count = sum(thread.is_alive() for thread in _active_threads.values())
-        while active_count < MAX_CONCURRENT_JOBS and not _worker_stop.is_set():
-            job_id = _claim_next_job()
-            if job_id is None:
-                break
-            thread = threading.Thread(
-                target=_execute_job,
-                args=(job_id,),
-                name=f"godfin-background-job-{job_id[:8]}",
-                daemon=True,
-            )
+        try:
             with _worker_lock:
-                _active_threads[job_id] = thread
-            thread.start()
-            active_count += 1
-        if time.monotonic() >= next_recovery:
-            recover_expired_jobs()
-            next_recovery = time.monotonic() + DEFAULT_LEASE_SECONDS
+                active_count = sum(
+                    thread.is_alive() for thread in _active_threads.values()
+                )
+            while active_count < MAX_CONCURRENT_JOBS and not _worker_stop.is_set():
+                job_id = _claim_next_job()
+                if job_id is None:
+                    break
+                thread = threading.Thread(
+                    target=_execute_job,
+                    args=(job_id,),
+                    name=f"godfin-background-job-{job_id[:8]}",
+                    daemon=True,
+                )
+                with _worker_lock:
+                    _active_threads[job_id] = thread
+                thread.start()
+                active_count += 1
+            if time.monotonic() >= next_recovery:
+                recover_expired_jobs()
+                next_recovery = time.monotonic() + DEFAULT_LEASE_SECONDS
+        except Exception as exc:
+            logger.exception(
+                "Background dispatcher cycle failed; retrying safely",
+                extra={
+                    "operation_id": "background_dispatcher",
+                    "error_code": "JOB_DISPATCHER_CYCLE_FAILED",
+                    "cause_type": type(exc).__name__,
+                },
+            )
+            # A transient database or driver failure must not permanently kill
+            # the only dispatcher. Bound the retry rate to avoid a hot loop.
+            _worker_wake.wait(1.0)
         _worker_wake.wait(DISPATCH_INTERVAL_SECONDS)
         _worker_wake.clear()
 

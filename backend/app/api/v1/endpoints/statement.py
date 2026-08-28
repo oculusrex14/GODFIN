@@ -1107,11 +1107,18 @@ async def import_statement(
                 for txn in imported_txns
                 if txn.merchant_normalized
             }
+            from app.core.license import has_feature
+            from app.core.product_depth import scan_transfer_candidates
+
+            if has_feature(db, "multiple_accounts"):
+                scan_transfer_candidates(
+                    db,
+                    transaction_ids={txn.id for txn in imported_txns},
+                )
             if merchant_keys:
                 from app.core.goal_contributions import (
                     detect_goal_contribution_suggestions,
                 )
-                from app.core.license import has_feature
                 from app.core.product_depth import sync_subscription_suggestions
                 from app.core.recurring import detect_recurring_patterns
 
@@ -1135,7 +1142,7 @@ async def import_statement(
                 for t in income_txns
             ]
 
-        if import_new and not recon_result.potential_duplicates:
+        if import_new:
             _account_balance_service().record_verified_statement_controls(
                 db,
                 resolved_account_id,

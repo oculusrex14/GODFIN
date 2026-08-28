@@ -9,6 +9,8 @@ from app.models.audit_session import AuditSession
 from app.models.recurring_pattern import RecurringPattern
 from app.models.subscription import Subscription
 from app.models.transaction import Transaction
+from app.models.transfer_match import TransferMatch
+from app.core.product_depth import scan_transfer_candidates
 from tests.license_helpers import install_test_license
 
 
@@ -123,6 +125,62 @@ def test_transfer_scan_and_confirm(auth_client, db_session):
     db_session.expire_all()
     assert db_session.get(Transaction, debit.id).is_transfer is True
     assert db_session.get(Transaction, credit.id).is_transfer is True
+
+
+def test_card_billpay_hint_matches_only_the_named_card_account(db_session):
+    accounts = db_session.query(Account).limit(2).all()
+    savings = next(account for account in accounts if account.account_type == "savings")
+    card = next(account for account in accounts if account.account_type == "credit_card")
+    other_card = Account(
+        id=str(uuid.uuid4()),
+        bank="HDFC",
+        account_type="credit_card",
+        last_4_digits="9999",
+        nickname="Synthetic second card",
+        is_active=True,
+    )
+    db_session.add(other_card)
+    db_session.flush()
+
+    debit = _transaction(
+        db_session,
+        account_id=savings.id,
+        txn_date=date(2026, 7, 10),
+        amount=5000,
+        txn_type="debit",
+        merchant=f"IB BILLPAY DR-HDFC4U-123456XXXXXX{card.last_4_digits}",
+    )
+    debit.is_transfer = True
+    debit.semantic_type = "internal_transfer"
+    debit.semantic_detail = "credit_card_payment"
+    debit.counterparty_candidate = f"credit_card_last4:{card.last_4_digits}"
+    correct_credit = _transaction(
+        db_session,
+        account_id=card.id,
+        txn_date=date(2026, 7, 11),
+        amount=5000,
+        txn_type="credit",
+        merchant="PAYMENT RECEIVED",
+    )
+    _transaction(
+        db_session,
+        account_id=other_card.id,
+        txn_date=date(2026, 7, 11),
+        amount=5000,
+        txn_type="credit",
+        merchant="PAYMENT RECEIVED",
+    )
+    db_session.commit()
+
+    assert scan_transfer_candidates(
+        db_session,
+        transaction_ids={debit.id},
+    ) == 1
+
+    match = db_session.query(TransferMatch).one()
+    assert match.debit_transaction_id == debit.id
+    assert match.credit_transaction_id == correct_credit.id
+    assert match.confidence >= 0.98
 
 
 def test_transfer_matching_requires_paid_license(auth_client):

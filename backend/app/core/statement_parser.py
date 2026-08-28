@@ -385,6 +385,26 @@ def _validate_savings_controls(result: StatementParseResult) -> None:
         result.reconciliation_status = "failed"
 
 
+def _xls_date_value(cell: xlrd.sheet.Cell, datemode: int) -> Optional[date]:
+    """Return a real date from a legacy XLS cell without guessing amounts.
+
+    HDFC's legacy export stores dates as Excel serials with the DATE cell type.
+    Converting ``str(cell.value)`` turns those into values such as ``46027.0``
+    that the ordinary text parser correctly rejects.
+    """
+
+    if cell.ctype == xlrd.XL_CELL_DATE:
+        try:
+            return xlrd.xldate_as_datetime(cell.value, datemode).date()
+        except (TypeError, ValueError, OverflowError, xlrd.XLDateError):
+            return None
+    if isinstance(cell.value, datetime):
+        return cell.value.date()
+    if isinstance(cell.value, date):
+        return cell.value
+    return _parse_statement_date(str(cell.value or "").strip())
+
+
 def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
     """Parse HDFC savings account XLS statement.
 
@@ -421,8 +441,10 @@ def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
         # Extract metadata
         if 'ACCOUNT NO' in row_upper:
             for v in row_vals:
-                if v and v.replace(' ', '').isdigit() and len(v.replace(' ', '')) >= 8:
-                    # Found account number
+                digits = re.sub(r'\D', '', v)
+                if len(digits) >= 4:
+                    result.account_last4 = digits[-4:]
+                    result.available_account_last4s = [result.account_last4]
                     break
         if 'STATEMENT FROM' in row_upper or 'FROM :' in row_upper:
             # Extract period dates
@@ -480,13 +502,14 @@ def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
             break
 
     for i in range(data_start, sheet.nrows):
-        date_cell = str(sheet.cell_value(i, col_map['date'])).strip()
+        date_cell = sheet.cell(i, col_map['date'])
+        date_text = str(date_cell.value).strip()
 
         # Stop at separator or empty date
-        if not date_cell or date_cell.startswith('*'):
+        if not date_text or date_text.startswith('*'):
             break
 
-        date_val = _parse_statement_date(date_cell)
+        date_val = _xls_date_value(date_cell, wb.datemode)
         if not date_val:
             continue
 
@@ -515,12 +538,21 @@ def parse_statement_xls(file_bytes: bytes) -> StatementParseResult:
             withdrawal = _parse_amount(wd_raw)
         if deposit is None and isinstance(dp_raw, str) and dp_raw.strip():
             deposit = _parse_amount(dp_raw)
+        if balance is None and isinstance(bal_raw, str) and bal_raw.strip():
+            balance = _parse_amount(bal_raw)
+
+        value_date_index = col_map.get('value_date')
+        value_date = (
+            _xls_date_value(sheet.cell(i, value_date_index), wb.datemode)
+            if value_date_index is not None and value_date_index < sheet.ncols
+            else None
+        )
 
         txn_dict = {
             'date': date_val,
             'narration': narration,
             'ref': ref,
-            'value_date': '',
+            'value_date': value_date,
             'withdrawal': withdrawal,
             'deposit': deposit,
             'balance': balance,
@@ -703,9 +735,17 @@ def parse_statement_narration(narration: str) -> dict:
     # === Bill Pay (Transfer to CC) ===
     # PDF text may have no spaces: "IBBILLPAYDR" or "IB BILLPAY DR"
     if 'IBBILLPAY' in upper or 'IB BILLPAY' in upper:
+        card_match = re.search(
+            r'HDFC(?:4U|5X)-[A-Z0-9X*]*(\d{4})(?!\d)',
+            upper,
+        )
         result['merchant_name'] = 'HDFC Credit Card Payment'
         result['is_transfer'] = True
         result['semantic_type'] = 'internal_transfer'
+        if card_match:
+            result['counterparty_candidate'] = (
+                f"credit_card_last4:{card_match.group(1)}"
+            )
         result['suggested_category'] = 'TRANSFERS'
         result['suggested_subcategory'] = 'Credit Card Payment'
         return result
