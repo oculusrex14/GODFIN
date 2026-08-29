@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuditProvider } from './context/AuditContext';
+import { UploadQueueProvider } from './context/UploadQueueContext';
 import AppLayout from './components/AppLayout';
 import LockedFeaturePage from './components/LockedFeaturePage';
 import GlobalErrorToasts from './components/GlobalErrorToasts';
@@ -54,7 +55,9 @@ export default function App() {
             <ToastProvider>
               <GlobalErrorToasts />
               <AuditProvider>
-                <AppRoutes />
+                <UploadQueueProvider>
+                  <AppRoutes />
+                </UploadQueueProvider>
               </AuditProvider>
             </ToastProvider>
           </ThemeProvider>

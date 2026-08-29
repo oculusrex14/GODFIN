@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.models.account_balance import AccountBalanceAnchor, AccountStatementCoverage
 from app.models.audit_log import AuditLog
 from app.models.audit_session import AuditSession
 from app.models.behavior_insight import BehaviorInsightPreference
@@ -29,6 +30,7 @@ from app.models.system_log import SystemLog
 from app.models.transaction import Transaction
 from app.models.transaction_split import TransactionSplit
 from app.models.transfer_match import TransferMatch
+from app.models.merchant_enrichment import TransactionRelationship
 
 
 RESET_DYNAMIC_MODELS = (
@@ -37,10 +39,13 @@ RESET_DYNAMIC_MODELS = (
     IncomeMatchSuggestion,
     GoalContributionSuggestion,
     TransferMatch,
+    TransactionRelationship,
     ClassificationCorrection,
     GoalContribution,
     SubscriptionSuggestion,
     NetWorthQuote,
+    AccountStatementCoverage,
+    AccountBalanceAnchor,
     Transaction,
     MonthlyAggregate,
     AuditSession,

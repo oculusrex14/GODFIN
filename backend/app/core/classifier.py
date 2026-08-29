@@ -81,6 +81,8 @@ def classify_transaction(
     amount: float,
     instrument: str,
     vpa_handle: Optional[str] = None,
+    *,
+    allow_ai_fallbacks: bool = True,
 ) -> ClassificationResult:
     result = ClassificationResult()
 
@@ -137,15 +139,19 @@ def classify_transaction(
             source="personal_model",
         )
 
-    # Layer 6: Embedding similarity
-    layer4 = _layer_embedding_match(db, merchant_normalized)
-    if layer4:
-        return layer4
+    # Model-backed fallbacks are intentionally opt-out for bulk imports. A
+    # statement may contain hundreds of unknown merchants; making one model or
+    # network call per row would keep SQLite locked and stall the whole app.
+    if allow_ai_fallbacks:
+        # Layer 6: Embedding similarity
+        layer4 = _layer_embedding_match(db, merchant_normalized)
+        if layer4:
+            return layer4
 
-    # Layer 7: LLM fallback
-    layer5 = _layer_llm(db, merchant_normalized, amount, instrument)
-    if layer5:
-        return layer5
+        # Layer 7: LLM fallback
+        layer5 = _layer_llm(db, merchant_normalized, amount, instrument)
+        if layer5:
+            return layer5
 
     return result  # unclassified → goes to review queue
 

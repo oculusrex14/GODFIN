@@ -31,6 +31,48 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useLocation } from '../router';
 import { activateGuidedTour } from '../components/GuidedTour';
 import DialogSurface from '../components/DialogSurface';
+import { useUploadQueue } from '../context/UploadQueueContext';
+
+const RESET_DATA_QUERY_ROOTS = new Set([
+  'advisorDigest',
+  'auditSessions',
+  'behaviorInsights',
+  'cashFlow',
+  'cashFlowCalendar',
+  'categoryBreakdown',
+  'dashboardMonths',
+  'dashboardStats',
+  'financialProfile',
+  'gmailCoverage',
+  'goalContributionSuggestions',
+  'goalContributions',
+  'goals',
+  'incomeCoverage',
+  'incomeMatches',
+  'incomeSources',
+  'incomeStats',
+  'ingestProgress',
+  'ingestionStatus',
+  'monthStatus',
+  'netWorth',
+  'recurring',
+  'recurringCandidates',
+  'report',
+  'reportDetailed',
+  'reportSummary',
+  'reviewQueue',
+  'reviewStats',
+  'rewardPilotPreview',
+  'subscriptionReminders',
+  'subscriptionStats',
+  'subscriptionSuggestions',
+  'subscriptions',
+  'spendingTrend',
+  'syncStatus',
+  'transactions',
+  'transferMatches',
+  'uploadReviewQueue',
+]);
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -106,6 +148,7 @@ export default function Settings() {
   const { pinLength } = useAuth();
   const queryClient = useQueryClient();
   const { addToast: showToast } = useToast();
+  const { clearAutomaticQueue } = useUploadQueue();
   const [csvMonth, setCsvMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -250,8 +293,13 @@ export default function Settings() {
     mutationFn: ({ pin }) => resetData(pin),
     onSuccess: (data) => {
       setShowResetPin(false);
+      setResetPin('');
       setResetPinError('');
-      queryClient.invalidateQueries();
+      clearAutomaticQueue();
+      queryClient.removeQueries({
+        predicate: query => RESET_DATA_QUERY_ROOTS.has(query.queryKey[0]),
+      });
+      queryClient.invalidateQueries({ queryKey: ['settingsHealth'] });
       const msg = data.backup_created
         ? `Data reset. Backup saved: ${data.backup_filename}`
         : 'All data has been reset';

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import time
 from datetime import date
 from types import SimpleNamespace
 
@@ -418,6 +419,59 @@ def test_verified_statement_records_balance_when_existing_email_row_needs_review
     assert response.json()["balance_status"] == "verified"
     assert response.json()["computed_balance"] == 900.0
     assert db_session.query(AccountStatementCoverage).count() == 1
+
+
+def test_bulk_statement_import_never_waits_on_ai_fallbacks(
+    auth_client,
+    monkeypatch,
+):
+    from app.api.v1.endpoints import statement as statement_endpoint
+
+    statement_transactions = [
+        StatementTransaction(
+            date=date(2026, 5, 1 + (index % 28)),
+            description=f"SYNTHETIC BULK UNKNOWN {index:04d}",
+            amount=100.0 + index,
+            txn_type="debit",
+        )
+        for index in range(250)
+    ]
+    parse_result = StatementParseResult(
+        transactions=statement_transactions,
+        statement_type="hdfc_savings",
+        parser_profile="hdfc_savings",
+        recognized=True,
+        reconciliation_status="passed",
+        reconciliation_method="explicit_columns",
+        source_digest="9" * 64,
+        account_last4="0000",
+    )
+
+    async def fake_read_and_parse(*_args, **_kwargs):
+        return parse_result
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("A statement import must not call an AI model per row")
+
+    monkeypatch.setattr(statement_endpoint, "_read_and_parse", fake_read_and_parse)
+    monkeypatch.setattr("app.core.classifier._layer_embedding_match", fail_if_called)
+    monkeypatch.setattr("app.core.classifier._layer_llm", fail_if_called)
+
+    started = time.perf_counter()
+    response = auth_client.post(
+        "/api/v1/ingest/upload/import",
+        files={"file": ("statement.xls", b"synthetic-xls")},
+        data={
+            "confirm_reconciled": "true",
+            "accepted_fingerprint": "9" * 64,
+            "detect_income": "false",
+        },
+    )
+    elapsed = time.perf_counter() - started
+
+    assert response.status_code == 200, response.text
+    assert response.json()["new_imported"] == 250
+    assert elapsed < 10
 
 # --- Income source CRUD ---
 

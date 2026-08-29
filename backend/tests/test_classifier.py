@@ -149,6 +149,25 @@ def test_classify_unknown(db_session):
     assert result.source not in ('rule', 'merchant_memory')
 
 
+def test_bulk_classification_skips_model_backed_fallbacks(db_session, monkeypatch):
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("Bulk classification must not call a model")
+
+    monkeypatch.setattr("app.core.classifier._layer_embedding_match", fail_if_called)
+    monkeypatch.setattr("app.core.classifier._layer_llm", fail_if_called)
+
+    result = classify_transaction(
+        db_session,
+        "SYNTHETIC BULK UNKNOWN MERCHANT",
+        100.0,
+        "statement",
+        allow_ai_fallbacks=False,
+    )
+
+    assert result.source == "unclassified"
+    assert result.category is None
+
+
 def test_embedding_layer_is_disabled_by_default(db_session, monkeypatch):
     from app.core.classifier import _layer_embedding_match
 

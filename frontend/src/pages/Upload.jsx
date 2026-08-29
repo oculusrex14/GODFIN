@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
@@ -8,7 +8,6 @@ import {
   DollarSign, FileCheck, AlertCircle, ChevronDown, Check,
 } from 'lucide-react';
 import {
-  previewStatement, reconcileStatement, importStatement,
   createIncomeSource, fetchReviewQueue, resolveReviewItem, fetchCategories,
   fetchAccounts, fetchLicenseStatus,
 } from '../api/client';
@@ -16,6 +15,7 @@ import { GlassButton } from '../components/GlassButton';
 import { GlassInput } from '../components/GlassInput';
 import MappedSpreadsheetImport from '../components/MappedSpreadsheetImport';
 import { openWebsite } from '../config/website';
+import { useUploadQueue } from '../context/UploadQueueContext';
 
 function formatINR(amount) {
   return new Intl.NumberFormat('en-IN', {
@@ -101,9 +101,18 @@ function StatementProgress({ value = 0, label, detail }) {
 
 export default function UploadPage() {
   const [importMode, setImportMode] = useState('automatic');
-  const [automaticQueue, setAutomaticQueue] = useState([]);
-  const [activeAutomaticId, setActiveAutomaticId] = useState(null);
-  const [reviewAllFirst, setReviewAllFirst] = useState(true);
+  const {
+    automaticQueue,
+    setAutomaticQueue,
+    activeAutomaticId,
+    setActiveAutomaticId,
+    reviewAllFirst,
+    setReviewAllFirst,
+    isProcessing,
+    updateAutomatic,
+    reviewAutomatic,
+    importAutomatic,
+  } = useUploadQueue();
   const [fileError, setFileError] = useState('');
 
   const activeAutomatic = automaticQueue.find(item => item.id === activeAutomaticId)
@@ -115,25 +124,6 @@ export default function UploadPage() {
   const reconcileData = activeAutomatic?.reconcileData || null;
   const importResult = activeAutomatic?.importResult || null;
   const activeStatus = activeAutomatic?.status || 'waiting';
-
-  useEffect(() => {
-    const progressCaps = {
-      parsing: 28,
-      reconciling: 58,
-      importing: 94,
-    };
-    const cap = progressCaps[activeStatus];
-    if (!activeAutomaticId || !cap) return undefined;
-    const timer = window.setInterval(() => {
-      setAutomaticQueue(current => current.map((item) => {
-        if (item.id !== activeAutomaticId) return item;
-        const progress = Number(item.progress || 0);
-        if (progress >= cap) return item;
-        return { ...item, progress: Math.min(cap, progress + 2) };
-      }));
-    }, 700);
-    return () => window.clearInterval(timer);
-  }, [activeAutomaticId, activeStatus]);
 
   // Review panel state
   const [expandedReviewId, setExpandedReviewId] = useState(null);
@@ -149,104 +139,9 @@ export default function UploadPage() {
   const batchAvailable = license?.features?.includes('batch_statement_import') === true;
   const mappedImportAvailable = license?.features?.includes('generic_mapped_import') === true;
 
-  const updateAutomatic = (id, patch) => {
-    setAutomaticQueue(current => current.map(item => (
-      item.id === id ? { ...item, ...patch } : item
-    )));
-  };
-
   const { data: importAccounts = [] } = useQuery({
     queryKey: ['accounts'],
     queryFn: fetchAccounts,
-  });
-
-  // Step 1: Preview
-  const previewMutation = useMutation({
-    mutationFn: entry => previewStatement(
-      entry.file,
-      entry.password || null,
-      entry.accountId || null,
-    ),
-    onMutate: entry => updateAutomatic(entry.id, {
-      status: 'parsing',
-      error: '',
-      progress: 8,
-      progressLabel: 'Reading and checking the statement',
-    }),
-    onSuccess: (_, entry) => {
-      updateAutomatic(entry.id, {
-        step: 2,
-        status: 'reconciling',
-        progress: 32,
-        progressLabel: 'Comparing with transactions already in GODFIN',
-      });
-      // Auto-trigger reconcile
-      reconcileMutation.mutate(entry);
-    },
-    onError: (error, entry) => updateAutomatic(entry.id, {
-      status: 'failed',
-      progress: 0,
-      error: error?.message || 'GODFIN could not read this statement.',
-    }),
-  });
-
-  // Step 2: Reconcile
-  const reconcileMutation = useMutation({
-    mutationFn: entry => reconcileStatement(
-      entry.file,
-      entry.accountId || null,
-      entry.password || null,
-    ),
-    onSuccess: (data, entry) => updateAutomatic(entry.id, {
-      step: 2,
-      status: 'reviewed',
-      progress: 60,
-      progressLabel: 'Review complete',
-      reconcileData: data,
-      accountId: data.account_id || entry.accountId,
-      error: '',
-    }),
-    onError: (error, entry) => updateAutomatic(entry.id, {
-      step: 2,
-      status: 'failed',
-      progress: 0,
-      error: error?.message || 'GODFIN could not reconcile this statement.',
-    }),
-  });
-
-  // Step 3: Import
-  const importMutation = useMutation({
-    mutationFn: entry => importStatement(entry.file, entry.reconcileData?.account_id, {
-      password: entry.password || null,
-      importNew: true,
-      detectIncome: true,
-      confirmReconciled: true,
-      acceptedFingerprint: entry.reconcileData?.parse_fingerprint,
-    }),
-    onMutate: entry => updateAutomatic(entry.id, {
-      status: 'importing',
-      error: '',
-      progress: 68,
-      progressLabel: 'Saving transactions and updating balances',
-    }),
-    onSuccess: (data, entry) => {
-      updateAutomatic(entry.id, {
-        importResult: data,
-        step: 3,
-        status: 'complete',
-        progress: 100,
-        progressLabel: 'Statement finished',
-      });
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
-      queryClient.invalidateQueries({ queryKey: ['reviewStats'] });
-      queryClient.invalidateQueries({ queryKey: ['reviewQueue'] });
-    },
-    onError: (error, entry) => updateAutomatic(entry.id, {
-      status: 'reviewed',
-      progress: 60,
-      error: error?.message || 'No transactions were imported.',
-    }),
   });
 
   // Review panel queries
@@ -325,7 +220,7 @@ export default function UploadPage() {
   }
 
   function removeAutomatic(id = activeAutomatic?.id) {
-    if (!id || previewMutation.isPending || reconcileMutation.isPending || importMutation.isPending) return;
+    if (!id || isProcessing) return;
     const index = automaticQueue.findIndex(item => item.id === id);
     const remaining = automaticQueue.filter(item => item.id !== id);
     setAutomaticQueue(remaining);
@@ -343,7 +238,6 @@ export default function UploadPage() {
     setActiveAutomaticId(null);
   }
 
-  const isProcessing = previewMutation.isPending || reconcileMutation.isPending || importMutation.isPending;
   const allAutomaticReviewed = automaticQueue.length > 0 && automaticQueue.every(
     item => ['reviewed', 'complete'].includes(item.status),
   );
@@ -601,11 +495,11 @@ export default function UploadPage() {
 
                 <div className="mt-4">
                   <GlassButton
-                    onClick={() => previewMutation.mutate(activeAutomatic)}
+                    onClick={() => reviewAutomatic(activeAutomatic)}
                     disabled={!file || isProcessing}
                     className="w-full justify-center"
                   >
-                    {previewMutation.isPending ? (
+                    {activeStatus === 'parsing' ? (
                       <><Loader2 size={15} className="animate-spin" /> Parsing...</>
                     ) : (
                       <><FileCheck size={15} /> Upload & Reconcile</>
@@ -647,7 +541,7 @@ export default function UploadPage() {
                   </button>
                 </div>
 
-                {reconcileMutation.isPending ? (
+                {activeStatus === 'reconciling' ? (
                   <div className="py-5">
                     <div className="flex items-center gap-3">
                       <Loader2 size={24} className="animate-spin text-cyan-200" />
@@ -755,7 +649,7 @@ export default function UploadPage() {
                     )}
 
                     {/* Import button / progress */}
-                    {importMutation.isPending ? (
+                    {activeStatus === 'importing' ? (
                       <StatementProgress
                         value={activeAutomatic?.progress}
                         label={activeAutomatic?.progressLabel || 'Saving the reviewed statement'}
@@ -763,7 +657,7 @@ export default function UploadPage() {
                       />
                     ) : (
                       <GlassButton
-                        onClick={() => importMutation.mutate(activeAutomatic)}
+                        onClick={() => importAutomatic(activeAutomatic)}
                         disabled={reviewAllFirst && !allAutomaticReviewed}
                         className="w-full justify-center mt-2"
                       >

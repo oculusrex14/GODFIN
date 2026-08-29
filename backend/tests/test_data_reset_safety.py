@@ -6,6 +6,8 @@ from sqlalchemy import text
 
 from app.models import (
     Account,
+    AccountBalanceAnchor,
+    AccountStatementCoverage,
     AppSetting,
     AuditLog,
     AuditSession,
@@ -26,6 +28,7 @@ from app.models import (
     SubscriptionSuggestion,
     SystemLog,
     Transaction,
+    TransactionRelationship,
     TransactionSplit,
     TransferMatch,
 )
@@ -135,6 +138,36 @@ def test_reset_deletes_complete_dynamic_graph_in_foreign_key_order(
     db_session.flush()
     first.audit_session_id = audit.id
 
+    balance_anchor = AccountBalanceAnchor(
+        account_id=account.id,
+        as_of_date=date(2026, 8, 31),
+        boundary_date=date(2026, 9, 1),
+        balance=1000,
+        currency="INR",
+        anchor_type="statement_closing",
+        source_fingerprint="b" * 64,
+        parser_profile="synthetic_reset",
+        parser_version="1.0",
+        statement_period_start=date(2026, 8, 1),
+        statement_period_end=date(2026, 8, 31),
+        verification_method="synthetic_controls",
+    )
+    db_session.add(balance_anchor)
+    db_session.flush()
+    db_session.add(
+        AccountStatementCoverage(
+            account_id=account.id,
+            source_fingerprint="b" * 64,
+            period_start=date(2026, 8, 1),
+            period_end=date(2026, 8, 31),
+            parser_profile="synthetic_reset",
+            parser_version="1.0",
+            transaction_count=2,
+            status="verified",
+            closing_anchor_id=balance_anchor.id,
+        )
+    )
+
     goal = Goal(
         name="Synthetic reset goal",
         target_amount=10000,
@@ -204,6 +237,14 @@ def test_reset_deletes_complete_dynamic_graph_in_foreign_key_order(
                 amount=100,
                 date_gap_days=0,
                 confidence=0.95,
+            ),
+            TransactionRelationship(
+                from_transaction_id=first.id,
+                to_transaction_id=second.id,
+                relationship_type="internal_transfer_pair",
+                confidence=0.95,
+                status="confirmed",
+                date_gap_days=0,
             ),
             ClassificationCorrection(
                 transaction_id=first.id,
@@ -284,10 +325,13 @@ def test_reset_deletes_complete_dynamic_graph_in_foreign_key_order(
         "goal_contribution_suggestions",
         "goal_contributions",
         "transfer_matches",
+        "transaction_relationships",
         "classification_corrections",
         "classification_patterns",
         "subscription_suggestions",
         "transactions",
+        "account_statement_coverages",
+        "account_balance_anchors",
         "monthly_aggregates",
         "audit_sessions",
         "merchant_memory",

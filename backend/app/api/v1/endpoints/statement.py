@@ -1059,6 +1059,7 @@ async def import_statement(
                         float(txn.amount),
                         txn.instrument or 'statement',
                         vpa_handle=txn.vpa_handle,
+                        allow_ai_fallbacks=False,
                     )
                     if classification.category:
                         txn.category = classification.category
@@ -1097,8 +1098,12 @@ async def import_statement(
                     refresh_transaction_enrichment(txn)
                     if txn.review_required:
                         review_queue_count += 1
-                except Exception as e:
-                    logger.warning(f"Classification failed for {txn.merchant_raw}: {e}")
+                except Exception as exc:
+                    logger.warning(
+                        "Deterministic classification failed for transaction %s: %s",
+                        txn.id,
+                        type(exc).__name__,
+                    )
                     txn.review_required = True
                     review_queue_count += 1
 

@@ -36,6 +36,7 @@ def postprocess_imported_transactions(
                 float(transaction.amount),
                 transaction.instrument or "statement",
                 vpa_handle=transaction.vpa_handle,
+                allow_ai_fallbacks=False,
             )
             if classification.category:
                 transaction.category = classification.category
