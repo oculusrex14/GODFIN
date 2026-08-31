@@ -96,9 +96,23 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: |
+            website/package-lock.json
+            website/remotion/package-lock.json
       - run: npm ci
         working-directory: website
+      - run: npm ci
+        working-directory: website/remotion
+      - run: npm run prepare:assets
+        working-directory: website/remotion
+      - run: npm run typecheck
+        working-directory: website/remotion
+      - run: npm run compositions
+        working-directory: website/remotion
+      - run: npm run render:smoke
+        working-directory: website/remotion
+      - run: npm run verify
+        working-directory: website/remotion
       - run: npm run verify:contracts
         working-directory: website
       - run: npm run test:unit

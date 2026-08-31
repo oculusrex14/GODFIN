@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -131,12 +131,18 @@ for (const rateLimitedRoute of [
 
 const publicContentPaths = [
   "src/app/page.tsx",
+  "src/app/demo/page.tsx",
+  "src/app/how-it-works/page.tsx",
   "src/app/pricing/page.tsx",
   "src/app/docs/page.tsx",
   "src/app/download/page.tsx",
   "src/app/privacy/page.tsx",
   "src/app/terms/page.tsx",
   "src/app/account/page.tsx",
+  "src/components/public-demo.tsx",
+  "src/components/product-demo-video.tsx",
+  "src/components/site-header.tsx",
+  "src/components/site-footer.tsx",
   "src/components/privacy-analytics.tsx",
 ];
 const publicContent = [];
@@ -159,6 +165,115 @@ for (const phrase of publicClaimsPolicy.prohibited_public_phrases) {
   );
 }
 
+const siteHeader = await text("src/components/site-header.tsx");
+for (const [href, label] of [
+  ["/demo", "Demo"],
+  ["/how-it-works", "How it works"],
+  ["/pricing", "Pricing"],
+  ["/#waitlist", "Join beta"],
+]) {
+  assert.equal(
+    siteHeader.includes(`{ href: "${href}", label: "${label}" }`),
+    true,
+    `Primary navigation is missing ${label}.`,
+  );
+}
+assert.match(siteHeader, /href="\/account">Sign in/);
+
+const pricingPage = await text("src/app/pricing/page.tsx");
+assert.match(pricingPage, /public checkout is closed/i);
+assert.match(pricingPage, /₹4,999/);
+assert.match(pricingPage, /₹9,999/);
+assert.match(pricingPage, /No bundled AI usage/);
+assert.doesNotMatch(pricingPage, /PurchaseButton|INR 1|₹1|PPP|purchasing power/i);
+
+const waitlistForm = await text("src/components/waitlist-form.tsx");
+assert.doesNotMatch(
+  waitlistForm,
+  /name=["']country["']|htmlFor=["']country["']/i,
+  "Public waitlist must not require a visible country field.",
+);
+const waitlistRouteSource = await text("src/app/api/waitlist/route.ts");
+const betaLibrary = await text("src/lib/beta.ts");
+assert.match(betaLibrary, /x-vercel-ip-country/);
+assert.match(waitlistRouteSource, /inferredCountry\(/);
+assert.match(waitlistRouteSource, /country_source:\s*countrySource/);
+
+const publicDemo = await text("src/components/public-demo.tsx");
+assert.match(publicDemo, /demo-data\.json/);
+assert.match(publicDemo, /data-demo-runtime="static"/);
+assert.match(publicDemo, /Start 2-minute tour/);
+assert.match(publicDemo, /Explore freely/);
+assert.match(publicDemo, /ArrowRight/);
+assert.match(publicDemo, /ArrowLeft/);
+assert.match(publicDemo, /Escape/);
+assert.doesNotMatch(publicDemo, /fetch\(|XMLHttpRequest|FormData|type=["']file["']/);
+assert.doesNotMatch(publicDemo, /\/api\/|supabase|cashfree|accounts\.google/i);
+
+const demoFixture = JSON.parse(await text("public/demo/demo-data.json"));
+assert.equal(
+  demoFixture.disclosure,
+  "Demo data - made-up household - nothing here is connected to a bank",
+);
+assert.equal(demoFixture.summary.income, "44000.00");
+assert.equal(demoFixture.summary.spend, "11000.00");
+assert.equal(demoFixture.summary.net, "33000.00");
+assert.equal(demoFixture.transactions.length, 13);
+
+const productDemoVideo = await text("src/components/product-demo-video.tsx");
+assert.match(productDemoVideo, /prefers-reduced-motion: reduce/);
+assert.match(productDemoVideo, /IntersectionObserver/);
+assert.match(productDemoVideo, /poster="\/video\/godfin-beta-hero\.poster\.webp"/);
+assert.match(productDemoVideo, /godfin-beta-hero\.webm/);
+assert.match(productDemoVideo, /godfin-beta-hero\.mp4/);
+assert.match(productDemoVideo, /kind="captions"/);
+assert.match(productDemoVideo, /Read the 24-second video transcript/);
+assert.match(productDemoVideo, /controls/);
+assert.match(productDemoVideo, /muted/);
+assert.match(productDemoVideo, /playsInline/);
+
+for (const mediaPath of [
+  "public/video/godfin-beta-hero.mp4",
+  "public/video/godfin-beta-hero.webm",
+  "public/video/godfin-beta-hero.poster.webp",
+  "public/video/godfin-beta-hero.en.vtt",
+  "public/video/godfin-demo-walkthrough.mp4",
+  "public/video/godfin-demo-walkthrough.webm",
+  "public/video/godfin-demo-walkthrough.poster.webp",
+  "public/video/godfin-beta-social.mp4",
+  "public/video/render-verification.json",
+]) {
+  assert.ok((await stat(path.join(websiteRoot, mediaPath))).size > 0, `${mediaPath} is empty.`);
+}
+
+const remotionPackage = JSON.parse(await text("remotion/package.json"));
+for (const packageName of ["remotion", "@remotion/cli", "@remotion/renderer", "@remotion/bundler"]) {
+  assert.equal(
+    remotionPackage.dependencies?.[packageName],
+    "4.0.518",
+    `${packageName} must remain exactly pinned for deterministic rendering.`,
+  );
+}
+const remotionRoot = await text("remotion/src/root.tsx");
+for (const composition of [
+  ["GodfinBetaHero16x9", 1920, 1080, 720],
+  ["GodfinDemoWalkthrough16x9", 1920, 1080, 1620],
+  ["GodfinBetaSocial9x16", 1080, 1920, 540],
+]) {
+  const [id, width, height, duration] = composition;
+  assert.match(
+    remotionRoot,
+    new RegExp(
+      `id: \\"${id}\\", width: ${width}, height: ${height}, fps: 30, durationInFrames: ${duration}`,
+    ),
+  );
+}
+assert.doesNotMatch(
+  await text("src/app/page.tsx"),
+  /godfin-workflow\.(mp4|webm)/,
+  "The public page must not reuse the mixed-fixture legacy workflow capture.",
+);
+
 const privacyPage = await text("src/app/privacy/page.tsx");
 const normalizedPrivacyPage = privacyPage.replace(/\s+/g, " ").toLowerCase();
 for (const disclosure of publicClaimsPolicy.required_privacy_disclosures) {
@@ -175,6 +290,79 @@ assert.match(envModule, /waitlistConfigured/);
 assert.match(checkout, /commerceConfigured\(\)/);
 const waitlistRoute = await text("src/app/api/waitlist/route.ts");
 assert.match(waitlistRoute, /waitlistConfigured\(\)/);
+
+const betaCheckoutRoute = await text("src/app/api/beta/checkout/route.ts");
+for (const requiredContract of [
+  /betaCheckoutConfigured\(\)/,
+  /tester\?\.checkoutEligible/,
+  /godfin_beta_/,
+  /BETA_CHECKOUT_AMOUNT_MINOR/,
+  /BETA_CHECKOUT_CURRENCY/,
+  /BETA_CHECKOUT_PRODUCT_CODE/,
+  /BETA_CHECKOUT_FLOW/,
+  /onConflict:\s*"provider_order_id",\s*ignoreDuplicates:\s*true/,
+  /attempt\.beta_tester_id !== tester\.id/,
+  /attempt\.user_id !== user\.id/,
+]) {
+  assert.match(betaCheckoutRoute, requiredContract);
+}
+assert.match(envModule, /BETA_CHECKOUT_ENABLED/);
+assert.match(envModule, /BETA_CHECKOUT_LIVE_ENABLED/);
+assert.match(envModule, /CASHFREE_ENVIRONMENT[\s\S]*?!== "production"/);
+assert.match(envModule, /productionAllowed/);
+
+const downloadPage = await text("src/app/download/page.tsx");
+assert.match(downloadPage, /BETA_MAC_APPLE_SILICON_DOWNLOAD_URL/);
+assert.match(downloadPage, /BETA_WINDOWS_X64_DOWNLOAD_URL/);
+assert.match(downloadPage, /robots:\s*\{\s*index:\s*false/);
+assert.doesNotMatch(downloadPage, /NEXT_PUBLIC_.*DOWNLOAD_URL/);
+
+for (const scopedCookieRoute of [
+  "src/app/api/beta/invite/claim/route.ts",
+  "src/app/api/beta/invite/accept/route.ts",
+]) {
+  assert.match(await text(scopedCookieRoute), /path:\s*"\/api\/beta\/invite"/);
+}
+for (const scopedCookieRoute of [
+  "src/app/api/waitlist/confirm/route.ts",
+  "src/app/api/waitlist/profile/route.ts",
+]) {
+  assert.match(await text(scopedCookieRoute), /path:\s*"\/api\/waitlist\/profile"/);
+}
+
+const betaMigration = await text(
+  "supabase/migrations/20260830044445_beta_waitlist_access_entitlements_feedback.sql",
+);
+for (const requiredSql of [
+  /create table if not exists public\.beta_candidate_profiles/,
+  /create table if not exists public\.beta_testers/,
+  /create table if not exists public\.beta_invites/,
+  /create table if not exists public\.beta_feedback/,
+  /create table if not exists public\.beta_checkout_attempts/,
+  /create table if not exists public\.beta_events/,
+  /event_key text unique/,
+  /create or replace function public\.accept_beta_invite/,
+  /create or replace function public\.set_beta_tester_access/,
+  /create or replace function public\.verify_license/,
+  /kind in \('purchase', 'owner_test', 'beta_test'\)/,
+  /v_license\.kind = 'beta_test'/,
+  /v_license\.expires_at <= now\(\)/,
+  /grant execute on function public\.accept_beta_invite[\s\S]*?to service_role/,
+  /grant execute on function public\.set_beta_tester_access[\s\S]*?to service_role/,
+  /grant execute on function public\.verify_license[\s\S]*?to service_role/,
+]) {
+  assert.match(betaMigration, requiredSql);
+}
+for (const betaTable of [
+  "beta_candidate_profiles",
+  "beta_testers",
+  "beta_invites",
+  "beta_feedback",
+  "beta_checkout_attempts",
+  "beta_events",
+]) {
+  assert.match(betaMigration, new RegExp(`alter table public\\.${betaTable} enable row level security`));
+}
 
 const webhook = await text("src/app/api/webhook/route.ts");
 assert.match(webhook, /verifyCashfreeWebhook/);
@@ -416,6 +604,10 @@ for (const name of [
   "LICENSE_ENTITLEMENT_ACTIVE_KEY_VERSION",
   "LICENSE_ENTITLEMENT_PRIVATE_KEYS_JSON",
   "RESEND_API_KEY",
+  "BETA_MAC_APPLE_SILICON_DOWNLOAD_URL",
+  "BETA_WINDOWS_X64_DOWNLOAD_URL",
+  "BETA_CHECKOUT_ENABLED",
+  "BETA_CHECKOUT_LIVE_ENABLED",
   ...publicClaimsPolicy.required_launch_gates,
 ]) {
   assert.match(envExample, new RegExp(`^${name}=`, "m"), `${name} is undocumented.`);
