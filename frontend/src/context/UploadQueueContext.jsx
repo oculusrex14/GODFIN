@@ -38,12 +38,17 @@ export function UploadQueueProvider({ children }) {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setAutomaticQueue(current => current.map((item) => {
-        const cap = PROGRESS_CAPS[item.status];
-        const progress = Number(item.progress || 0);
-        if (!cap || progress >= cap) return item;
-        return { ...item, progress: Math.min(cap, progress + 2) };
-      }));
+      setAutomaticQueue((current) => {
+        let changed = false;
+        const next = current.map((item) => {
+          const cap = PROGRESS_CAPS[item.status];
+          const progress = Number(item.progress || 0);
+          if (!cap || progress >= cap) return item;
+          changed = true;
+          return { ...item, progress: Math.min(cap, progress + 2) };
+        });
+        return changed ? next : current;
+      });
     }, 700);
     return () => window.clearInterval(timer);
   }, []);
