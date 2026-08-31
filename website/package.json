@@ -5,16 +5,20 @@
   "scripts": {
     "predev": "node scripts/sync-entitlements.mjs",
     "dev": "next dev --turbopack -p 5300",
-    "prebuild": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs && node scripts/verify-supabase-migrations.mjs",
+    "prebuild": "node scripts/sync-entitlements.mjs && node scripts/verify-demo-fixture.mjs && node scripts/verify-production-contracts.mjs && node scripts/verify-supabase-migrations.mjs",
     "build": "next build",
     "start": "next start -p 5300",
     "lint": "next lint",
     "test:cashfree": "node --import tsx --test src/lib/cashfree.test.ts",
     "test:webhook": "node --import tsx --test src/lib/webhook-security.test.ts",
     "test:upgrades": "node --import tsx --test src/lib/license-upgrades.test.ts",
-    "test:unit": "npm run test:cashfree && npm run test:webhook && npm run test:upgrades",
-    "verify:contracts": "node scripts/sync-entitlements.mjs && node scripts/verify-production-contracts.mjs && node scripts/verify-supabase-migrations.mjs",
-    "verify:migrations": "node scripts/verify-supabase-migrations.mjs"
+    "test:beta": "node --import tsx --test src/lib/beta.test.ts",
+    "test:beta-checkout": "node --import tsx --test src/lib/beta-checkout.test.ts",
+    "test:unit": "npm run test:cashfree && npm run test:webhook && npm run test:upgrades && npm run test:beta && npm run test:beta-checkout",
+    "verify:demo": "node scripts/verify-demo-fixture.mjs",
+    "verify:contracts": "node scripts/sync-entitlements.mjs && node scripts/verify-demo-fixture.mjs && node scripts/verify-production-contracts.mjs && node scripts/verify-supabase-migrations.mjs",
+    "verify:migrations": "node scripts/verify-supabase-migrations.mjs",
+    "beta:ops": "tsx scripts/beta-ops.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.3",

@@ -71,6 +71,8 @@ playwright-tests/test-results/
 test-results/
 playwright-report/
 *.webm
+!website/public/video/
+!website/public/video/*.webm
 trace.zip
 !docs/launch-artifacts/
 !docs/launch-artifacts/*.png

@@ -1,0 +1,60 @@
+{
+  "schema_version": "godfin-public-demo-v1",
+  "source_fixture": "backend/tests/fixtures/golden_ledger_v1.json",
+  "source_schema_version": "golden-ledger-v1",
+  "source_repo_sha": "a668ab800f9a98b25ca9af13188d2ae14049ab23",
+  "month": "July 2026",
+  "disclosure": "Demo data - made-up household - nothing here is connected to a bank",
+  "summary": {
+    "income": "44000.00",
+    "spend": "11000.00",
+    "net": "33000.00",
+    "savings_rate": "75.0",
+    "balance_status": "unavailable",
+    "balance_reason": "Two synthetic statement controls conflict, so GODFIN does not guess a balance."
+  },
+  "transactions": [
+    {"id":"salary-2026-07","date":"31 Jul","merchant":"SYNTHETIC SALARY","amount":"34000.00","direction":"credit","category":"Salary","reason":"Verified income in the imported statement"},
+    {"id":"freelance-2026-07","date":"15 Jul","merchant":"SYNTHETIC FREELANCE","amount":"10000.00","direction":"credit","category":"Freelance","reason":"Verified income in the imported statement"},
+    {"id":"generic-credit-2026-07","date":"14 Jul","merchant":"SYNTHETIC GENERIC CREDIT","amount":"7000.00","direction":"credit","category":"Other credit","reason":"A credit is not treated as income without evidence"},
+    {"id":"refund-2026-07","date":"13 Jul","merchant":"SYNTHETIC REFUND","amount":"1200.00","direction":"credit","category":"Refund","reason":"Matched refund evidence"},
+    {"id":"cashback-2026-07","date":"12 Jul","merchant":"SYNTHETIC CASHBACK","amount":"100.00","direction":"credit","category":"Cashback","reason":"Cashback evidence in the description"},
+    {"id":"reimbursement-2026-07","date":"11 Jul","merchant":"SYNTHETIC REIMBURSEMENT","amount":"300.00","direction":"credit","category":"Reimbursement","reason":"Reimbursement is kept separate from income"},
+    {"id":"reversal-2026-07","date":"10 Jul","merchant":"SYNTHETIC REVERSAL","amount":"500.00","direction":"credit","category":"Reversal","reason":"Excluded from active totals"},
+    {"id":"groceries-2026-07","date":"09 Jul","merchant":"SYNTHETIC GROCERIES","amount":"8000.00","direction":"debit","category":"Groceries","reason":"Confirmed food-and-dining classification"},
+    {"id":"dining-2026-07","date":"08 Jul","merchant":"SYNTHETIC DINING","amount":"2000.00","direction":"debit","category":"Restaurants","reason":"Confirmed food-and-dining classification"},
+    {"id":"subscription-ledger-2026-07","date":"07 Jul","merchant":"SYNTHETIC STREAM","amount":"1000.00","direction":"debit","category":"Subscriptions","reason":"Confirmed entertainment subscription"},
+    {"id":"transfer-out-2026-07","date":"06 Jul","merchant":"SYNTHETIC OWN TRANSFER","amount":"5000.00","direction":"debit","category":"Own transfer","reason":"Excluded from spending as an internal transfer"},
+    {"id":"transfer-in-2026-07","date":"06 Jul","merchant":"SYNTHETIC OWN TRANSFER","amount":"5000.00","direction":"credit","category":"Own transfer","reason":"Excluded from income as an internal transfer"},
+    {"id":"card-payment-2026-07","date":"05 Jul","merchant":"SYNTHETIC CARD PAYMENT","amount":"3000.00","direction":"debit","category":"Card payment","reason":"Excluded from spending to avoid double counting"}
+  ],
+  "subscriptions": {
+    "monthly": "1830.00",
+    "annual": "21960.00",
+    "items": [
+      {"name":"Synthetic INR subscription","monthly":"1000.00","category":"Entertainment"},
+      {"name":"Synthetic USD subscription","monthly":"830.00","category":"Productivity"}
+    ]
+  },
+  "goal": {
+    "name": "Synthetic emergency fund",
+    "target": "50000.00",
+    "saved": "8000.00",
+    "entries": [
+      {"label":"Deposit","amount":"10000.00"},
+      {"label":"Withdrawal","amount":"-2000.00"}
+    ]
+  },
+  "net_worth": {
+    "assets": "108300.00",
+    "liabilities": "20000.00",
+    "net": "88300.00",
+    "items": 3
+  },
+  "financial_year": {
+    "income": "146000.00",
+    "spend": "11000.00",
+    "transactions": 16,
+    "status": "review evidence, not filing-ready"
+  }
+}

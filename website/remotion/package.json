@@ -1,0 +1,27 @@
+{
+  "name": "godfin-remotion",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "node": ">=22.0.0" },
+  "scripts": {
+    "prepare:assets": "node scripts/prepare-assets.mjs",
+    "typecheck": "tsc --noEmit",
+    "compositions": "remotion compositions src/index.ts",
+    "render:smoke": "node scripts/smoke-render.mjs",
+    "render": "node scripts/render.mjs",
+    "verify": "node scripts/verify-renders.mjs"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.518",
+    "@remotion/cli": "4.0.518",
+    "@remotion/renderer": "4.0.518",
+    "react": "19.1.9",
+    "react-dom": "19.1.9",
+    "remotion": "4.0.518"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.1.17",
+    "typescript": "5.7.2"
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-08-30T19:47:58.191Z",
+  "files": [
+    {
+      "file": "godfin-beta-hero.mp4",
+      "width": 1920,
+      "height": 1080,
+      "duration": 24,
+      "codec": "h264",
+      "bytes": 2526868,
+      "frame_hashes": [
+        {
+          "percent": 0,
+          "sha256": "114cf589dfaebdbaaad782f27dce16eb20643fc771ff3160ebc08927b580485b"
+        },
+        {
+          "percent": 20,
+          "sha256": "7a8a47508f4f471e81134ccdcca9d1e0a6082e2329ca8c15fdd9760cf4130b06"
+        },
+        {
+          "percent": 50,
+          "sha256": "8de3578ba961125bc89ba3fecb42baa99261ab2be5fa59439b227ad8b184f8a8"
+        },
+        {
+          "percent": 80,
+          "sha256": "d81b110e78c694cbef5cd11c67de41c5bbb14a5bd9aca4fcd4d1ae56ef1435a4"
+        },
+        {
+          "percent": 99,
+          "sha256": "57857f1a6d7438321a115db2edc45e2b9a6c62359aadff5eb4b537a35b7ef336"
+        }
+      ]
+    },
+    {
+      "file": "godfin-beta-hero.webm",
+      "width": 1920,
+      "height": 1080,
+      "duration": 24,
+      "codec": "vp9",
+      "bytes": 3029393,
+      "frame_hashes": [
+        {
+          "percent": 0,
+          "sha256": "0c6b647d5712287d38fdb32493a4623e6374bb95e774ddf19d00c32f02bbbabe"
+        },
+        {
+          "percent": 20,
+          "sha256": "b39a3e86a6b4c7ae1797a6d99e79a71e2519477da7c675a025557b63026f4fe4"
+        },
+        {
+          "percent": 50,
+          "sha256": "eeb14054791bd0ca85eb51e05585a6f642d184f32f49c9be22365d8df287d093"
+        },
+        {
+          "percent": 80,
+          "sha256": "7b3c56a7957cf2ea084c021adcceef7d280724614528c5fefe0c64eecb3154a4"
+        },
+        {
+          "percent": 99,
+          "sha256": "3d8284f56557fe53b22b171c17b78532275dc6996f468a61d36b0c49bf8b167d"
+        }
+      ]
+    },
+    {
+      "file": "godfin-demo-walkthrough.mp4",
+      "width": 1920,
+      "height": 1080,
+      "duration": 54,
+      "codec": "h264",
+      "bytes": 3961724,
+      "frame_hashes": [
+        {
+          "percent": 0,
+          "sha256": "114cf589dfaebdbaaad782f27dce16eb20643fc771ff3160ebc08927b580485b"
+        },
+        {
+          "percent": 20,
+          "sha256": "3660f4a8f002bb79b7d937b694f687987294d292d0a8a597d367e41d0ebeb8af"
+        },
+        {
+          "percent": 50,
+          "sha256": "3f6d63cee0445bc6ab15126f04e533fd22dd7d185e76d9e366499e4318435783"
+        },
+        {
+          "percent": 80,
+          "sha256": "16dbff6a5598a9d646a039b4d86f100c7e18256459b4a08a9021c115c5898de0"
+        },
+        {
+          "percent": 99,
+          "sha256": "ed826cee1f177ef7c9589db447af1c94fa4b3262c5affff7a263062b8be78325"
+        }
+      ]
+    },
+    {
+      "file": "godfin-demo-walkthrough.webm",
+      "width": 1920,
+      "height": 1080,
+      "duration": 54,
+      "codec": "vp9",
+      "bytes": 4693637,
+      "frame_hashes": [
+        {
+          "percent": 0,
+          "sha256": "0c6b647d5712287d38fdb32493a4623e6374bb95e774ddf19d00c32f02bbbabe"
+        },
+        {
+          "percent": 20,
+          "sha256": "35b3b991bfb8766d946868caa1301adbf33cb3acfed0ea9cc70af731913dd914"
+        },
+        {
+          "percent": 50,
+          "sha256": "9f95ca1ce12534b8f7b3b91b74fe7e5fb228c0dea1400987c4d9734419b2d67b"
+        },
+        {
+          "percent": 80,
+          "sha256": "66b82858e4d5a646c4c0ab7a7b7f0fdd7bec4ecd28e73bf6b7699bbc05d24380"
+        },
+        {
+          "percent": 99,
+          "sha256": "ead5e0fa500b0c9e78774671a8020de28450953cacf03658faa04bdf22b24866"
+        }
+      ]
+    },
+    {
+      "file": "godfin-beta-social.mp4",
+      "width": 1080,
+      "height": 1920,
+      "duration": 18,
+      "codec": "h264",
+      "bytes": 1289438,
+      "frame_hashes": [
+        {
+          "percent": 0,
+          "sha256": "e380cba3207edd0e3cbdb755e32ed0d2ee5553e6ade6f5f210204ff95279600a"
+        },
+        {
+          "percent": 20,
+          "sha256": "cdc3626a494f5991e3773696c51ab46fe939ca899075a9a3d95bf80bc82e666e"
+        },
+        {
+          "percent": 50,
+          "sha256": "a0f302c9088deab46d46b38a955b005693b60c29f3e7edd1c4cd1d981c7477f4"
+        },
+        {
+          "percent": 80,
+          "sha256": "2cb456f8f16e4fc4eb0f8aa7a9fdb1e523440d1dcc8bd6fadf315fa99adf1f29"
+        },
+        {
+          "percent": 99,
+          "sha256": "699f4cf6e3f1f34802feda6d76a33b3710c18790b85780f662177a699d0cd5ad"
+        }
+      ]
+    },
+    {
+      "file": "godfin-beta-hero.poster.webp",
+      "bytes": 47500,
+      "sha256": "faa5b8112a949c2756ebf3863f961921c7f7f18eb49c07b181635bfabcada20e"
+    },
+    {
+      "file": "godfin-demo-walkthrough.poster.webp",
+      "bytes": 49240,
+      "sha256": "e52b8bfcc08a83e599365053799de07888d1cde66792e2ac489e8b42015f1484"
+    }
+  ]
+}
