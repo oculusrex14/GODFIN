@@ -247,6 +247,11 @@ for (const mediaPath of [
 }
 
 const remotionPackage = JSON.parse(await text("remotion/package.json"));
+const websiteTypeScriptConfig = JSON.parse(await text("tsconfig.json"));
+assert.ok(
+  websiteTypeScriptConfig.exclude?.includes("remotion"),
+  "Next.js must not typecheck the isolated Remotion package; Remotion has its own CI gate.",
+);
 for (const packageName of ["remotion", "@remotion/cli", "@remotion/renderer", "@remotion/bundler"]) {
   assert.equal(
     remotionPackage.dependencies?.[packageName],
