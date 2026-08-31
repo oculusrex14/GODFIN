@@ -132,7 +132,7 @@ export function WaitlistForm({ enabled = true }: { enabled?: boolean }) {
         </span>
       </label>
       <button className="button" disabled={!enabled || state === "sending"} type="submit">
-        {state === "sending" ? "Sending confirmation…" : "Join the waitlist"}
+        {state === "sending" ? "Sending confirmation…" : "Join the early testers"}
       </button>
       {message ? (
         <p className={state === "error" ? "form-message error" : "form-message"} role="status">

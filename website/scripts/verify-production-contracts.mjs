@@ -167,10 +167,10 @@ for (const phrase of publicClaimsPolicy.prohibited_public_phrases) {
 
 const siteHeader = await text("src/components/site-header.tsx");
 for (const [href, label] of [
-  ["/demo", "Demo"],
+  ["/demo", "Try the demo"],
   ["/how-it-works", "How it works"],
-  ["/pricing", "Pricing"],
-  ["/#waitlist", "Join beta"],
+  ["/pricing", "Planned prices"],
+  ["/#waitlist", "Join the early testers"],
 ]) {
   assert.equal(
     siteHeader.includes(`{ href: "${href}", label: "${label}" }`),
@@ -178,7 +178,7 @@ for (const [href, label] of [
     `Primary navigation is missing ${label}.`,
   );
 }
-assert.match(siteHeader, /href="\/account">Sign in/);
+assert.match(siteHeader, /href="\/account">Tester sign in/);
 
 const pricingPage = await text("src/app/pricing/page.tsx");
 assert.match(pricingPage, /public checkout is closed/i);
@@ -202,13 +202,23 @@ assert.match(waitlistRouteSource, /country_source:\s*countrySource/);
 const publicDemo = await text("src/components/public-demo.tsx");
 assert.match(publicDemo, /demo-data\.json/);
 assert.match(publicDemo, /data-demo-runtime="static"/);
-assert.match(publicDemo, /Start 2-minute tour/);
-assert.match(publicDemo, /Explore freely/);
+assert.match(publicDemo, /useState<DemoMode>\("tour"\)/);
+assert.match(publicDemo, /Restart tour/);
+assert.match(publicDemo, /Join the early testers/);
+assert.match(publicDemo, /role="dialog"/);
+assert.match(publicDemo, /Sample data · not your accounts/);
 assert.match(publicDemo, /ArrowRight/);
 assert.match(publicDemo, /ArrowLeft/);
 assert.match(publicDemo, /Escape/);
 assert.doesNotMatch(publicDemo, /fetch\(|XMLHttpRequest|FormData|type=["']file["']/);
 assert.doesNotMatch(publicDemo, /\/api\/|supabase|cashfree|accounts\.google/i);
+
+const demoPage = await text("src/app/demo/page.tsx");
+assert.match(demoPage, /demo-fullscreen-route/);
+assert.doesNotMatch(demoPage, /demo-page-intro|Join the early testers/);
+
+const waitlistButton = await text("src/components/waitlist-form.tsx");
+assert.match(waitlistButton, /Join the early testers/);
 
 const demoFixture = JSON.parse(await text("public/demo/demo-data.json"));
 assert.equal(

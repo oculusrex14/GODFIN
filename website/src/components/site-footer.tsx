@@ -17,16 +17,16 @@ export function SiteFooter() {
           </div>
           <div className="footer-col">
             <strong>Explore</strong>
-            <Link href="/demo">Public demo</Link>
+            <Link href="/demo">Try the demo</Link>
             <Link href="/how-it-works">How it works</Link>
-            <Link href="/pricing">Planned pricing</Link>
-            <Link href="/#waitlist">Join beta</Link>
+            <Link href="/pricing">Planned prices</Link>
+            <Link href="/#waitlist">Join the early testers</Link>
           </div>
           <div className="footer-col">
             <strong>Help</strong>
             <Link href="/docs">Setup and support</Link>
             <Link href="/account">Account</Link>
-            <Link href="/beta">Selected testers</Link>
+            <Link href="/beta">Tester portal</Link>
             <Link href="/changelog">Changelog</Link>
           </div>
           <div className="footer-col">

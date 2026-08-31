@@ -16,13 +16,13 @@ export const metadata: Metadata = {
     apple: "/godfin-vault-dial.png",
   },
   title: {
-    default: "GODFIN — The Finance App That Respects Your Privacy",
+    default: "GODFIN — See your month. Keep it on your laptop.",
     template: "%s · GODFIN",
   },
   description:
     "Local-first personal finance for Indian banks. Your statements and financial data stay on your laptop.",
   openGraph: {
-    title: "GODFIN — The Finance App That Respects Your Privacy",
+    title: "GODFIN — See your month. Keep it on your laptop.",
     description:
       "Parse Indian bank statements, classify spending, and build reports without uploading your bank history.",
     type: "website",

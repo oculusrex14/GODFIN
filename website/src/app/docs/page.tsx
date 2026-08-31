@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Documentation",
@@ -13,10 +14,10 @@ export default function DocsPage() {
           <div className="eyebrow eyebrow-accent">
             Documentation
           </div>
-          <h1>From first launch to a clean month</h1>
+          <h1>How to set up GODFIN on your computer</h1>
           <p>
-            GODFIN is designed to stay understandable: local database, explicit
-            connections, and reversible edits until you finalize a month.
+            Start here when you receive a beta invite. These steps explain the app
+            without assuming you know finance or software terms.
           </p>
         </div>
       </section>
@@ -34,16 +35,18 @@ export default function DocsPage() {
           <article className="content-card prose">
             <h2 id="install">Install</h2>
             <p>
-              Signed public installers are not published during the private
-              preview. When a release is available, use only the platform link
-              shown on the download page and verify its published signature and
-              checksum. The app starts a local interface and local API bound to
-              <code>127.0.0.1</code>.
+              During the beta, only invited testers receive a download link. If you
+              already have an invite, open the download page and choose Mac or
+              Windows. If you do not have one yet, join the early testers first.
             </p>
-            <div className="callout">
-              Leave “Allow network access” off unless you deliberately want to
-              use GODFIN from another device on your LAN.
+            <div className="inline-actions">
+              <Link className="button-secondary" href="/download">Open downloads</Link>
+              <Link className="button-ghost" href="/#waitlist">Join the early testers</Link>
             </div>
+            <details>
+              <summary>If you are curious how it runs</summary>
+              <p>GODFIN starts the screen you use and a private helper service on the same computer. It listens only on <code>127.0.0.1</code> by default. Leave “Allow network access” off unless you deliberately want another device on your home network to reach it.</p>
+            </details>
 
             <h2 id="first-run">First run</h2>
             <ol>
@@ -61,36 +64,37 @@ export default function DocsPage() {
               account, preview reconciliation, then import. Password-protected
               statement passwords are used locally for that operation.
             </p>
-            <h3>SBI, ICICI, Axis, and Kotak</h3>
+            <h3>SBI and Kotak</h3>
             <p>
-              These are on the parser roadmap and are not supported by the
-              launch build. GODFIN will ship each bank-specific parser only
-              after its formats are validated; the app does not silently guess
-              at an incompatible statement.
+              Current tested formats also include selected SBI savings relationship
+              statements and Kotak savings statements. Bank files change over time,
+              so GODFIN stops and explains the problem when it does not recognize a
+              format instead of inventing transactions.
             </p>
 
             <h2 id="gmail">Gmail</h2>
             <p>
-              Gmail is optional and separate from website sign-in. The desktop
-              app requests the exact OAuth scope
+              Gmail is optional and separate from signing in on this website. If you
+              connect it, the desktop app asks for read-only access so it can look for
+              supported bank alerts. It cannot send, edit, or delete email. The exact
+              Google permission is
               <code>https://www.googleapis.com/auth/gmail.readonly</code>, which
-              permits message and mailbox-settings viewing. GODFIN uses it to
-              search matching bank-alert messages; it does not request Gmail
-              send, edit, or delete access. OAuth credentials and tokens are
-              encrypted locally, and the website account is not involved.
+              permits message and mailbox-settings viewing. The connection details
+              are protected on your computer, and the website account is not involved.
             </p>
 
             <h2 id="backup">Backups</h2>
             <p>
-              Settings → Backup creates a local SQLite snapshot. Automatic
-              retention keeps the latest seven daily and four weekly backups.
-              Store a copy on an external drive if the data matters.
+              Settings → Backup creates a local safety copy. GODFIN keeps the latest
+              seven daily and four weekly copies. Store another copy on an external
+              drive if losing the records would matter to you.
             </p>
 
             <h2 id="licenses">Activate Pro or Max</h2>
+            <p>Public checkout is closed during the beta. Selected testers receive temporary test access; nobody should pay for a permanent license yet.</p>
             <ol>
-              <li>Purchase a lifetime license on the pricing page.</li>
-              <li>Copy the key from the delivery email.</li>
+              <li>Open the beta email sent to your invited address.</li>
+              <li>Copy the temporary test key.</li>
               <li>Open Settings → License in the desktop app.</li>
               <li>Paste the key and activate this device.</li>
             </ol>
@@ -105,8 +109,8 @@ export default function DocsPage() {
             <h2 id="faq">FAQ</h2>
             <h3>Is GODFIN cloud software?</h3>
             <p>
-              No. The desktop app and its SQLite database run locally. The
-              website handles accounts, downloads, purchases, and licenses.
+              No. The desktop app and its money-record file run on your computer.
+              The website handles tester access and, later, purchases and licenses.
             </p>
             <h3>Is there a subscription?</h3>
             <p>

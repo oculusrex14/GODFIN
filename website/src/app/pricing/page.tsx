@@ -12,7 +12,7 @@ const plans = [
   {
     name: "Core",
     price: "Free",
-    suffix: "planned forever",
+    suffix: "No payment",
     codes: ["manual_import", "deterministic_classification", "budgets", "goal_contribution_ledger", "recurring_detection", "basic_reports"],
     features: ["Import one supported statement at a time", "Understand and correct categories", "Track budgets and savings goals", "See regular payments and monthly reports", "Back up and export your own data"],
   },
@@ -21,7 +21,7 @@ const plans = [
     price: "₹4,999",
     suffix: "planned one-time India price",
     codes: ["multiple_accounts", "batch_statement_import", "generic_mapped_import", "gmail_sync", "advanced_reports", "advanced_recurring", "fd_rd_goal_detection"],
-    features: ["Everything in Core", "More accounts and statement batches", "Guided CSV and spreadsheet mapping", "Optional read-only Gmail import", "Deeper reports and regular-payment review", "FD and RD goal-contribution suggestions"],
+    features: ["Everything in Core", "More accounts and statement batches", "Guided CSV and spreadsheet mapping", "Optional read-only Gmail import", "Deeper reports and regular-payment review", "Suggestions when a fixed or recurring deposit may belong to a goal—GODFIN never moves the money"],
     featured: true,
   },
   {
@@ -29,7 +29,7 @@ const plans = [
     price: "₹9,999",
     suffix: "planned one-time India price",
     codes: ["ai_classification", "ai_advisor", "personal_classifier", "net_worth", "behavior_insights", "ca_tax_pack"],
-    features: ["Everything in Pro", "Optional AI explanations and classification help", "Net-worth tracking with visible freshness", "Plain-language money-behaviour reflections", "Review-oriented CA tax pack", "Use local AI or your own supported provider"],
+    features: ["Everything in Pro", "Review-oriented CA tax pack", "Net-worth tracking with visible freshness", "Plain-language money-behaviour reflections", "Optional AI explanations and classification help", "Use local AI or your own supported provider"],
   },
 ];
 
@@ -59,19 +59,17 @@ export default function PricingPage() {
           <div className="pricing-grid pricing-grid-human">
             {plans.map((plan) => (
               <article className={`price-card${plan.featured ? " featured" : ""}`} key={plan.name}>
-                {plan.featured ? <span className="price-badge">A practical middle</span> : null}
+                {plan.featured ? <span className="price-badge">Most people</span> : null}
                 <div className="eyebrow eyebrow-accent">{plan.name}</div>
                 <div className="price">{plan.price}</div>
                 <p className="price-suffix">{plan.suffix}</p>
                 <ul className="check-list">
                   {plan.features.map((feature) => <li key={feature}><span className="check">✓</span>{feature}</li>)}
                 </ul>
-                <Link className={plan.featured ? "button" : "button-secondary"} href="/#waitlist">
-                  Join the beta waitlist
-                </Link>
               </article>
             ))}
           </div>
+          <div className="pricing-single-action"><Link className="button" href="/#waitlist">Join the early testers</Link><span>No payment is taken during the beta.</span></div>
           <div className="pricing-clarity-grid">
             <article><strong>No subscription</strong><p>Pro and Max are planned as one-time desktop licenses.</p></article>
             <article><strong>No bundled AI usage</strong><p>The price never includes recurring hosted AI credits. Local AI and your own provider are separate choices.</p></article>

@@ -65,10 +65,10 @@ export function ProductDemoVideo() {
         <ol>
           <li>A clearer month, without moving your money life online.</li>
           <li>Preview a supported statement before reconciling it.</li>
-          <li>See verified money in, included spending, and what was left.</li>
+          <li>See money in, spending, and what was left.</li>
           <li>Correct a category and keep the reason visible.</li>
           <li>Review regular commitments and explainable goal progress.</li>
-          <li>Try the made-up household at godfin.dev/demo.</li>
+          <li>Try the sample household at godfin.dev/demo.</li>
         </ol>
       </details>
     </div>

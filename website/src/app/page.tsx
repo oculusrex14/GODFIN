@@ -35,15 +35,14 @@ export default function HomePage() {
         <div className="shell beta-hero-grid">
           <div className="beta-hero-copy">
             <div className="eyebrow eyebrow-accent">Early desktop beta</div>
-            <h1>Your money, clearer. Your records, closer.</h1>
+            <h1>See your month. Keep the statement on your laptop.</h1>
             <p>
-              GODFIN turns supported bank statements into a calm monthly view—then
-              helps you understand spending, regular bills, goals, and reports on
-              your own computer.
+              Download a statement from your bank, open it in GODFIN on your laptop,
+              and see where your money went. We never receive the file.
             </p>
             <div className="hero-actions">
-              <Link className="button" href="/demo">Try the made-up demo <ArrowRight size={17} /></Link>
-              <Link className="button-secondary" href="/#waitlist">Join the early-tester list</Link>
+              <Link className="button" href="/demo">Try the demo <ArrowRight size={17} /></Link>
+              <Link className="button-secondary" href="/#waitlist">Join the early testers</Link>
             </div>
             <div className="beta-proof-row">
               <span><Check size={14} /> No account for the demo</span>
@@ -53,27 +52,27 @@ export default function HomePage() {
           </div>
           <div className="golden-product-card" aria-label="Made-up July GODFIN summary">
             <div className="golden-product-top"><span>July 2026</span><small>Demo household</small></div>
-            <div className="golden-product-balance"><span>Left this month</span><strong>₹33,000</strong><small>after ₹11,000 of included spending</small></div>
-            <div className="golden-product-metrics"><article><span>Money in</span><strong>₹44,000</strong></article><article><span>Saved</span><strong>75%</strong></article><article><span>Regular bills</span><strong>₹1,830</strong></article></div>
-            <div className="golden-product-warning"><span>Account balance</span><strong>Unavailable—needs review</strong></div>
-            <p>Demo data - made-up household - nothing here is connected to a bank</p>
+            <div className="golden-product-balance"><span>Money left in July</span><strong>₹33,000</strong><small>after ₹11,000 of spending</small></div>
+            <div className="golden-product-metrics"><article><span>Money in</span><strong>₹44,000</strong></article><article><span>Spent</span><strong>₹11,000</strong></article><article><span>Regular bills</span><strong>₹1,830</strong></article></div>
+            <div className="golden-product-warning"><span>Try it yourself</span><strong>Open transactions, bills, a goal, and the report</strong></div>
+            <p>Sample data · made-up household · not connected to a bank</p>
           </div>
         </div>
       </section>
 
       <section className="editorial-strip">
         <div className="shell editorial-strip-grid">
-          <p>Built for the moment after you download a statement and think, “What actually happened this month?”</p>
-          <Link href="/how-it-works">See the full journey <ArrowRight size={16} /></Link>
+          <p>Built for the moment after you download a statement and think, “Where did my money go?”</p>
+          <Link href="/how-it-works">See how it works <ArrowRight size={16} /></Link>
         </div>
       </section>
 
       <section className="section story-video-section">
         <div className="shell">
           <div className="section-head center">
-            <div className="eyebrow eyebrow-accent">24 seconds, one made-up month</div>
-            <h2>See the rhythm before you join the beta.</h2>
-            <p>The video is silent and text-led. It uses the same synthetic July fixture as the public demo.</p>
+            <div className="eyebrow eyebrow-accent">24 seconds, one sample month</div>
+            <h2>See what GODFIN does before you join.</h2>
+            <p>The video is silent and uses the same made-up household as the demo.</p>
           </div>
           <ProductDemoVideo />
         </div>
@@ -99,15 +98,15 @@ export default function HomePage() {
             <div className="eyebrow eyebrow-accent">Honest early support</div>
             <h2>Small enough to test properly.</h2>
             <p>
-              The first tester builds focus on Apple Silicon Mac and Windows x64.
+              The first tester builds focus on Mac computers with Apple chips and Windows PCs.
               Current verified statement formats include selected HDFC savings and
               credit-card statements, SBI savings relationship statements, and Kotak savings.
             </p>
             <Link className="text-link" href="/how-it-works#support">Read current limits →</Link>
           </div>
           <div className="support-pills" aria-label="Current beta focus">
-            <span><Laptop /> Apple Silicon Mac</span>
-            <span><Laptop /> Windows x64</span>
+            <span><Laptop /> Mac with Apple chip</span>
+            <span><Laptop /> Windows PC</span>
             <span><FileCheck2 /> Selected HDFC formats</span>
             <span><FileCheck2 /> SBI savings relationship</span>
             <span><FileCheck2 /> Kotak savings</span>
@@ -119,8 +118,8 @@ export default function HomePage() {
         <div className="shell beta-boundary-grid">
           <div className="boundary-mark"><LockKeyhole size={34} /><span>Local-first</span></div>
           <div>
-            <div className="eyebrow">A boundary you can explain</div>
-            <h2>Your day-to-day finance records belong on your computer.</h2>
+            <div className="eyebrow">What stays private</div>
+            <h2>Your statements and money records stay on your computer.</h2>
             <p>
               The desktop app keeps ordinary statements, transactions, categories,
               goals, and reports locally. The website handles the waitlist, selected
@@ -141,15 +140,15 @@ export default function HomePage() {
       <section className="section waitlist-section" id="waitlist">
         <div className="shell waitlist-shell">
           <div className="section-head">
-            <div className="eyebrow eyebrow-accent">Join the first cohort</div>
-            <h2>Help make private personal finance feel ordinary.</h2>
+            <div className="eyebrow eyebrow-accent">Join the early testers</div>
+            <h2>Try GODFIN early and tell us where it is confusing.</h2>
             <p>
               Tell us which computer you use and what you hope to understand better.
-              We will confirm your email, then invite a small, varied group. Never send
+              We will confirm your email, then invite a small group. Never send
               a statement, account number, balance, PIN, key, or Gmail content.
             </p>
           </div>
-          <Suspense fallback={<p className="lead">Loading the early-tester form…</p>}>
+          <Suspense fallback={<p className="lead">Loading the early-testers form…</p>}>
             <WaitlistForm enabled={waitlistEnabled} />
           </Suspense>
         </div>

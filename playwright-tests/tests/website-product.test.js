@@ -20,16 +20,16 @@ test('homepage presents an honest beta path and accessible media', async ({ page
 
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: 'Your money, clearer. Your records, closer.' }),
+    page.getByRole('heading', { name: 'See your month. Keep the statement on your laptop.' }),
   ).toBeVisible();
-  for (const link of ['Demo', 'How it works', 'Pricing', 'Join beta']) {
+  for (const link of ['Try the demo', 'How it works', 'Planned prices', 'Join the early testers']) {
     await expect(page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: link })).toBeVisible();
   }
-  await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
-  await expect(page.getByText('Demo data - made-up household - nothing here is connected to a bank').first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Tester sign in' })).toBeVisible();
+  await expect(page.getByText('Sample data · made-up household · not connected to a bank').first()).toBeVisible();
   const support = page.getByLabel('Current beta focus');
-  await expect(support.getByText('Apple Silicon Mac', { exact: true })).toBeVisible();
-  await expect(support.getByText('Windows x64', { exact: true })).toBeVisible();
+  await expect(support.getByText('Mac with Apple chip', { exact: true })).toBeVisible();
+  await expect(support.getByText('Windows PC', { exact: true })).toBeVisible();
 
   const video = page.getByLabel('Silent GODFIN product walkthrough using one made-up household');
   await video.scrollIntoViewIfNeeded();
@@ -74,13 +74,12 @@ test('public demo is auth-free, static, keyboard-operable, and makes no finance-
   });
 
   await page.goto('/demo');
-  await expect(page.getByRole('heading', { name: 'Try GODFIN with a household that does not exist.' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Start 2-minute tour' })).toBeVisible();
-  await expect(page.locator('input[type="file"]')).toHaveCount(0);
-  await expect(page.getByText('Demo data - made-up household - nothing here is connected to a bank')).toBeVisible();
-
-  await page.getByRole('button', { name: 'Start 2-minute tour' }).click();
+  await expect(page.locator('.site-header')).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'GODFIN demo tour' })).toBeVisible();
   await expect(page.getByText('Step 1 of 6')).toBeVisible();
+  await expect(page.locator('input[type="file"]')).toHaveCount(0);
+  await expect(page.getByText('Sample data · not your accounts')).toBeVisible();
+
   await page.keyboard.press('ArrowRight');
   await expect(page.getByText('Step 2 of 6')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
@@ -101,15 +100,24 @@ test('public demo is auth-free, static, keyboard-operable, and makes no finance-
 test('public demo and mobile navigation fit a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 760 });
   await page.goto('/demo');
-  await page.getByRole('button', { name: 'Open navigation' }).click();
-  await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
-  await page.getByRole('button', { name: 'Explore freely' }).click();
+  await expect(page.locator('.site-header')).toBeHidden();
+  await page.getByRole('button', { name: 'Skip tour' }).click();
   await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible();
   const dimensions = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
   }));
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
+});
+
+test('uninvited download and setup help both lead to the early testers', async ({ page }) => {
+  await page.goto('/download');
+  await expect(page.getByRole('heading', { name: 'Sign in with your invited email' })).toBeVisible();
+  await expect(page.locator('.account-card').getByRole('link', { name: 'Join the early testers →' })).toBeVisible();
+
+  await page.goto('/docs');
+  await expect(page.getByRole('heading', { name: 'How to set up GODFIN on your computer' })).toBeVisible();
+  await expect(page.locator('.content-card').getByRole('link', { name: 'Join the early testers' })).toBeVisible();
 });
 
 test('how-it-works states current support and non-goals plainly', async ({ page }) => {

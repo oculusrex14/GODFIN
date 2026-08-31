@@ -5,38 +5,38 @@ const articles = {
   "local-first-finance": {
     title: "What local-first actually means for a finance app",
     description:
-      "The architecture behind keeping a finance ledger local while still supporting purchases and licenses.",
+      "What stays on your laptop, what the website can see, and why the two are kept apart.",
     sections: [
       [
         "Start with the data boundary",
-        "A privacy promise is useful only when it maps to architecture. In GODFIN, statements, transactions, balances, merchant memory, budgets, and reports belong to the desktop application and its local SQLite database.",
+        "A privacy promise should be easy to check. In GODFIN, statements, transactions, balances, category memory, budgets, and reports belong to the desktop app and the money-record file on your computer.",
       ],
       [
         "Keep commerce separate",
-        "The website needs an email address, a purchase record, a license state, and device activation records. It does not need a copy of the user’s ledger. Separating these systems narrows both the security surface and the meaning of consent.",
+        "The website may need an email address, tester access, a purchase record after checkout opens, a license state, and device activation records. It does not need a copy of your transactions. Keeping these systems apart limits what any website problem could expose.",
       ],
       [
         "Make network features optional",
-        "Gmail ingestion, optional AI provider connections, license checks, and updates can improve the product without becoming prerequisites for local bookkeeping. When the network disappears, the local rules and records should remain useful.",
+        "Gmail, optional AI connections, license checks, and updates can help without becoming requirements for everyday use. When the internet disappears, your local rules and records should still work.",
       ],
     ],
   },
   "clean-statement-imports": {
     title: "How to import a bank statement without losing trust",
     description:
-      "A safer workflow for statement parsing, reconciliation, and duplicate handling.",
+      "How GODFIN checks a statement and shows what it found before adding anything.",
     sections: [
       [
         "Preview before mutation",
-        "A statement importer should identify the account, date range, row count, and likely format before changing the ledger. That gives the user a chance to stop a bad parse early.",
+        "Before adding anything, GODFIN should show the account, date range, number of rows, and statement format it found. You get a chance to stop if any of that looks wrong.",
       ],
       [
         "Reconcile deterministically",
-        "Checksums, dates, amounts, and account context are more reliable than filenames. Existing transactions should be matched or skipped explicitly, not inserted and cleaned up later.",
+        "Dates, amounts, account details, and file fingerprints are safer than trusting a filename. Existing transactions should be matched or skipped clearly, not added twice and cleaned up later.",
       ],
       [
         "Return a report, not a mystery",
-        "A successful import should say what was imported, skipped as duplicate, classified automatically, sent to review, or rejected. Auxiliary merchant-memory updates should never erase the main result.",
+        "A finished import should say what was added, what was already there, what GODFIN understood, what needs your review, and what it could not read. You should never be left guessing what the spinner did.",
       ],
     ],
   },

@@ -12,12 +12,13 @@ import {
   Target,
   WalletCards,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import demo from "../../public/demo/demo-data.json";
 
 type DemoView = "overview" | "transactions" | "bills" | "goal" | "report" | "privacy";
-type DemoMode = "welcome" | "tour" | "explore";
+type DemoMode = "tour" | "explore";
 
 const views: Array<{ id: DemoView; label: string; icon: typeof LayoutDashboard }> = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -34,7 +35,7 @@ const tourSteps: Array<{ view: DemoView; title: string; body: string }> = [
   { view: "bills", title: "Spot regular commitments", body: "Two made-up subscriptions add up to ₹1,830 a month. Nothing is cancelled or changed without you." },
   { view: "goal", title: "Track real progress", body: "The goal keeps its deposit and withdrawal history, so ₹8,000 is explainable rather than a mystery total." },
   { view: "report", title: "Finish with a useful story", body: "The report brings monthly totals, net worth, and review warnings together. It does not pretend to be tax advice." },
-  { view: "privacy", title: "Know the boundary", body: "The public demo is made-up and disconnected. In the desktop app, ordinary finance records stay on the computer." },
+  { view: "privacy", title: "Know the boundary", body: "The demo is made-up and disconnected. In the desktop app, ordinary finance records stay on the computer." },
 ];
 
 function money(value: string) {
@@ -46,12 +47,13 @@ function money(value: string) {
 }
 
 export function PublicDemo() {
-  const [mode, setMode] = useState<DemoMode>("welcome");
+  const [mode, setMode] = useState<DemoMode>("tour");
   const [view, setView] = useState<DemoView>("overview");
   const [tourIndex, setTourIndex] = useState(0);
   const [search, setSearch] = useState("");
   const [reasonId, setReasonId] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const filteredTransactions = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -62,7 +64,7 @@ export function PublicDemo() {
       : demo.transactions;
   }, [search]);
 
-  function beginTour() {
+  function restartTour() {
     setMode("tour");
     setTourIndex(0);
     setView(tourSteps[0].view);
@@ -81,7 +83,11 @@ export function PublicDemo() {
   }, [tourIndex]);
 
   useEffect(() => {
-    headingRef.current?.focus();
+    if (mode === "tour") {
+      dialogRef.current?.focus();
+    } else {
+      headingRef.current?.focus();
+    }
   }, [view, mode]);
 
   useEffect(() => {
@@ -98,39 +104,15 @@ export function PublicDemo() {
   return (
     <div className="public-demo" data-demo-runtime="static">
       <div className="demo-disclosure" role="note">
-        <span className="demo-disclosure-dot" />
-        {demo.disclosure}
+        <div><span className="demo-disclosure-dot" /> Sample data · not your accounts</div>
+        <div className="demo-disclosure-actions">
+          <button onClick={restartTour} type="button">Restart tour</button>
+          <Link href="/#waitlist">Join the early testers <ArrowRight size={14} /></Link>
+        </div>
       </div>
-
-      {mode === "welcome" ? (
-        <section className="demo-welcome" aria-labelledby="demo-welcome-title">
-          <div className="demo-welcome-copy">
-            <div className="eyebrow eyebrow-accent">Try the workflow</div>
-            <h2 id="demo-welcome-title">A made-up month you can safely explore.</h2>
-            <p>
-              No account, upload, bank connection, or AI is used here. Take the short
-              guided tour, or look around at your own pace.
-            </p>
-            <div className="inline-actions">
-              <button className="button" onClick={beginTour} type="button">
-                Start 2-minute tour <ArrowRight size={17} />
-              </button>
-              <button className="button-secondary" onClick={() => setMode("explore")} type="button">
-                Explore freely
-              </button>
-            </div>
-          </div>
-          <div className="demo-welcome-summary" aria-label="Made-up July summary">
-            <span>July 2026</span>
-            <strong>{money(demo.summary.net)}</strong>
-            <small>left after included spending</small>
-            <div className="demo-mini-bars" aria-hidden="true"><i /><i /><i /><i /></div>
-          </div>
-        </section>
-      ) : (
-        <div className="demo-app-shell">
+      <div className="demo-app-shell">
           <aside className="demo-sidebar" aria-label="Demo sections">
-            <div className="demo-sidebar-brand">G<span>O</span>DFIN <small>public demo</small></div>
+            <div className="demo-sidebar-brand">G<span>O</span>DFIN <small>sample household</small></div>
             <div className="demo-nav" role="tablist" aria-label="Explore the made-up household">
               {views.map(({ id, label, icon: Icon }) => (
                 <button
@@ -151,7 +133,8 @@ export function PublicDemo() {
           </aside>
           <section className="demo-stage" role="tabpanel">
             {mode === "tour" ? (
-              <div className="demo-tour-bar" aria-live="polite">
+              <div className="demo-tour-overlay">
+                <div className="demo-tour-bar" aria-live="polite" role="dialog" aria-modal="true" aria-label="GODFIN demo tour" ref={dialogRef} tabIndex={-1}>
                 <div>
                   <span>Step {tourIndex + 1} of {tourSteps.length}</span>
                   <strong>{tourSteps[tourIndex].title}</strong>
@@ -168,6 +151,7 @@ export function PublicDemo() {
                   max={tourSteps.length}
                   value={tourIndex + 1}
                 />
+                </div>
               </div>
             ) : null}
 
@@ -180,12 +164,12 @@ export function PublicDemo() {
                 <div className="demo-period-row"><span>July 2026</span><span>Finalized month</span></div>
                 <div className="demo-metric-grid">
                   <article><span>Money in</span><strong>{money(demo.summary.income)}</strong><small>verified salary + freelance</small></article>
-                  <article><span>Included spending</span><strong>{money(demo.summary.spend)}</strong><small>3 spending transactions</small></article>
+                  <article><span>Spent this month</span><strong>{money(demo.summary.spend)}</strong><small>3 purchases counted here</small></article>
                   <article className="accent"><span>Left this month</span><strong>{money(demo.summary.net)}</strong><small>{demo.summary.savings_rate}% of verified income</small></article>
                   <article className="warning"><span>Account balance</span><strong>Unavailable</strong><small>{demo.summary.balance_reason}</small></article>
                 </div>
                 <div className="demo-chart-card">
-                  <div><span>Where included spending went</span><strong>{money(demo.summary.spend)}</strong></div>
+                  <div><span>Where the money went</span><strong>{money(demo.summary.spend)}</strong></div>
                   <div className="demo-donut" aria-label="₹10,000 food and dining and ₹1,000 entertainment"><span>91%<small>food</small></span></div>
                   <ul><li><i className="food" /> Food & dining <strong>₹10,000</strong></li><li><i className="fun" /> Entertainment <strong>₹1,000</strong></li></ul>
                 </div>
@@ -229,7 +213,7 @@ export function PublicDemo() {
 
             {view === "report" ? (
               <div className="demo-view">
-                <div className="demo-report-hero"><span>Your July money story</span><strong>{money(demo.summary.net)} left</strong><small>after {money(demo.summary.spend)} of included spending</small></div>
+                <div className="demo-report-hero"><span>Your July money story</span><strong>{money(demo.summary.net)} left</strong><small>after {money(demo.summary.spend)} of spending</small></div>
                 <div className="demo-report-grid">
                   <article><span>Net worth in this demo</span><strong>{money(demo.net_worth.net)}</strong><small>{money(demo.net_worth.assets)} assets less {money(demo.net_worth.liabilities)} liabilities</small></article>
                   <article><span>Financial-year evidence</span><strong>{money(demo.financial_year.income)}</strong><small>verified income across {demo.financial_year.transactions} active rows</small></article>
@@ -243,13 +227,12 @@ export function PublicDemo() {
               <div className="demo-view demo-privacy-view">
                 <LockKeyhole size={34} />
                 <h3>This page is a safe illustration.</h3>
-                <p>Every name and amount comes from GODFIN’s synthetic acceptance ledger. This demo has no upload control, bank connection, website account, payment request, Gmail access, or AI request.</p>
+                <p>Every name and amount belongs to a made-up sample household. This demo has no upload control, bank connection, website account, payment request, Gmail access, or AI request.</p>
                 <div className="demo-boundary"><article><strong>Desktop app</strong><span>Ordinary statements, transactions, categories, goals, reports, and the local PIN stay on the computer.</span></article><article><strong>Website</strong><span>Waitlist consent, selected beta access, licenses, and feedback only when you choose those flows.</span></article></div>
               </div>
             ) : null}
           </section>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

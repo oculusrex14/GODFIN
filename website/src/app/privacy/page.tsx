@@ -19,14 +19,23 @@ export default function PrivacyPage() {
           </div>
           <h1>Privacy policy</h1>
           <p>
-            The short version: your desktop financial database stays on your
-            device. The website stores only the account and commerce data needed
-            to sell and support GODFIN.
+            The short version: statements and everyday money records stay on your
+            computer. During the beta, the website stores only waitlist, sign-in,
+            tester-access, license, and support information.
           </p>
         </div>
       </section>
       <section className="page-content legal">
         <article className="shell narrow prose">
+          <div className="plain-language-box">
+            <h2>In ordinary words</h2>
+            <ul>
+              <li>Your statements, transactions, categories, budgets, goals, and reports stay in the desktop app on your computer.</li>
+              <li>The website sees what you submit to the waitlist, website sign-in, tester access, and license services.</li>
+              <li>If you connect Gmail, the desktop app reads supported bank alerts; the website does not receive your Gmail.</li>
+              <li>If you turn on a cloud AI provider, the app shows you what kind of information may be sent before asking for consent.</li>
+            </ul>
+          </div>
           <h2>1. Two separate data boundaries</h2>
           <p>
             The GODFIN desktop application stores statements, transactions,
@@ -150,7 +159,7 @@ export default function PrivacyPage() {
             </p>
           ) : (
             <p>
-              This private preview has no public privacy mailbox configured, so
+              This beta has no public privacy mailbox configured, so
               waitlist collection and checkout remain disabled. A working
               privacy contact must be published before either service opens.
             </p>

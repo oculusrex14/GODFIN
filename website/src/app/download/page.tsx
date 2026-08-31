@@ -27,7 +27,7 @@ export default async function DownloadPage() {
           <div className="eyebrow eyebrow-accent">Selected desktop beta</div>
           <h1>Private beta builds</h1>
           <p>
-            This cohort currently tests Apple Silicon Mac and Windows x64. Build
+            The first group currently tests Macs with Apple chips and Windows PCs. Build
             access does not sync or upload your desktop financial records.
           </p>
         </div>
@@ -37,20 +37,22 @@ export default async function DownloadPage() {
           {!user ? (
             <div className="account-card">
               <h2>Sign in with your invited email</h2>
-              <p>Only accepted testers can see private build links.</p>
+              <p>Only accepted testers can see private build links. Not invited yet?</p>
               <SignInButton next="/download" />
+              <Link className="text-link" href="/#waitlist">Join the early testers →</Link>
             </div>
           ) : !active ? (
             <div className="account-card">
               <h2>No active build access</h2>
-              <p>Your account is not in an active selected beta phase.</p>
+              <p>This account does not have an active beta invite yet.</p>
               <Link className="button-secondary" href="/beta">Return to beta portal</Link>
+              <Link className="text-link" href="/#waitlist">Join the early testers →</Link>
             </div>
           ) : (
             <>
               <div className="download-grid">
                 <section className="account-card">
-                  <div className="eyebrow">Apple Silicon</div>
+                  <div className="eyebrow">Mac with Apple chip</div>
                   <h2>macOS beta</h2>
                   <p>For M-series Macs only. Intel Mac testing comes later.</p>
                   {macUrl ? (
@@ -60,7 +62,7 @@ export default async function DownloadPage() {
                   )}
                 </section>
                 <section className="account-card">
-                  <div className="eyebrow">64-bit PC</div>
+                  <div className="eyebrow">Windows PC</div>
                   <h2>Windows beta</h2>
                   <p>For Windows 10 22H2 or Windows 11 on x64 computers.</p>
                   {windowsUrl ? (

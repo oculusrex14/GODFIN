@@ -142,7 +142,7 @@ export default async function AccountPage({
           <h1>{user ? "Your GODFIN account" : "Licenses without a subscription"}</h1>
           <p>
             This account stores purchases, licenses, device activations, and
-            downloads. Your desktop transaction database is not synced here.
+            downloads. Your desktop money records are not synced here.
           </p>
         </div>
       </section>
@@ -171,8 +171,8 @@ export default async function AccountPage({
             <div className="account-card narrow">
               <h2>Sign in to continue</h2>
               <p className="lead">
-                Google sign-in keeps checkout and license delivery tied to the
-                correct email address.
+                During the beta, Google sign-in is for invited testers and existing
+                license access. Public checkout is still closed.
               </p>
               <SignInButton next={params.next || "/account"} />
             </div>

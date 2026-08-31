@@ -139,14 +139,14 @@ export async function sendWaitlistConfirmedEmail({
       from: serverEnv.resendFromEmail(),
       to,
       ...(privacyEmail ? { replyTo: privacyEmail } : {}),
-      subject: "You’re on the GODFIN early-tester list",
+      subject: "You’ve joined the GODFIN early testers",
       text: [
         "Your GODFIN waitlist email is confirmed.",
         "",
         "You can optionally tell us which supported computer and statement formats you can help test. Never send a bank statement, account number, PIN, license key, or Gmail content.",
-        `See the public demo: ${siteUrl()}/demo`,
+        `Try the demo: ${siteUrl()}/demo`,
         "",
-        "We will contact a small number of people for the first Apple Silicon Mac and Windows x64 beta.",
+        "We will contact a small number of people for the first Mac and Windows beta.",
       ].join("\n"),
       html: `
         <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#17201c">
@@ -154,8 +154,8 @@ export async function sendWaitlistConfirmedEmail({
           <h1>Your email is confirmed</h1>
           <p>You can optionally tell us which supported computer and statement formats you can help test.</p>
           <p><strong>Never send a bank statement, account number, PIN, license key, or Gmail content.</strong></p>
-          <p style="margin:28px 0"><a href="${siteUrl()}/demo" style="display:inline-block;padding:13px 20px;border-radius:10px;background:#2f6b52;color:white;text-decoration:none;font-weight:700">Try the made-up household demo</a></p>
-          <p style="color:#626b65;font-size:13px">We will contact a small number of people for the first Apple Silicon Mac and Windows x64 beta.</p>
+          <p style="margin:28px 0"><a href="${siteUrl()}/demo" style="display:inline-block;padding:13px 20px;border-radius:10px;background:#2f6b52;color:white;text-decoration:none;font-weight:700">Try the demo</a></p>
+          <p style="color:#626b65;font-size:13px">We will contact a small number of people for the first Mac and Windows beta.</p>
         </div>
       `,
     },

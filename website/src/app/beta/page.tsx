@@ -33,7 +33,7 @@ export default async function BetaPage({
           <div className="eyebrow eyebrow-accent">Private desktop beta</div>
           <h1>{tester ? "Your GODFIN beta" : "Selected early testers"}</h1>
           <p>
-            The first cohort focuses on Apple Silicon Mac and Windows x64. Financial
+            The first group focuses on Macs with Apple chips and Windows PCs. Financial
             data stays in the desktop app; this website stores access and feedback only.
           </p>
         </div>
@@ -49,9 +49,9 @@ export default async function BetaPage({
           ) : !tester ? (
             <div className="account-card">
               <h2>No active invitation is linked to this account.</h2>
-              <p className="lead">Join the public waitlist or accept the private link sent to your selected email address.</p>
+              <p className="lead">Join the early testers or accept the invite sent to your selected email address.</p>
               <div className="inline-actions">
-                <Link className="button" href="/#waitlist">Join the waitlist</Link>
+                <Link className="button" href="/#waitlist">Join the early testers</Link>
                 <SignOutButton />
               </div>
             </div>
@@ -68,7 +68,7 @@ export default async function BetaPage({
                 <section className="account-card">
                   <span className="status-pill">{tester.status}</span>
                   <h2>Phase: {tester.phase === "core" ? "Core" : tester.phase === "pro" ? "Pro" : tester.phase === "max" ? "Max" : "Checkout test"}</h2>
-                  <p className="lead">Cohort {tester.cohort}</p>
+                  <p className="lead">Testing group {tester.cohort}</p>
                   {tester.status === "active" ? (
                     <p>Your access is active. Revocation never deletes your local GODFIN data.</p>
                   ) : tester.status === "paused" ? (

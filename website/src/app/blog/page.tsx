@@ -11,13 +11,13 @@ const articles = [
     slug: "local-first-finance",
     title: "What local-first actually means for a finance app",
     summary:
-      "A concrete boundary between the database on your laptop and the services needed to sell and support the app.",
+      "What stays on your laptop, what the website can see, and where you stay in control.",
   },
   {
     slug: "clean-statement-imports",
     title: "How to import a bank statement without losing trust",
     summary:
-      "Preview, reconciliation, duplicate detection, and why an import report matters more than a spinner.",
+      "Why GODFIN shows you what it found before adding anything to your month.",
   },
 ];
 
@@ -29,7 +29,7 @@ export default function BlogPage() {
           <div className="eyebrow eyebrow-accent">
             Notes from GODFIN
           </div>
-          <h1>Privacy with implementation details</h1>
+          <h1>Notes on money that stays on your computer</h1>
           <p>
             Practical writing about personal finance software, local data, and
             workflows for Indian bank statements.

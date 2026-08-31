@@ -40,6 +40,11 @@ export default function TermsPage() {
             Commercial use, commercial redistribution, and forks intended for
             commercial use require prior written approval.
           </p>
+          <p>
+            The source-code license describes what people may do with the code.
+            A paid Pro or Max product license describes which GODFIN features a
+            customer may use. One does not silently replace the other.
+          </p>
 
           <h2>3. Core, Pro, and Max</h2>
           <p>
@@ -58,6 +63,7 @@ export default function TermsPage() {
           </p>
 
           <h2>5. Payments and refunds</h2>
+          <p>You cannot buy a permanent license on this website until public checkout opens.</p>
           <p>
             Payments are processed by Cashfree. Taxes, invoices, and supported
             methods depend on location and checkout. Except where applicable law
@@ -115,7 +121,7 @@ export default function TermsPage() {
             </p>
           ) : (
             <p>
-              Material changes will be dated on this page. This private preview
+              Material changes will be dated on this page. This beta
               is not accepting payment because a verified public support
               address has not yet been configured.
             </p>
