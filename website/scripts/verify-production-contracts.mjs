@@ -199,23 +199,30 @@ assert.match(betaLibrary, /x-vercel-ip-country/);
 assert.match(waitlistRouteSource, /inferredCountry\(/);
 assert.match(waitlistRouteSource, /country_source:\s*countrySource/);
 
-const publicDemo = await text("src/components/public-demo.tsx");
-assert.match(publicDemo, /demo-data\.json/);
-assert.match(publicDemo, /data-demo-runtime="static"/);
-assert.match(publicDemo, /useState<DemoMode>\("tour"\)/);
-assert.match(publicDemo, /Restart tour/);
-assert.match(publicDemo, /Join the early testers/);
-assert.match(publicDemo, /role="dialog"/);
-assert.match(publicDemo, /Sample data · not your accounts/);
-assert.match(publicDemo, /ArrowRight/);
-assert.match(publicDemo, /ArrowLeft/);
-assert.match(publicDemo, /Escape/);
-assert.doesNotMatch(publicDemo, /fetch\(|XMLHttpRequest|FormData|type=["']file["']/);
-assert.doesNotMatch(publicDemo, /\/api\/|supabase|cashfree|accounts\.google/i);
-
 const demoPage = await text("src/app/demo/page.tsx");
-assert.match(demoPage, /demo-fullscreen-route/);
-assert.doesNotMatch(demoPage, /demo-page-intro|Join the early testers/);
+assert.match(demoPage, /redirect\("\/demo-app\/index\.html"\)/);
+
+const demoMain = await text("src/demo-main.jsx", path.join(repoRoot, "frontend"));
+assert.match(demoMain, /installDemoTransport\(\)/);
+assert.match(demoMain, /Synthetic desktop demo/);
+assert.match(demoMain, /no bank, Gmail, AI, or payment connection/);
+
+const demoTransport = await text("src/demo/transport.js", path.join(repoRoot, "frontend"));
+assert.match(demoTransport, /window\.fetch/);
+assert.match(demoTransport, /SYNTHETIC SALARY/);
+assert.doesNotMatch(demoTransport, /supabase|cashfree|accounts\.google/i);
+assert.match(
+  await text("src/context/AuthContext.jsx", path.join(repoRoot, "frontend")),
+  /VITE_GODFIN_DEMO_MODE/,
+);
+
+for (const demoAsset of [
+  "public/demo-app/index.html",
+  "public/screenshots/real-app/godfin-dashboard-synthetic-2x.png",
+  "public/screenshots/real-app/provenance.json",
+]) {
+  assert.ok((await stat(path.join(websiteRoot, demoAsset))).size > 0, `${demoAsset} is empty.`);
+}
 
 const waitlistButton = await text("src/components/waitlist-form.tsx");
 assert.match(waitlistButton, /Join the early testers/);
@@ -540,7 +547,16 @@ assert.match(
   middleware,
   /connect-src 'self'\$\{development \? " ws: wss:" : ""\}/,
 );
-assert.doesNotMatch(middleware, /unsafe-inline/);
+assert.equal(
+  middleware.match(/unsafe-inline/g)?.length,
+  2,
+  "Only the isolated exact-app demo may relax inline style CSP.",
+);
+assert.match(
+  middleware,
+  /demoApp[\s\S]*?style-src-elem 'self' 'unsafe-inline'[\s\S]*?demoApp[\s\S]*?style-src-attr 'unsafe-inline'/,
+);
+assert.doesNotMatch(middleware, /script-src[^\n]*unsafe-inline/);
 assert.doesNotMatch(nextConfig, /unsafe-inline/);
 assert.match(nextConfig, /default-src 'none'/);
 assert.match(rootLayout, /dynamic = "force-dynamic"/);

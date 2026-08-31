@@ -63,12 +63,12 @@ export function ProductDemoVideo() {
       <details className="story-video-transcript" id="hero-video-transcript">
         <summary>Read the 24-second video transcript</summary>
         <ol>
-          <li>A clearer month, without moving your money life online.</li>
-          <li>Preview a supported statement before reconciling it.</li>
-          <li>See money in, spending, and what was left.</li>
-          <li>Correct a category and keep the reason visible.</li>
-          <li>Review regular commitments and explainable goal progress.</li>
-          <li>Try the sample household at godfin.dev/demo.</li>
+          <li>Meet the exact GODFIN desktop app using a made-up household.</li>
+          <li>Preview a supported statement in the real Upload screen.</li>
+          <li>See the real Dashboard, Transactions, and Review pages.</li>
+          <li>Open goals and recurring commitments in the real Plan pages.</li>
+          <li>Read reports and money-habit explanations from synthetic data.</li>
+          <li>Explore every real app tab at godfin.dev/demo.</li>
         </ol>
       </details>
     </div>

@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "kind": "godfin-real-app-demo-capture",
+  "source_repo_sha": "98f5fcc1e05c0a10786537f0cd16557163ae26d8",
+  "source_git_sha": "98f5fcc1e05c0a10786537f0cd16557163ae26d8",
+  "canonical_golden_fixture": "backend/tests/fixtures/golden_ledger_v1.json",
+  "canonical_golden_fixture_sha256": "4707a31e2aeee1e6b6c51ec0a4eec1e8c5673258be562615569d38d632964df7",
+  "entrypoint": "http://127.0.0.1:5300/demo",
+  "served_demo_route": "/demo-app/index.html",
+  "deterministic_clock": "2026-07-31T12:00:00+05:30",
+  "external_network_required_at_render": false,
+  "synthetic_data": true,
+  "privacy_statement": "Every captured value is synthetic in-memory demo data. No bank, Gmail, payment, account, contact, or personal financial record is used or exported.",
+  "pure_screenshot_overlay_hidden": ".godfin-demo-badge",
+  "animation_policy": "Reduced motion plus zero-duration CSS transitions/animations and Playwright animations disabled.",
+  "privacy_scan": {
+    "source": "visible document.body.innerText after the demo disclosure badge is hidden",
+    "allowed_email": "hello@godfin.dev",
+    "patterns": [
+      "email",
+      "phone",
+      "UPI",
+      "IFSC",
+      "license key",
+      "long unmasked account number"
+    ],
+    "result": "passed"
+  },
+  "screenshots": [
+    {
+      "route": "/",
+      "heading": "Dashboard",
+      "filename": "godfin-dashboard-synthetic-2x.png",
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "device_scale_factor": 2
+      },
+      "dimensions": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "route": "/",
+      "heading": "Dashboard",
+      "filename": "dashboard.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "route": "/upload",
+      "heading": "Upload Statement",
+      "filename": "upload.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "route": "/transactions",
+      "heading": "Transactions",
+      "filename": "transactions.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "route": "/review",
+      "heading": "Review Queue",
+      "filename": "review.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "route": "/budget",
+      "heading": "Budget & Goals",
+      "filename": "budget.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "route": "/subscriptions",
+      "heading": "Subscriptions",
+      "filename": "subscriptions.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "route": "/reports",
+      "heading": "Reports",
+      "filename": "reports.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "route": "/cash-flow",
+      "heading": "Cash-flow Calendar",
+      "filename": "cash-flow.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "route": "/net-worth",
+      "heading": "Net Worth",
+      "filename": "net-worth.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    },
+    {
+      "route": "/behavior-insights",
+      "heading": "Your Money Habits",
+      "filename": "behavior-insights.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "device_scale_factor": 1
+      },
+      "dimensions": {
+        "width": 1920,
+        "height": 1080
+      }
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import {
   LockKeyhole,
   Sparkles,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { Suspense } from "react";
 
@@ -50,13 +51,22 @@ export default function HomePage() {
               <span><Check size={14} /> Desktop first</span>
             </div>
           </div>
-          <div className="golden-product-card" aria-label="Made-up July GODFIN summary">
-            <div className="golden-product-top"><span>July 2026</span><small>Demo household</small></div>
-            <div className="golden-product-balance"><span>Money left in July</span><strong>₹33,000</strong><small>after ₹11,000 of spending</small></div>
-            <div className="golden-product-metrics"><article><span>Money in</span><strong>₹44,000</strong></article><article><span>Spent</span><strong>₹11,000</strong></article><article><span>Regular bills</span><strong>₹1,830</strong></article></div>
-            <div className="golden-product-warning"><span>Try it yourself</span><strong>Open transactions, bills, a goal, and the report</strong></div>
-            <p>Sample data · made-up household · not connected to a bank</p>
-          </div>
+          <figure className="real-app-product-frame">
+            <div className="real-app-window-bar" aria-hidden="true">
+              <span /><span /><span />
+              <small>GODFIN desktop</small>
+            </div>
+            <Image
+              alt="The real GODFIN desktop dashboard showing a made-up July household with synthetic transactions"
+              className="real-app-dashboard-image"
+              height={1800}
+              priority
+              sizes="(max-width: 900px) 100vw, 56vw"
+              src="/screenshots/real-app/godfin-dashboard-synthetic-2x.png"
+              width={2880}
+            />
+            <figcaption>Actual GODFIN desktop interface · synthetic data · not connected to a bank</figcaption>
+          </figure>
         </div>
       </section>
 

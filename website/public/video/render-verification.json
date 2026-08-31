@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "verified_at": "2026-08-31T00:44:45.701Z",
+  "verified_at": "2026-08-31T16:10:41.679Z",
   "frame_hash_format": "rawvideo:yuv420p",
   "files": [
     {
@@ -9,28 +9,28 @@
       "height": 1080,
       "duration": 24,
       "codec": "h264",
-      "bytes": 2526868,
-      "sha256": "a5c07d680f1589f45debfdd10f0af28878dfe9b86643ba49e48eaf34b498cc62",
+      "bytes": 9763790,
+      "sha256": "1247fb1a571859bff886c7d76c4783071d7b476530ef8e7d6272a4e32f3dcde6",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "94e0cf5b93056182b44331ed61fc8939b330ec728387673fec4e7959784e44a5"
+          "sha256": "d83181f583881c15923ef32e78fb5770887b89fd6f3152cac314e6afc1ad2891"
         },
         {
           "percent": 20,
-          "sha256": "4061b2edc8e0cca6135ec2e006a36398f4107d8b69236b2ea12cd1e021a77ede"
+          "sha256": "6237d3deac041ebabc9050d49a9b41c9f105b7bd3a32b998961b73025bce3340"
         },
         {
           "percent": 50,
-          "sha256": "188723227beac9ad3775e1d351f9ceb960f04e68aec2a6c40fb0b7764793ba2a"
+          "sha256": "4cc2c2302b8e86871fb4420a68af5fbb24d75cf5e3357299abcf2d825d073741"
         },
         {
           "percent": 80,
-          "sha256": "85ea89e24652bdfe68945a79f91c57ace444ef99b18fe509ec72bb3fff110f2a"
+          "sha256": "a1080a451baa8c44b58197825c0d7f3d9058f5b912ff47f6757a1d076f262cd4"
         },
         {
           "percent": 99,
-          "sha256": "2aad5c6f5b4aa9e4c7d2df21df6ba8068f80d9a27867f82b7d876be6ecddaa8c"
+          "sha256": "d029211928e0c9a95255009e8b72c6784cfaa1692cd09d77ffa9912a814b0dba"
         }
       ]
     },
@@ -40,28 +40,28 @@
       "height": 1080,
       "duration": 24,
       "codec": "vp9",
-      "bytes": 3029393,
-      "sha256": "c43e7b3fe918b172cd6b9802b3d3a483ed19e9158614e24752bad73f6f154294",
+      "bytes": 7994461,
+      "sha256": "37451bd71e562de5fd9a7e1b241310001c2e760b26da496ac46d726fb78dcfcd",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "fefdb27833f6788446d4e23ceafec03de305110bcfcc33816ceaaa937a406f3c"
+          "sha256": "748556ba3e59c9d4b15afe1b40c110cf4898c0472628609b325b5a30dc9633f4"
         },
         {
           "percent": 20,
-          "sha256": "690b83b8885b1fe29ace82eefcc10bbc5cb58f2565438e21f74ab788a6739b6b"
+          "sha256": "be46655a993dfd7d8a640a847966e2ae6f0c7168062a03357ecae321a0c6b51c"
         },
         {
           "percent": 50,
-          "sha256": "23be8ea0c5c54d0b4a807c2ab6ae2b51eef60c2d98841889ab01a70572d2b113"
+          "sha256": "acd414deb8e8c5716648a6ebfcc21c3568249a4c16aa62e0b8c50fa740afb237"
         },
         {
           "percent": 80,
-          "sha256": "2efa55750d4c1269e3121f6fb1265c1f6b0ff65f9fb8658ef3f2ba5981b08462"
+          "sha256": "699adf441aaa84367055c3f3221961f2ef7235221876cc6cb7edf52b3f583fb2"
         },
         {
           "percent": 99,
-          "sha256": "290a95f800680173f916f6eed246343935cafd1e2a8cb8760cf185e8b989c7a8"
+          "sha256": "8b3d07a6e20e74b243e3d9cc96a4c34b1135635b0fc3b4793296780558d7a7a9"
         }
       ]
     },
@@ -71,28 +71,28 @@
       "height": 1080,
       "duration": 54,
       "codec": "h264",
-      "bytes": 3961724,
-      "sha256": "dd9d15d6982fa7ced1a683ef84f26c36612f14bfb5e466c91f2ceb825fe75923",
+      "bytes": 19839038,
+      "sha256": "874d2ece4deebf764ee4c20587422ec407dfd259136e1b5f082ad2104dbb96c6",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "94e0cf5b93056182b44331ed61fc8939b330ec728387673fec4e7959784e44a5"
+          "sha256": "d83181f583881c15923ef32e78fb5770887b89fd6f3152cac314e6afc1ad2891"
         },
         {
           "percent": 20,
-          "sha256": "475e6043ba996cb017f2ffe5544c219790926906d0bbe9bbcdf31e8b8b386236"
+          "sha256": "3da5c757c04bff05add8c2adeba197157f06ae7091943e254f27e088599407ee"
         },
         {
           "percent": 50,
-          "sha256": "9e5768299b9e33021076dcd99236f570065df0244c78976c4eba84dc6d871dce"
+          "sha256": "db5e834547d26d8cc5ab4bd42d7076d64b980ed8b9b7f6bcff87240f3e1db945"
         },
         {
           "percent": 80,
-          "sha256": "6542ca0afb35598d18ced229fdba534863d8fc27724b60ca96b91a1d43005a52"
+          "sha256": "e36ad02307f359f05a6772de4942d779ade82fa9fb8ea11bdaa81a49c860828f"
         },
         {
           "percent": 99,
-          "sha256": "3aa6c1b3ba4e19a08b5051bad4e9b0b05b56e5c2ab5c7fb58d78708efea7e4ec"
+          "sha256": "0007ac2ffb40e66e8ce5df6bd7cc5139a452a733755f8f5400d9bd026b3e8b6d"
         }
       ]
     },
@@ -102,28 +102,28 @@
       "height": 1080,
       "duration": 54,
       "codec": "vp9",
-      "bytes": 4693637,
-      "sha256": "51005377abf21c1c6c4a1f4d3d88edf2ff241debac7802854665d2059e32dbcf",
+      "bytes": 14735170,
+      "sha256": "0dd16ee3f952b8250a3a00b0ef8b839dbfab61fd09198f0009232fbe216c4a2e",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "fefdb27833f6788446d4e23ceafec03de305110bcfcc33816ceaaa937a406f3c"
+          "sha256": "748556ba3e59c9d4b15afe1b40c110cf4898c0472628609b325b5a30dc9633f4"
         },
         {
           "percent": 20,
-          "sha256": "c1a37308e3bb1af7bbd7df4592d7e30e1ec3d7adba1832255b864bdda300e71f"
+          "sha256": "f68ffdc2e5382487d1025a980375c319263a4cc923f36f67c30b497f34e3fca7"
         },
         {
           "percent": 50,
-          "sha256": "5aec6a055932732969582bfffde2768245bc7945aa8babe43f4fdfa9f4556115"
+          "sha256": "006982a24f745f14f597cec38f3210ed6b62e5d626bde78c106a53c15dd2f109"
         },
         {
           "percent": 80,
-          "sha256": "692f51dd2a32e2ef1af91bee8a67e94829bc188f9cc8c2827f3c60cfb36df627"
+          "sha256": "36a398d4d213181058100bf889cc37fc0101490af66c6989254e789c7ea31e00"
         },
         {
           "percent": 99,
-          "sha256": "17d072a0e592d56e2d914b6d60579fd419a7640587b796494306a0c2a74140d1"
+          "sha256": "d6ef7692513638c6d5eb682f840ec31c6f5545bfeaebd196ce1d5be2cdcaab48"
         }
       ]
     },
@@ -133,40 +133,40 @@
       "height": 1920,
       "duration": 18,
       "codec": "h264",
-      "bytes": 1289438,
-      "sha256": "67cd0158c7692b46e6fc7127ac2a7ca99336c1301b1d477cb115ab2c6c08bfa7",
+      "bytes": 4146461,
+      "sha256": "9d98eb166116cf40ad67a45635a5a6a5de3c9ed8b8b72032791a62067c791a5c",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "7476d6dea0505959feda436956b8eb362f2c878c8f509a3cbefe2474d47ed5bd"
+          "sha256": "f3061c997a78ce3a369bfd183d02c978260f43384d357910333a8704d426e12c"
         },
         {
           "percent": 20,
-          "sha256": "fbedd7278ae664933c8e7db0eb9a410684c293d0124fb42a624eb8c4ef30bbe5"
+          "sha256": "b22aa4453b8b69a533ebb1064acd14b34c0bad20d35e1c62da51f24bd20a3eb4"
         },
         {
           "percent": 50,
-          "sha256": "cdccf64df3f51064b91e8e25518acf17ba753d4cbfc021de3f5214122eaec84e"
+          "sha256": "5000fde575bf0e703b37cc98821d47ba68fe470591b7468feda9753ee4163069"
         },
         {
           "percent": 80,
-          "sha256": "d5fea0befbcd469bc9abee3d8af7d66338e96f8648418539556c7b2e810d9363"
+          "sha256": "d6754bdf957b94d4457c14272c6ae6fca7cac6e044ac93a0bd14a77e843a9025"
         },
         {
           "percent": 99,
-          "sha256": "093a2f81d5d560ca7414edd2441ce616fb1f049683bd14c054682e6f423e9931"
+          "sha256": "37c0469ebb192fd14a17f1d324a408753b5c42f927a04fe4b34d07a1f5883b90"
         }
       ]
     },
     {
       "file": "godfin-beta-hero.poster.webp",
-      "bytes": 47500,
-      "sha256": "faa5b8112a949c2756ebf3863f961921c7f7f18eb49c07b181635bfabcada20e"
+      "bytes": 57522,
+      "sha256": "315f4d47f84d57e89a6fa5c911c0b1a63333577d710b46e7a85e8d911f532bb2"
     },
     {
       "file": "godfin-demo-walkthrough.poster.webp",
-      "bytes": 49240,
-      "sha256": "e52b8bfcc08a83e599365053799de07888d1cde66792e2ac489e8b42015f1484"
+      "bytes": 59248,
+      "sha256": "5727c4d17013422b2957fafa047b81f3c0206d001b4812d86a7a98f97b8d1b59"
     }
   ]
 }

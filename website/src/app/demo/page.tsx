@@ -1,15 +1,11 @@
 import type { Metadata } from "next";
-import { PublicDemo } from "@/components/public-demo";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
   title: "Try the demo",
-  description: "Click through a made-up GODFIN household with no account, upload, or bank connection.",
+  description: "Click through the exact GODFIN desktop interface with a made-up household and no bank connection.",
 };
 
 export default function DemoPage() {
-  return (
-    <section className="demo-fullscreen-route" aria-label="GODFIN sample household demo">
-      <PublicDemo />
-    </section>
-  );
+  redirect("/demo-app/index.html");
 }

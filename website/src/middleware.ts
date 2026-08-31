@@ -6,6 +6,7 @@ import { supabasePublicConfig } from "@/lib/env";
 function contentSecurityPolicy(
   nonce: string,
   upgradeInsecureRequests: boolean,
+  demoApp: boolean,
 ): string {
   const development = process.env.NODE_ENV === "development";
   const directives = [
@@ -20,9 +21,15 @@ function contentSecurityPolicy(
     "manifest-src 'self'",
     "media-src 'self'",
     "object-src 'none'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
-    `style-src-elem 'self' 'nonce-${nonce}'`,
-    "style-src-attr 'unsafe-hashes' 'sha256-zlqnbDt84zf1iSefLU/ImC54isoprH/MRiVZGskwexk='",
+    demoApp
+      ? "script-src 'self'"
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
+    demoApp
+      ? "style-src-elem 'self' 'unsafe-inline'"
+      : `style-src-elem 'self' 'nonce-${nonce}'`,
+    demoApp
+      ? "style-src-attr 'unsafe-inline'"
+      : "style-src-attr 'unsafe-hashes' 'sha256-zlqnbDt84zf1iSefLU/ImC54isoprH/MRiVZGskwexk='",
   ];
   if (upgradeInsecureRequests) directives.push("upgrade-insecure-requests");
   return directives.join("; ");
@@ -30,6 +37,7 @@ function contentSecurityPolicy(
 
 export async function middleware(request: NextRequest) {
   const nonce = crypto.randomUUID().replaceAll("-", "");
+  const demoApp = request.nextUrl.pathname.startsWith("/demo-app/");
   const forwardedProtocol = request.headers
     .get("x-forwarded-proto")
     ?.split(",", 1)[0]
@@ -37,7 +45,7 @@ export async function middleware(request: NextRequest) {
   const secureTransport = forwardedProtocol
     ? forwardedProtocol === "https"
     : request.nextUrl.protocol === "https:";
-  const csp = contentSecurityPolicy(nonce, secureTransport);
+  const csp = contentSecurityPolicy(nonce, secureTransport, demoApp);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
@@ -49,7 +57,7 @@ export async function middleware(request: NextRequest) {
   };
 
   const config = supabasePublicConfig();
-  if (!config) return securedResponse();
+  if (!config || demoApp) return securedResponse();
 
   let response = securedResponse();
   const supabase = createServerClient(config.url, config.key, {

@@ -10,9 +10,36 @@ import {
 
 const RouterContext = createContext(null);
 
+const ROUTER_BASE_PATH = (() => {
+  const configured = import.meta.env.BASE_URL || '/';
+  if (configured === '/') return '';
+  return `/${configured.replace(/^\/+|\/+$/g, '')}`;
+})();
+
+function stripBasePath(pathname) {
+  if (!ROUTER_BASE_PATH) return pathname;
+  if (
+    pathname === ROUTER_BASE_PATH
+    || pathname === `${ROUTER_BASE_PATH}/`
+    || pathname === `${ROUTER_BASE_PATH}/index.html`
+  ) {
+    return '/';
+  }
+  return pathname.startsWith(`${ROUTER_BASE_PATH}/`)
+    ? pathname.slice(ROUTER_BASE_PATH.length)
+    : pathname;
+}
+
+function withBasePath(pathname) {
+  if (!ROUTER_BASE_PATH) return pathname;
+  return pathname === '/'
+    ? `${ROUTER_BASE_PATH}/index.html`
+    : `${ROUTER_BASE_PATH}${pathname}`;
+}
+
 function browserLocation() {
   return {
-    pathname: window.location.pathname,
+    pathname: stripBasePath(window.location.pathname),
     search: window.location.search,
   };
 }
@@ -29,7 +56,7 @@ export function RouterProvider({ children }) {
   const navigate = useCallback((target, { replace = false } = {}) => {
     const url = new URL(target, window.location.origin);
     const method = replace ? 'replaceState' : 'pushState';
-    window.history[method](null, '', `${url.pathname}${url.search}${url.hash}`);
+    window.history[method](null, '', `${withBasePath(url.pathname)}${url.search}${url.hash}`);
     setLocation(browserLocation());
   }, []);
 

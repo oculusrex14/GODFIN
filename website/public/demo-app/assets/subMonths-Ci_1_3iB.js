@@ -1,0 +1,1 @@
+import{t as u,c as a}from"./format-CErc_BkB.js";function c(e,o,s){const t=u(e,s?.in);if(isNaN(o))return a(e,NaN);if(!o)return t;const r=t.getDate(),n=a(e,t.getTime());n.setMonth(t.getMonth()+o+1,0);const i=n.getDate();return r>=i?n:(t.setFullYear(n.getFullYear(),n.getMonth(),r),t)}function h(e,o,s){return c(e,-1,s)}export{c as a,h as s};

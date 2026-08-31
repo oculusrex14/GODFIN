@@ -2,14 +2,19 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { fetchAuthStatus, logoutSession, setAuthToken } from '../api/client';
 
 const AuthContext = createContext(null);
+const DEMO_MODE = import.meta.env.VITE_GODFIN_DEMO_MODE === 'true';
 
 export function AuthProvider({ children }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isFirstRun, setIsFirstRun] = useState(null);
-  const [pinLength, setPinLength] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(DEMO_MODE);
+  const [isFirstRun, setIsFirstRun] = useState(DEMO_MODE ? false : null);
+  const [pinLength, setPinLength] = useState(DEMO_MODE ? 4 : null);
+  const [loading, setLoading] = useState(!DEMO_MODE);
 
   useEffect(() => {
+    if (DEMO_MODE) {
+      setAuthToken('godfin-synthetic-demo-session');
+      return undefined;
+    }
     let retries = 0;
     const maxRetries = 5;
     let timeoutId = null;

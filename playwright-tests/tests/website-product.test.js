@@ -26,7 +26,8 @@ test('homepage presents an honest beta path and accessible media', async ({ page
     await expect(page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: link })).toBeVisible();
   }
   await expect(page.getByRole('link', { name: 'Tester sign in' })).toBeVisible();
-  await expect(page.getByText('Sample data · made-up household · not connected to a bank').first()).toBeVisible();
+  await expect(page.getByText('Actual GODFIN desktop interface · synthetic data · not connected to a bank')).toBeVisible();
+  await expect(page.getByAltText(/real GODFIN desktop dashboard/i)).toBeVisible();
   const support = page.getByLabel('Current beta focus');
   await expect(support.getByText('Mac with Apple chip', { exact: true })).toBeVisible();
   await expect(support.getByText('Windows PC', { exact: true })).toBeVisible();
@@ -65,44 +66,43 @@ test('reduced motion keeps a poster and user-controlled playback', async ({ brow
   await context.close();
 });
 
-test('public demo is auth-free, static, keyboard-operable, and makes no finance-service requests', async ({ page }) => {
+test('public demo uses the exact desktop interface and makes no finance-service requests', async ({ page }) => {
   const forbiddenRequests = [];
   page.on('request', (request) => {
-    if (/\/api\/|supabase|cashfree|accounts\.google|gmail/i.test(request.url())) {
+    if (/\/api\/v1\/|supabase|cashfree|accounts\.google|gmail/i.test(request.url())) {
       forbiddenRequests.push(request.url());
     }
   });
 
   await page.goto('/demo');
-  await expect(page.locator('.site-header')).toBeHidden();
-  await expect(page.getByRole('dialog', { name: 'GODFIN demo tour' })).toBeVisible();
-  await expect(page.getByText('Step 1 of 6')).toBeVisible();
-  await expect(page.locator('input[type="file"]')).toHaveCount(0);
-  await expect(page.getByText('Sample data · not your accounts')).toBeVisible();
+  await expect(page).toHaveURL(/\/demo-app\/index\.html$/);
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await expect(page.getByText('Synthetic desktop demo')).toBeVisible();
+  await expect(page.getByText('Made-up household · no bank, Gmail, AI, or payment connection')).toBeVisible();
 
-  await page.keyboard.press('ArrowRight');
-  await expect(page.getByText('Step 2 of 6')).toBeVisible();
-  await page.keyboard.press('ArrowLeft');
-  await expect(page.getByText('Step 1 of 6')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByText('Step 1 of 6')).toBeHidden();
+  for (const link of [
+    'Dashboard', 'Transactions', 'Transfers', 'Review', 'Upload',
+    'Budget', 'Subscriptions', 'Income', 'Reports', 'Cash Flow',
+    'Net Worth', 'Behavior Insights', 'Advisor', 'Audit', 'Settings',
+  ]) {
+    await expect(page.getByRole('link', { name: link, exact: true })).toBeVisible();
+  }
 
-  await page.getByRole('tab', { name: 'Transactions' }).click();
-  const search = page.getByPlaceholder('Search this made-up month');
-  await search.fill('salary');
-  await expect(page.getByText('SYNTHETIC SALARY')).toBeVisible();
-  await expect(page.getByText('SYNTHETIC GREEN BASKET')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Why?' }).click();
-  await expect(page.getByText(/Verified income in the imported statement/)).toBeVisible();
+  await page.getByRole('link', { name: 'Transactions', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Transactions', exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: /^SYNTHETIC SALARY\(Salary\)$/ })).toBeVisible();
+  await page.getByRole('link', { name: 'Upload', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Upload Statement', exact: true })).toBeVisible();
+  expect(await page.locator('input[type="file"]').count()).toBeGreaterThan(0);
   expect(forbiddenRequests).toEqual([]);
 });
 
 test('public demo and mobile navigation fit a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 760 });
   await page.goto('/demo');
-  await expect(page.locator('.site-header')).toBeHidden();
-  await page.getByRole('button', { name: 'Skip tour' }).click();
-  await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Activity', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open navigation menu' })).toBeVisible();
   const dimensions = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,

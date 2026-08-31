@@ -11,7 +11,8 @@
     "test:smoke": "playwright test tests/production-smoke.test.js",
     "test:app-matrix": "playwright test --config=playwright.app-matrix.config.js",
     "test:website": "playwright test --config=playwright.website.config.js",
-    "test:legacy": "playwright test --config=playwright.legacy.config.js"
+    "test:legacy": "playwright test --config=playwright.legacy.config.js",
+    "capture:real-demo": "node scripts/capture-real-demo-assets.cjs"
   },
   "keywords": [],
   "author": "",

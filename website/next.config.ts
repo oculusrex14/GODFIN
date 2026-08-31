@@ -8,6 +8,14 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "1mb",
     },
   },
+  async rewrites() {
+    return [
+      {
+        source: "/demo-app/:path+",
+        destination: "/demo-app/index.html",
+      },
+    ];
+  },
   async headers() {
     return [
       {

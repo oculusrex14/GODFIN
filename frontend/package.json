@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:demo": "VITE_GODFIN_DEMO_MODE=true vite build --config vite.demo.config.js",
     "lint": "eslint .",
     "verify:a11y": "node scripts/verify-accessibility-contracts.mjs && node scripts/verify-contrast-tokens.mjs",
     "verify:controls": "node scripts/generate-interactive-action-manifest.mjs",
