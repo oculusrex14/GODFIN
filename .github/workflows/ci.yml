@@ -111,6 +111,10 @@ jobs:
         working-directory: website/remotion
       - run: npm run render:smoke
         working-directory: website/remotion
+      - name: Install FFmpeg verification tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm run verify
         working-directory: website/remotion
       - run: npm run verify:contracts
