@@ -1,6 +1,7 @@
 {
-  "schema_version": 1,
-  "verified_at": "2026-08-30T19:47:58.191Z",
+  "schema_version": 2,
+  "verified_at": "2026-08-31T00:44:45.701Z",
+  "frame_hash_format": "rawvideo:yuv420p",
   "files": [
     {
       "file": "godfin-beta-hero.mp4",
@@ -9,26 +10,27 @@
       "duration": 24,
       "codec": "h264",
       "bytes": 2526868,
+      "sha256": "a5c07d680f1589f45debfdd10f0af28878dfe9b86643ba49e48eaf34b498cc62",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "114cf589dfaebdbaaad782f27dce16eb20643fc771ff3160ebc08927b580485b"
+          "sha256": "94e0cf5b93056182b44331ed61fc8939b330ec728387673fec4e7959784e44a5"
         },
         {
           "percent": 20,
-          "sha256": "7a8a47508f4f471e81134ccdcca9d1e0a6082e2329ca8c15fdd9760cf4130b06"
+          "sha256": "4061b2edc8e0cca6135ec2e006a36398f4107d8b69236b2ea12cd1e021a77ede"
         },
         {
           "percent": 50,
-          "sha256": "8de3578ba961125bc89ba3fecb42baa99261ab2be5fa59439b227ad8b184f8a8"
+          "sha256": "188723227beac9ad3775e1d351f9ceb960f04e68aec2a6c40fb0b7764793ba2a"
         },
         {
           "percent": 80,
-          "sha256": "d81b110e78c694cbef5cd11c67de41c5bbb14a5bd9aca4fcd4d1ae56ef1435a4"
+          "sha256": "85ea89e24652bdfe68945a79f91c57ace444ef99b18fe509ec72bb3fff110f2a"
         },
         {
           "percent": 99,
-          "sha256": "57857f1a6d7438321a115db2edc45e2b9a6c62359aadff5eb4b537a35b7ef336"
+          "sha256": "2aad5c6f5b4aa9e4c7d2df21df6ba8068f80d9a27867f82b7d876be6ecddaa8c"
         }
       ]
     },
@@ -39,26 +41,27 @@
       "duration": 24,
       "codec": "vp9",
       "bytes": 3029393,
+      "sha256": "c43e7b3fe918b172cd6b9802b3d3a483ed19e9158614e24752bad73f6f154294",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "0c6b647d5712287d38fdb32493a4623e6374bb95e774ddf19d00c32f02bbbabe"
+          "sha256": "fefdb27833f6788446d4e23ceafec03de305110bcfcc33816ceaaa937a406f3c"
         },
         {
           "percent": 20,
-          "sha256": "b39a3e86a6b4c7ae1797a6d99e79a71e2519477da7c675a025557b63026f4fe4"
+          "sha256": "690b83b8885b1fe29ace82eefcc10bbc5cb58f2565438e21f74ab788a6739b6b"
         },
         {
           "percent": 50,
-          "sha256": "eeb14054791bd0ca85eb51e05585a6f642d184f32f49c9be22365d8df287d093"
+          "sha256": "23be8ea0c5c54d0b4a807c2ab6ae2b51eef60c2d98841889ab01a70572d2b113"
         },
         {
           "percent": 80,
-          "sha256": "7b3c56a7957cf2ea084c021adcceef7d280724614528c5fefe0c64eecb3154a4"
+          "sha256": "2efa55750d4c1269e3121f6fb1265c1f6b0ff65f9fb8658ef3f2ba5981b08462"
         },
         {
           "percent": 99,
-          "sha256": "3d8284f56557fe53b22b171c17b78532275dc6996f468a61d36b0c49bf8b167d"
+          "sha256": "290a95f800680173f916f6eed246343935cafd1e2a8cb8760cf185e8b989c7a8"
         }
       ]
     },
@@ -69,26 +72,27 @@
       "duration": 54,
       "codec": "h264",
       "bytes": 3961724,
+      "sha256": "dd9d15d6982fa7ced1a683ef84f26c36612f14bfb5e466c91f2ceb825fe75923",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "114cf589dfaebdbaaad782f27dce16eb20643fc771ff3160ebc08927b580485b"
+          "sha256": "94e0cf5b93056182b44331ed61fc8939b330ec728387673fec4e7959784e44a5"
         },
         {
           "percent": 20,
-          "sha256": "3660f4a8f002bb79b7d937b694f687987294d292d0a8a597d367e41d0ebeb8af"
+          "sha256": "475e6043ba996cb017f2ffe5544c219790926906d0bbe9bbcdf31e8b8b386236"
         },
         {
           "percent": 50,
-          "sha256": "3f6d63cee0445bc6ab15126f04e533fd22dd7d185e76d9e366499e4318435783"
+          "sha256": "9e5768299b9e33021076dcd99236f570065df0244c78976c4eba84dc6d871dce"
         },
         {
           "percent": 80,
-          "sha256": "16dbff6a5598a9d646a039b4d86f100c7e18256459b4a08a9021c115c5898de0"
+          "sha256": "6542ca0afb35598d18ced229fdba534863d8fc27724b60ca96b91a1d43005a52"
         },
         {
           "percent": 99,
-          "sha256": "ed826cee1f177ef7c9589db447af1c94fa4b3262c5affff7a263062b8be78325"
+          "sha256": "3aa6c1b3ba4e19a08b5051bad4e9b0b05b56e5c2ab5c7fb58d78708efea7e4ec"
         }
       ]
     },
@@ -99,26 +103,27 @@
       "duration": 54,
       "codec": "vp9",
       "bytes": 4693637,
+      "sha256": "51005377abf21c1c6c4a1f4d3d88edf2ff241debac7802854665d2059e32dbcf",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "0c6b647d5712287d38fdb32493a4623e6374bb95e774ddf19d00c32f02bbbabe"
+          "sha256": "fefdb27833f6788446d4e23ceafec03de305110bcfcc33816ceaaa937a406f3c"
         },
         {
           "percent": 20,
-          "sha256": "35b3b991bfb8766d946868caa1301adbf33cb3acfed0ea9cc70af731913dd914"
+          "sha256": "c1a37308e3bb1af7bbd7df4592d7e30e1ec3d7adba1832255b864bdda300e71f"
         },
         {
           "percent": 50,
-          "sha256": "9f95ca1ce12534b8f7b3b91b74fe7e5fb228c0dea1400987c4d9734419b2d67b"
+          "sha256": "5aec6a055932732969582bfffde2768245bc7945aa8babe43f4fdfa9f4556115"
         },
         {
           "percent": 80,
-          "sha256": "66b82858e4d5a646c4c0ab7a7b7f0fdd7bec4ecd28e73bf6b7699bbc05d24380"
+          "sha256": "692f51dd2a32e2ef1af91bee8a67e94829bc188f9cc8c2827f3c60cfb36df627"
         },
         {
           "percent": 99,
-          "sha256": "ead5e0fa500b0c9e78774671a8020de28450953cacf03658faa04bdf22b24866"
+          "sha256": "17d072a0e592d56e2d914b6d60579fd419a7640587b796494306a0c2a74140d1"
         }
       ]
     },
@@ -129,26 +134,27 @@
       "duration": 18,
       "codec": "h264",
       "bytes": 1289438,
+      "sha256": "67cd0158c7692b46e6fc7127ac2a7ca99336c1301b1d477cb115ab2c6c08bfa7",
       "frame_hashes": [
         {
           "percent": 0,
-          "sha256": "e380cba3207edd0e3cbdb755e32ed0d2ee5553e6ade6f5f210204ff95279600a"
+          "sha256": "7476d6dea0505959feda436956b8eb362f2c878c8f509a3cbefe2474d47ed5bd"
         },
         {
           "percent": 20,
-          "sha256": "cdc3626a494f5991e3773696c51ab46fe939ca899075a9a3d95bf80bc82e666e"
+          "sha256": "fbedd7278ae664933c8e7db0eb9a410684c293d0124fb42a624eb8c4ef30bbe5"
         },
         {
           "percent": 50,
-          "sha256": "a0f302c9088deab46d46b38a955b005693b60c29f3e7edd1c4cd1d981c7477f4"
+          "sha256": "cdccf64df3f51064b91e8e25518acf17ba753d4cbfc021de3f5214122eaec84e"
         },
         {
           "percent": 80,
-          "sha256": "2cb456f8f16e4fc4eb0f8aa7a9fdb1e523440d1dcc8bd6fadf315fa99adf1f29"
+          "sha256": "d5fea0befbcd469bc9abee3d8af7d66338e96f8648418539556c7b2e810d9363"
         },
         {
           "percent": 99,
-          "sha256": "699f4cf6e3f1f34802feda6d76a33b3710c18790b85780f662177a699d0cd5ad"
+          "sha256": "093a2f81d5d560ca7414edd2441ce616fb1f049683bd14c054682e6f423e9931"
         }
       ]
     },

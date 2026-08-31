@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,7 +30,12 @@ async function capture(command, args) {
   });
 }
 
-const report = { schema_version: 1, files: [] };
+const updateManifest = process.argv.includes("--update-manifest");
+const report = {
+  schema_version: 2,
+  frame_hash_format: "rawvideo:yuv420p",
+  files: [],
+};
 for (const item of expected) {
   const source = path.join(output, item.file);
   const probe = JSON.parse((await capture("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", source])).toString("utf8"));
@@ -47,11 +52,30 @@ for (const item of expected) {
   const frameHashes = [];
   for (const percent of [0, 20, 50, 80, 99]) {
     const timestamp = Math.max(0, item.duration * percent / 100 - (percent === 99 ? 0.05 : 0));
-    const frame = await capture("ffmpeg", ["-v", "error", "-ss", timestamp.toFixed(3), "-i", source, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"]);
+    const frame = await capture("ffmpeg", [
+      "-v",
+      "error",
+      "-ss",
+      timestamp.toFixed(3),
+      "-i",
+      source,
+      "-frames:v",
+      "1",
+      "-pix_fmt",
+      "yuv420p",
+      "-f",
+      "rawvideo",
+      "-",
+    ]);
     frameHashes.push({ percent, sha256: createHash("sha256").update(frame).digest("hex") });
   }
   const bytes = await readFile(source);
-  report.files.push({ ...item, bytes: bytes.length, frame_hashes: frameHashes });
+  report.files.push({
+    ...item,
+    bytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    frame_hashes: frameHashes,
+  });
 }
 
 for (const base of ["godfin-beta-hero", "godfin-demo-walkthrough"]) {
@@ -59,13 +83,27 @@ for (const base of ["godfin-beta-hero", "godfin-demo-walkthrough"]) {
   report.files.push({ file: `${base}.poster.webp`, bytes: poster.length, sha256: createHash("sha256").update(poster).digest("hex") });
 }
 
-const recorded = JSON.parse(
-  await readFile(path.join(output, "render-verification.json"), "utf8"),
+const manifestPath = path.join(output, "render-verification.json");
+if (updateManifest) {
+  const updated = {
+    schema_version: report.schema_version,
+    verified_at: new Date().toISOString(),
+    frame_hash_format: report.frame_hash_format,
+    files: report.files,
+  };
+  await writeFile(manifestPath, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+} else {
+  const recorded = JSON.parse(await readFile(manifestPath, "utf8"));
+  assert.equal(recorded.schema_version, report.schema_version);
+  assert.equal(recorded.frame_hash_format, report.frame_hash_format);
+  assert.deepEqual(
+    recorded.files,
+    report.files,
+    "Committed media no longer matches its deterministic verification manifest.",
+  );
+}
+console.log(
+  updateManifest
+    ? `Verified ${expected.length} silent media files and 2 WebP posters; updated the manifest explicitly.`
+    : `Verified ${expected.length} silent media files and 2 WebP posters without modifying the manifest.`,
 );
-assert.equal(recorded.schema_version, report.schema_version);
-assert.deepEqual(
-  recorded.files,
-  report.files,
-  "Committed media no longer matches its deterministic verification manifest.",
-);
-console.log(`Verified ${expected.length} silent media files and 2 WebP posters without modifying the manifest.`);
