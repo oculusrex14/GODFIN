@@ -467,8 +467,8 @@ def build_document() -> Document:
     metadata.paragraph_format.space_after = Pt(42)
     set_run_font(
         metadata.add_run(
-            "Version 3.2  •  25 August 2026  •  oculusrex14/GODFIN\n"
-            "Production branch: codex/godfin-production-v6"
+            "Version 3.3  •  31 August 2026  •  oculusrex14/GODFIN\n"
+            "Beta website branch: codex/godfin-beta-website-v1"
         ),
         size=10,
         color=MUTED,
@@ -504,16 +504,16 @@ def build_document() -> Document:
     add_callout(
         document,
         "ENGINEERING BASELINE",
-        "Application code candidate 5ee71fabfe8c7f28726bf625b75801cb254b23a1 is merged to main and pushed on codex/godfin-production-v6. GitHub Actions run 32827447450 completed successfully against that exact commit on 25 August 2026. Its seven green jobs include the complete 1,011-test Python 3.12 backend suite, dependency and full-history secret audits, frontend and website production gates, desktop privacy/update audits, production smoke tests, Chromium/Firefox/WebKit accessibility and website matrices, and a clean 11-migration Supabase database with 107 passing pgTAP assertions. All 182 API operations publish an explicit success or intentional terminal status, a non-empty media-specific success schema, and the shared error contract.",
+        "Beta website engineering candidate 493d20a8b0f75602dd7891578494b7e5cfc98760 is pushed on codex/godfin-beta-website-v1. GitHub Actions run 33345967709 completed successfully against that exact commit on 31 August 2026. Its seven green jobs include the complete 1,011-test Python 3.12 backend suite, dependency and full-history secret audits, frontend and website production gates, deterministic Remotion media verification, desktop privacy/update audits, production smoke tests, Chromium/Firefox/WebKit accessibility and website matrices, and a clean 12-migration Supabase database with 146 passing pgTAP assertions. All 182 API operations retain the previously verified response contracts.",
         tone="good",
     )
     for item in (
-        "Production repository URL: https://github.com/oculusrex14/GODFIN. The GitHub API reports PRIVATE as of 25 August 2026; no public repository or release was created.",
+        "Production repository URL: https://github.com/oculusrex14/GODFIN. It was made public only for the owner-requested CI window. Return it to PRIVATE immediately after the final documentation-only CI run; no public release or installer is authorized.",
         "Canonical production website: https://godfin.dev. The apex resolves to Vercel over HTTPS; https://godfin.vercel.app remains an operational fallback.",
-        "Supabase project: GODFIN (ap-south-1). All 11 ordered migration hashes through 20260825021500_grant_authenticated_rls_reads.sql align on the linked project. Clean CI and the linked project each pass all 107 pgTAP assertions for least-privilege grants, own-row RLS, two-user isolation, abuse controls, Cashfree state, upgrades, device caps, and email leasing. Managed backup/PITR, a restore drill, Auth leaked-password protection, and the real second-account browser flow remain required.",
+        "Supabase project: GODFIN (ap-south-1). All 12 ordered migrations through 20260830044445_beta_waitlist_access_entitlements_feedback.sql align on the linked project. Clean CI passes all 146 pgTAP assertions for least-privilege grants, own-row RLS, two-user isolation, abuse controls, Cashfree state, upgrades, device caps, email leasing, beta invitations, phased entitlements, Gmail-test selection, checkout allowlisting, expiry, and feedback isolation. Managed backup/PITR, a restore drill, Auth leaked-password protection, and the real second-account browser flow remain required.",
         "Deprecated source is preserved only in private, read-only repository oculusrex14/GODFIN-OPUS46-ARCHIVE. Its 35-commit rewritten history and archival tag pass secret scanning; the obsolete local source/build workspace was moved to Trash while active Application Support data was preserved.",
         "PIN access recovery, portal-positioned calculation help, collapsible App Settings, external pricing navigation, auditable goal contributions, corrected goal simulation, recurring re-detection, atomic account routing, package privacy assertions, and the AY 2026–27 CA tax pack are implemented and tested.",
-        "The website product tour uses real React application captures generated only from synthetic data, muted WebM/MP4 media with reduced-motion fallbacks, and build-time checks that prevent unreleased features from being advertised. godfin.dev is the final canonical domain and godfin.vercel.app is the fallback. The older source commit 3a44f00 is still the deployed production website; checkout remains deliberately disabled. Candidate 5ee71fa is not deployed and must not be promoted until the provider, recovery, and legal gates pass.",
+        "The beta website is deployed to production as Vercel deployment dpl_4oXjaiVBh3k9q9cBff2WY9gCRzyA. godfin.dev is canonical and godfin.vercel.app remains the fallback. Public /demo and /how-it-works use one deterministic, fictional household; the static demo makes no finance-service requests and never presents upload or bank-connect controls. Public checkout remains closed. The waitlist fails closed until the owner verifies Resend/DNS and supplies RESEND_API_KEY plus RESEND_FROM_EMAIL through Vercel's encrypted environment settings.",
         "Production acceptance on 30 July 2026: website Playwright 4/4; Lighthouse performance 99, accessibility 100, SEO 100, LCP 1.73 seconds, CLS 0; required CSP, HSTS, frame, MIME, referrer, and permissions headers are present.",
         "Vercel already contains the Supabase public/server variables and LICENSE_SIGNING_SECRET. Values are encrypted and are intentionally not reproduced here.",
         "Google OAuth is active. The owner-controlled GODFIN Website project uses the rotated web client named GODFIN Website Rotated; the provider requests only openid/email/profile, the original client is revoked, and production sign-in returned successfully to /account twice on 30 July 2026.",
@@ -522,7 +522,7 @@ def build_document() -> Document:
         "The deterministic CycloneDX 1.6 SBOM contains 1,035 unique components with zero unresolved license identifiers. Third-party notices list all conditional licenses. Final human legal clearance is intentionally fail-closed and remains pending in supply-chain/legal-clearance.json.",
         "Native GitHub Actions run 32823401864 built and launched unpacked packages from exact application candidate 5ee71fa on macOS arm64, Windows x64, and Linux x64. First starts were 2.098, 3.886, and 3.224 seconds; restarts were 2.440, 2.390, and 2.360 seconds; idle memory was 529.2, 488.1, and 498.5 MB. A separate isolated run on the owner's Apple Silicon Mac passed at 0.991 seconds first start, 0.822 seconds restart, and 598.8 MB. Every required run preserved its isolated synthetic database, enforced local trust and maintenance boundaries, and loaded request-only integrations after startup. Executable and log hashes are retained under docs/production-remediation/evidence. These packages were unsigned, not uploaded as installers, and not published. macOS x64/Intel is explicitly owner-deferred for this pass.",
         "Release workflows require exact tag, commit, and package-version agreement; refuse an existing GitHub Release; publish deterministic SBOM, notices, checksums, and provenance; use immutable action SHAs; and require staged promotion plus a reviewed rollback path.",
-        "Application-code evidence is current through immutable commit 5ee71fabfe8c7f28726bf625b75801cb254b23a1 on main and codex/godfin-production-v6. GitHub Actions run 32827447450 passed all seven jobs on that exact SHA, including all 1,011 backend tests, the three-engine browser matrices, and the clean Supabase database matrix. The repository was then returned to PRIVATE and verified through the GitHub API. This closes source-level hosted CI, clean-database RLS, repository-privacy, and required-platform unpacked-smoke gates; it does not authorize a tag, installer, deployment, payment acceptance, update promotion, or public launch.",
+        "Beta website evidence is current through immutable commit 493d20a8b0f75602dd7891578494b7e5cfc98760 on codex/godfin-beta-website-v1. GitHub Actions run 33345967709 passed all seven jobs on that exact SHA, including all 1,011 backend tests, both three-engine browser matrices, deterministic media checks, and the clean 12-migration Supabase database matrix. Production Chromium acceptance then passed 7/7 on godfin.dev with no Vercel runtime errors. This authorizes the tested beta website content only; it does not authorize an installer, payment acceptance, updater promotion, or public desktop launch.",
         "Desktop Gmail recovery is implemented and included in the exact-candidate native smoke packages. Its external-browser callback uses a short-lived signed handoff bound to the active desktop launch; ordinary routes still require the launch secret. The owner must start a completely fresh Connect Gmail attempt from an installed candidate; an old callback tab or stale OAuth state cannot be reused. oculusrexai@gmail.com and naraharikripa14@gmail.com are the intended Google test users. Connected status, first sync, restart, reauthorization, and the seven-day soak must be evidenced before this gate is complete.",
         "The local database upgraded from schema revision 21 to 22 with automatic pre-migration backup godfin_backup_20260824_034907_983690_e24b194b5f24.db. Integrity and foreign-key checks pass, and 100 reviewed canonical public-brand merchant aliases are indexed locally. The 24-partition synthetic enrichment benchmark reports 100% semantic accuracy, safety precision, UNKNOWN abstention, merchant auto-accept precision, relationship precision/recall, and balance-control accuracy, with approximately 1 ms p95 enrichment latency.",
         "Public Gmail consent-screen review, the fresh Gmail recovery/soak, Cashfree KYC/sandbox/live tests, Supabase backup/PITR/restore and Auth leaked-password protection, Resend/DNS, the real second-account Google isolation flow, Apple/Windows certificates, R2, signed-installer and clean-system lifecycle evidence, dependency-license approval, independent parser/full pentesting, native assistive-technology checks, and public-launch authorization are not yet complete. macOS x64/Intel is owner-deferred and must be reopened before any Intel support claim.",
@@ -530,16 +530,41 @@ def build_document() -> Document:
     ):
         add_list_item(document, item, bullet_num)
 
+    document.add_page_break()
+    document.add_heading("Beta website, tester operations, and demo", level=1)
+    add_callout(
+        document,
+        "PRODUCTION BETA WEBSITE",
+        "Vercel deployment dpl_4oXjaiVBh3k9q9cBff2WY9gCRzyA is Ready on godfin.dev. Public /demo requires no account, uses only static synthetic data, and makes no finance-service requests. Pricing is explicitly planned and public checkout is closed. The waitlist is visibly and safely disabled until Resend email confirmation can work.",
+        tone="good",
+    )
+    for item in (
+        "Public routes verified with HTTP 200: /, /demo, /how-it-works, /pricing, /account, /privacy, /terms, and /docs. HSTS, CSP, frame denial, MIME protection, referrer policy, and permissions policy remain present.",
+        "Production Chromium acceptance passed 7/7: honest beta path, accessible video, reduced-motion fallback, auth-free static demo, narrow viewport, current support/non-goals, lifetime-only planned pricing, no public checkout, and representative accessibility checks.",
+        "The additive migration 20260830044445_beta_waitlist_access_entitlements_feedback.sql is applied remotely. It adds selected-tester invitations, account-bound beta access, Core/Pro/Max phases, expiry, Gmail-test selection, controlled INR 1 checkout allowlisting, and isolated feedback without weakening the existing Cashfree verification path.",
+        "The owner command surface is website/scripts/beta-ops.mjs. Run it from website with npm run beta:ops -- help. It can list confirmed/active candidates; shortlist, invite, activate, phase, pause, revoke, or complete access; manage Gmail-test and checkout allowlists; and inspect feedback. It never prints invite tokens, license keys, OAuth data, or service credentials.",
+        "Normal progression is confirmed waitlist -> owner shortlist -> email invite -> matching Google account acceptance -> Core -> Pro -> Max. Waitlist membership alone grants nothing. INR 1 validation is a separate, private, owner-allowlisted checkout test for eligible active Max testers and is never public pricing or a normal purchase license.",
+        "Generated media is reproducible from the isolated website/remotion project using Remotion 4.0.518 and React 19.1.9. It produces a 24-second 1920x1080 hero, a 54-second 1920x1080 walkthrough, an 18-second 1080x1920 social cut, WebM fallbacks, posters, captions, provenance hashes, decoded-frame checks, and privacy scans. Remotion is build tooling only and is not in the Next.js runtime bundle.",
+        "Remotion's current Free License states that individuals and for-profit organizations with three or fewer people may create and automate videos. A team of four or more, or another covered collaboration, needs the applicable Company terms. The owner must confirm the correct tier with Remotion and counsel before ongoing production use. Codec patent obligations are separate and are not covered by Remotion's license. This is an engineering note, not legal advice.",
+        "Required Vercel variables still missing for the public waitlist are RESEND_API_KEY and RESEND_FROM_EMAIL. Cashfree validation also remains off until CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET are supplied and the provider/KYC gates pass. Beta download URLs remain unset until signed installers exist.",
+    ):
+        add_list_item(document, item, decimal_num)
+    add_source(document, "Remotion pricing and license overview", "https://www.remotion.dev/docs/license/pricing")
+    add_source(document, "Remotion license text", "https://github.com/remotion-dev/remotion/blob/main/LICENSE.md")
+    add_source(document, "Remotion license FAQ", "https://www.remotion.dev/docs/license/faq")
+    add_source(document, "Remotion current terms", "https://www.remotion.dev/docs/terms")
+    add_owner_fields(document, ["Beta cohort owner", "Resend verification date", "Cashfree sandbox approval", "Completed by / date"])
+
     critical_path_heading = document.add_heading("Critical path and blockers", level=1)
     critical_path_heading.paragraph_format.page_break_before = True
     add_table(
         document,
         ["Blocker", "Why blocked", "Your intervention", "Completion evidence"],
         [
-            ["GitHub Actions + repository privacy", "Closed on 25 August 2026 for application candidate 5ee71fa.", "Keep the repository private and rerun CI after any later application or workflow change.", "Actions run 32827447450 is green on exact SHA 5ee71fa; GitHub API reports PRIVATE."],
+            ["GitHub Actions + repository privacy", "Run 33345967709 is green on exact beta SHA 493d20a; the repository is public only for the owner-requested CI window.", "After the documentation-only final CI run is green, return the repository to private and verify with the GitHub API.", "All seven required jobs are green and repository visibility is PRIVATE."],
             ["Dependency legal review", "Automated license inventory is complete; human approval is not.", "Review conditional licenses and sign legal-clearance.json without changing evidence hashes.", "Release gate reports approved and the signed record is archived."],
-            ["Cashfree India", "Repository integration, all 11 hosted migrations, and database state-machine tests pass; KYC, credentials, webhook, and provider sandbox evidence are absent.", "Complete KYC; configure sandbox keys and required webhook events; keep checkout disabled until the full sandbox matrix passes.", "Replay-safe purchase, upgrade, refund, dispute, rate-limit, and one-email flows pass."],
-            ["Resend + DNS", "No sending key/domain verification.", "Verify godfin.dev and add the production key.", "SPF, DKIM, DMARC and two inbox tests pass."],
+            ["Cashfree India", "Repository integration, all 12 hosted migrations, database state-machine tests, and private beta allowlisting pass; KYC, credentials, webhook, and provider sandbox evidence are absent.", "Complete KYC; add CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET through Vercel; configure sandbox webhooks; keep public checkout disabled until the full sandbox matrix passes.", "Replay-safe private INR 1 validation, purchase, upgrade, refund, dispute, rate-limit, and one-email flows pass."],
+            ["Resend + DNS", "RESEND_API_KEY and RESEND_FROM_EMAIL are absent, so double opt-in cannot be delivered and the production waitlist correctly stays disabled.", "Verify godfin.dev in Resend, configure SPF/DKIM/DMARC, create hello@godfin.dev, then add both variables through encrypted Vercel settings and redeploy.", "The waitlist enables, confirmation works once, SPF/DKIM/DMARC pass, and two inbox tests pass."],
             ["Provider callbacks", "The final domain and Vercel redirects are verified, but Google/Supabase and Cashfree must still be rechecked with their real provider settings.", "Set godfin.dev as the primary provider URL and retain the Vercel callback fallback.", "Google account return and Cashfree webhook/return URLs pass on godfin.dev."],
             ["Signing", "No GitHub signing secrets are configured.", "Complete Apple and Windows signing enrollment.", "Notarized/signed installers verify."],
             ["R2 updates", "No release bucket or releases.godfin.dev.", "Create R2, DNS, and least-privilege secrets.", "Immutable assets and updater metadata resolve."],
@@ -654,22 +679,22 @@ def build_document() -> Document:
         "Enable Cashfree's available risk controls. Do not build hardware serial, persistent IP fingerprint, or payment-method fingerprint storage in GODFIN.",
     ):
         add_list_item(document, item, decimal_num)
-    document.add_heading("2.2 Verify all 11 Supabase migrations and recovery", level=2)
+    document.add_heading("2.2 Verify all 12 Supabase migrations and recovery", level=2)
     add_callout(
         document,
         "DO THIS BEFORE ENABLING CHECKOUT",
-        "All 11 migrations now align remotely and both clean CI and linked-project database suites pass 107 assertions. Keep CHECKOUT_ENABLED=false throughout this section. Backup/PITR, a restore drill, leaked-password protection, and provider sandbox evidence still block checkout.",
+        "All 12 migrations now align remotely and clean CI passes 146 assertions. Keep CHECKOUT_ENABLED=false throughout this section. Backup/PITR, a restore drill, leaked-password protection, and provider sandbox evidence still block checkout.",
         tone="warn",
     )
     for item in (
-        "Repository evidence already retained: GitHub Actions run 32827447450 applied all 11 migrations to a clean temporary database and passed all 107 pgTAP assertions on exact application candidate 5ee71fa. Do not replace this with source inspection.",
-        "Linked-project evidence already retained: all 11 local/remote migration versions align and all five live pgTAP files passed 107 assertions. See docs/production-remediation/SUPABASE_REMOTE_EVIDENCE_2026-08-25.md.",
+        "Repository evidence already retained: GitHub Actions run 33345967709 applied all 12 migrations to a clean temporary database and passed all 146 pgTAP assertions on exact beta website candidate 493d20a. Do not replace this with source inspection.",
+        "Linked-project evidence: all 12 local/remote migration versions align through 20260830044445_beta_waitlist_access_entitlements_feedback.sql. The previous 11-migration evidence remains under docs/production-remediation; retain the new CLI alignment output with the beta tranche evidence.",
         "In Supabase Dashboard, open GODFIN → Database → Backups. Current evidence shows no managed backup history and PITR disabled. Upgrade the plan or create an approved encrypted export before checkout, then perform and document a restore drill.",
         "In Supabase Dashboard, open Authentication → Settings or Security and enable leaked-password protection if the current plan offers it. The Auth advisor currently reports it disabled. Do not mark this complete until the advisor is clean.",
         "Use a second Google test account to sign in to godfin.dev. Confirm each account sees only its own licenses, purchases, and activations. Database-level two-user isolation already passes; this step validates the browser/provider path.",
         "Back in Terminal, run: supabase login. Complete the one-time browser authorization if asked; never paste the access token into this document or chat.",
         "Run: supabase link --project-ref omrtkfwjauyakhvynutk. Confirm the displayed project is GODFIN in ap-south-1.",
-        "Run: supabase migration list --linked. Confirm all 11 names appear in both local and remote columns, ending with 20260825021500_grant_authenticated_rls_reads.sql.",
+        "Run: supabase migration list --linked. Confirm all 12 names appear in both local and remote columns, ending with 20260830044445_beta_waitlist_access_entitlements_feedback.sql.",
         "For any future pending migration, run supabase db push --linked --dry-run first and confirm the exact proposed files. Take the approved backup/export before the real push.",
         "After any future migration, rerun the isolated CI database job and all five linked-project pgTAP files. A source parse is not a database pass.",
         "Leave CHECKOUT_ENABLED=false until backup/restore, Auth, second-account, Cashfree sandbox, and qualified tax/refund gates all pass.",
@@ -696,7 +721,7 @@ def build_document() -> Document:
         "Add sandbox credentials to Vercel Preview first. Keep production credentials in a separate environment and business vault.",
         "Leave PPP_CHECKOUT_ENABLED=false. India remains the only enabled checkout region until Cashfree international-payment approval, billing-country evidence, and qualified legal/tax review are complete.",
         "Do not pass amount, currency, country, user ID, or entitlement from browser code. GODFIN selects and revalidates them server-side.",
-        "All 11 ordered Supabase migrations are applied. Keep CHECKOUT_ENABLED=false until recovery/Auth and the complete Cashfree sandbox matrix below pass.",
+        "All 12 ordered Supabase migrations are applied. Keep CHECKOUT_ENABLED=false until recovery/Auth and the complete Cashfree sandbox matrix below pass.",
     ):
         add_list_item(document, item, decimal_num)
     document.add_heading("2.4 Configure the webhook", level=2)
@@ -751,7 +776,7 @@ def build_document() -> Document:
     add_callout(
         document,
         "CURRENT DOMAIN CHECK",
-        "On 24 August 2026, older source commit 3a44f00 was deployed to Vercel production as deployment dpl_HjwgU9aBfaBvdcFH8aiR981mgVDY. https://godfin.dev and https://godfin.vercel.app return HTTP 200; https://www.godfin.dev permanently redirects to the apex; HSTS and the Cashfree-only CSP are present; hello@godfin.dev is the only public contact; and checkout fails closed with HTTP 503. This verifies the domain and safe-disable posture only—not candidate 5ee71fa, Cashfree credentials, recovery readiness, or payment acceptance.",
+        "On 31 August 2026, tested preview dpl_H5Zxbiw6ar7naiioG6HfCtrUDQ6p was promoted as production deployment dpl_4oXjaiVBh3k9q9cBff2WY9gCRzyA. https://godfin.dev and https://godfin.vercel.app return HTTP 200; https://www.godfin.dev uses the production alias; HSTS and the Cashfree-only CSP are present; all seven public Chromium acceptance tests pass; media byte ranges return 206; and no runtime errors were reported. Public checkout is closed and the waitlist is disabled until Resend is configured.",
         tone="good",
     )
     for item in (
@@ -761,9 +786,9 @@ def build_document() -> Document:
         "NEXT_PUBLIC_SITE_URL=https://godfin.dev is already set for Production, Preview, and Development. Keep Google/Supabase redirect allow-lists and the Cashfree webhook/return URLs synchronized with the final domain.",
         "Open Terminal and run: cd /Users/oculus/Projects/GODFIN/GODFIN_PRODUCTION/website. Then run: vercel whoami. If it asks you to sign in, run vercel login, complete the browser approval yourself, and return to Terminal.",
         "Run: vercel link. Select the existing GODFIN team/account and the existing godfin project. Do not create a second Vercel project.",
-        "Run: vercel env ls. The public domain/email variables, Supabase variables, LICENSE_SIGNING_SECRET, CASHFREE_ENVIRONMENT=sandbox, CHECKOUT_ENABLED=false, PPP_CHECKOUT_ENABLED=false, and CASHFREE_GLOBAL_PAYMENTS_APPROVED=false are already present. Add the still-missing ABUSE_HASH_SECRET, CASHFREE_CLIENT_ID, CASHFREE_CLIENT_SECRET, LICENSE_ENTITLEMENT_ACTIVE_KEY_VERSION, LICENSE_ENTITLEMENT_PRIVATE_KEYS_JSON, RESEND_API_KEY, and RESEND_FROM_EMAIL only through Vercel's encrypted environment UI or prompt; never print or commit their values.",
-        "The 3a44f00 production deployment is intentionally fail-closed and predates candidate 5ee71fa. After any provider-variable change, keep CHECKOUT_ENABLED=false, deploy a preview from the exact candidate, and test account sign-in, pricing, disabled checkout behavior, waitlist, privacy, terms, and license verification.",
-        "All 11 Supabase migrations are applied and database-tested. After recovery/Auth and the Cashfree sandbox matrix pass, run the repository website checks again and deploy the exact tested SHA to production. A production deployment does not authorize public marketing or customer checkout.",
+        "Run: vercel env ls. The public domain/email variables, Supabase variables, abuse secret, license-signing and entitlement keys, CASHFREE_ENVIRONMENT=sandbox, CHECKOUT_ENABLED=false, PPP_CHECKOUT_ENABLED=false, and CASHFREE_GLOBAL_PAYMENTS_APPROVED=false are already present. Add the still-missing CASHFREE_CLIENT_ID, CASHFREE_CLIENT_SECRET, RESEND_API_KEY, and RESEND_FROM_EMAIL only through Vercel's encrypted environment UI or prompt; never print or commit their values. Add beta download URLs only after signed installers exist.",
+        "Production deployment dpl_4oXjaiVBh3k9q9cBff2WY9gCRzyA is intentionally fail-closed for public checkout and unconfirmed email collection. After any provider-variable change, keep CHECKOUT_ENABLED=false, deploy a preview from the exact candidate, and retest account sign-in, pricing, disabled checkout behavior, waitlist confirmation, privacy, terms, and license verification.",
+        "All 12 Supabase migrations are applied and database-tested. After recovery/Auth and the Cashfree sandbox matrix pass, run the repository website checks again and deploy the exact tested SHA to production. A production deployment does not authorize customer checkout or the public desktop launch.",
         "Verify HTTPS, HSTS, CSP, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy, sitemap.xml, robots.txt, and a deliberate 404.",
         "Set immutable signed download URLs only after Section 12 clean-system validation. Do not point download buttons at unsigned local builds.",
     ):
@@ -970,11 +995,11 @@ def build_document() -> Document:
     document.add_page_break()
     document.add_heading("13. Security, privacy, payment, and recovery evidence", level=1)
     for item in (
-        "Backend: all 1,011 tests passed in GitHub Actions run 32827447450 under clean Python 3.12 on exact application candidate 5ee71fa, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, local trust, Gmail coverage/restart handling, startup dependency boundaries, exact response contracts for all 182 API operations, certified statement parsers, hostile-file preflight, goal/simulation/recurring behavior, CA tax pack, classification memory, performance, net worth, behavior insights, reward-pilot redaction, and UTC finance-fetch regressions.",
+        "Backend: all 1,011 tests passed in GitHub Actions run 33345967709 under clean Python 3.12 on exact beta website candidate 493d20a, including auth/PIN, encryption, migrations, backups, merchant upsert, licenses, local trust, Gmail coverage/restart handling, startup dependency boundaries, exact response contracts for all 182 API operations, certified statement parsers, hostile-file preflight, goal/simulation/recurring behavior, CA tax pack, classification memory, performance, net worth, behavior insights, reward-pilot redaction, and UTC finance-fetch regressions.",
         "Independent finance oracle: golden_ledger_v1.json is evaluated by a standard-library-only oracle that imports no application calculation code. Dashboard, transactions, cash flow, FY reports, encrypted CA pack, income, profile, subscriptions, goals, net worth, audit aggregates, and AI non-authority agree with the independently expected values.",
         "Private parser fixtures: owner-supplied SBI, HDFC, and Kotak PDFs are recognized as sbi_savings, hdfc_savings, and kotak_savings and reconcile exactly to 29, 306, and 497 rows. Only hashes and aggregate evidence are retained; the PDFs are not copied into the repository.",
-        "Frontend: lint, static accessibility/contrast, memory-only authentication, build-identity, secure-password, tier-navigation, and production-build gates pass. The deterministic inventory records 422 controls across 19 route scopes. GitHub Actions run 32827447450 also passed the production smoke and accessibility suites in Chromium, Firefox, and WebKit; native screen-reader and signed-package interaction remain separate gates.",
-        "Website: entitlement/payment contract verification, five Cashfree tests, three strict webhook-body tests, three lifetime-upgrade tests, 11 ordered migration hashes, production build, real-app product chapters, reduced-motion fallbacks, lifetime/no-bundled-credit pricing, security headers, checkout safe-disable behavior, and dependency audit pass. A clean Supabase stack and the linked project each pass all 107 pgTAP assertions. The previously measured production URL scored Lighthouse performance 99, accessibility 100, and SEO 100, with LCP 1.73 seconds and CLS 0; repeat this measurement after deploying the exact final SHA.",
+        "Frontend: lint, static accessibility/contrast, memory-only authentication, build-identity, secure-password, tier-navigation, and production-build gates pass. The deterministic inventory records 422 controls across 19 route scopes. GitHub Actions run 33345967709 also passed the production smoke and accessibility suites in Chromium, Firefox, and WebKit, including focus restoration during idle upload progress ticks; native screen-reader and signed-package interaction remain separate gates.",
+        "Website: beta access, invitation identity binding, private INR 1 allowlisting, entitlement/payment contracts, Cashfree signature/idempotency, 12 ordered migration hashes, deterministic Remotion rendering and media verification, production build, auth-free static demo, reduced-motion fallbacks, planned lifetime/no-bundled-credit pricing, security headers, no public checkout, and dependency audit pass. A clean Supabase stack passes all 146 pgTAP assertions. CI website acceptance passed 21/21 across Chromium, Firefox, and WebKit; production Chromium passed 7/7 on godfin.dev. Repeat Lighthouse after Resend configuration without weakening the fail-closed waitlist.",
         "Dependencies: runtime, test, and build Python locks are separated and hash-locked; frontend, website, desktop, and Playwright workspaces use npm ci. Audits report zero unaccepted known vulnerabilities. The Gmail API client is explicit in runtime requirements.",
         "Supply chain: deterministic CycloneDX 1.6 SBOM and third-party notices cover 1,035 unique components with zero unresolved license identifiers. Human review of conditional licenses remains a required fail-closed release gate.",
         "Release engineering: 12/12 desktop update/release workflow tests and 11/11 package privacy checks pass. All GitHub Actions are pinned to verified 40-character commit SHAs, checksum-pinned Gitleaks is installed in CI, and release provenance binds the exact commit, tag, package version, SBOM, notices, and checksums.",
@@ -988,19 +1013,19 @@ def build_document() -> Document:
     add_callout(
         document,
         "CI RELEASE GATE",
-        "Application candidate 5ee71fa passed all seven jobs in GitHub Actions run 32827447450, including the full backend suite, supply-chain and secret checks, desktop audits, website/browser matrices, Chromium/Firefox/WebKit app accessibility, and the clean Supabase database matrix. The repository API then confirmed PRIVATE. Any later application, workflow, lockfile, generated-asset, or verification-contract change requires a new exact-SHA green run before tagging; source CI does not replace signed-package, provider, legal, or launch authorization gates.",
+        "Beta website candidate 493d20a passed all seven jobs in GitHub Actions run 33345967709, including the full backend suite, supply-chain and full-history secret checks, desktop audits, deterministic media checks, website/browser matrices, Chromium/Firefox/WebKit app accessibility, and the clean 12-migration Supabase database matrix. Return the repository to PRIVATE after the final documentation-only CI run. Any later application, workflow, lockfile, generated-asset, or verification-contract change requires a new exact-SHA green run before tagging; source CI does not replace signed-package, provider, legal, or launch authorization gates.",
         tone="good",
     )
     document.add_heading("13.1 Preserve the verified private CI gate", level=2)
     for item in (
-        "Retain https://github.com/oculusrex14/GODFIN/actions/runs/32827447450 as exact-source evidence for commit 5ee71fabfe8c7f28726bf625b75801cb254b23a1. All seven jobs completed successfully on 25 August 2026.",
+        "Retain https://github.com/oculusrex14/GODFIN/actions/runs/33345967709 as exact-source evidence for commit 493d20a8b0f75602dd7891578494b7e5cfc98760. All seven jobs completed successfully on 31 August 2026.",
         "Keep oculusrex14/GODFIN PRIVATE. Confirm visibility before every tag or draft-release operation; do not paste repository credentials or billing information into evidence.",
         "If any application code, workflow, dependency lock, generated asset, or verification contract changes, push the cohesive change and wait for a new all-green run on that exact SHA.",
         "Check that backend, frontend, website, website-browser-matrix, desktop-audit, e2e, and supabase-db all execute real steps. A skipped or cancelled required job is not a pass.",
         "Keep checkout, deployment promotion, release publishing, and update-feed promotion disabled until their separate provider, signed-package, legal, and owner gates are complete.",
     ):
         add_list_item(document, item, decimal_num)
-    add_source(document, "Exact candidate CI run", "https://github.com/oculusrex14/GODFIN/actions/runs/32827447450")
+    add_source(document, "Exact beta website CI run", "https://github.com/oculusrex14/GODFIN/actions/runs/33345967709")
     add_source(document, "GitHub repository visibility", "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/setting-repository-visibility")
     add_owner_fields(document, ["Release commit", "CI run URL", "Security scan evidence", "Completed by / date"])
 
@@ -1072,14 +1097,14 @@ def build_document() -> Document:
             ["Dependency license clearance", "", "☐", "Human approval of conditional licenses with unchanged SBOM/notices hashes."],
             ["Cashfree + webhook + refund/tax", "", "☐", ""],
             ["Resend + DNS + support inboxes", "", "☐", ""],
-            ["Canonical domain + security headers", "Codex", "☒", "Production deployment dpl_HjwgU9aBfaBvdcFH8aiR981mgVDY serves godfin.dev; www redirects to apex; HSTS and Cashfree-only CSP verified; checkout remains disabled."],
+            ["Canonical domain + security headers", "Codex", "☒", "Production deployment dpl_4oXjaiVBh3k9q9cBff2WY9gCRzyA serves godfin.dev; HSTS/CSP and media ranges verified; production Chromium passed 7/7; public checkout remains disabled."],
             ["License custody + three devices", "", "☐", ""],
             ["macOS/Windows signing", "", "☐", ""],
             ["R2 updates + rollback", "", "☐", ""],
             ["Exact-candidate required-platform smoke", "Codex", "☒", "Run 32823401864 passed on macOS arm64, Windows x64, and Linux x64 with retained exact-SHA evidence. Packages are unsigned/unpublished smoke artifacts."],
             ["Signed clean-system lifecycle matrix", "", "☐", "Apple Silicon, Windows 10/11 x64, and Ubuntu 22.04+ remain external signed-installer gates. macOS x64/Intel is owner-deferred."],
             ["Browser-family matrix", "", "☐", "Chrome, Safari, Firefox, and Edge acceptance evidence remains deferred."],
-            ["GitHub Actions + repository privacy", "Codex", "☒", "Run 32827447450 passed on exact SHA 5ee71fa; GitHub API verified oculusrex14/GODFIN is PRIVATE on 25 Aug 2026."],
+            ["GitHub Actions + repository privacy", "Codex", "☒", "Run 33345967709 passed on exact SHA 493d20a; final documentation CI must pass before the GitHub API is used to return oculusrex14/GODFIN to PRIVATE."],
             ["Security/privacy/recovery matrix", "", "☐", ""],
             ["Legal/tax/privacy review", "", "☐", ""],
             ["Private draft + screenshots + demo", "", "☐", ""],
