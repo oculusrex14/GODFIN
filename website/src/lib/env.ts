@@ -84,6 +84,25 @@ export function waitlistConfigured(): boolean {
   );
 }
 
+export function betaCheckoutConfigured(): boolean {
+  const productionAllowed =
+    process.env.CASHFREE_ENVIRONMENT?.trim().toLowerCase() !== "production" ||
+    process.env.BETA_CHECKOUT_LIVE_ENABLED === "true";
+  return Boolean(
+    process.env.BETA_CHECKOUT_ENABLED === "true" &&
+      productionAllowed &&
+      publicContactConfig().commerceReady &&
+      [
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "ABUSE_HASH_SECRET",
+        "CASHFREE_CLIENT_ID",
+        "CASHFREE_CLIENT_SECRET",
+      ].every(present),
+  );
+}
+
 export const serverEnv = {
   required,
   supabaseServiceRoleKey: () => required("SUPABASE_SERVICE_ROLE_KEY"),

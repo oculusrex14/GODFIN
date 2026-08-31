@@ -15,21 +15,21 @@ function detectedOs(): string {
 }
 
 function detectedCountry(): string {
-  if (typeof navigator === "undefined") return "IN";
+  if (typeof navigator === "undefined") return "";
   const locale = Intl.DateTimeFormat().resolvedOptions().locale;
   const country = locale.split("-")[1]?.toUpperCase();
-  return country && /^[A-Z]{2}$/.test(country) ? country : "IN";
+  return country && /^[A-Z]{2}$/.test(country) ? country : "";
 }
 
 export function WaitlistForm({ enabled = true }: { enabled?: boolean }) {
   const searchParams = useSearchParams();
   const [state, setState] = useState<State>("idle");
   const [message, setMessage] = useState("");
-  const [country, setCountry] = useState("IN");
+  const [localeCountry, setLocaleCountry] = useState("");
   const [os, setOs] = useState("other");
 
   useEffect(() => {
-    setCountry(detectedCountry());
+    setLocaleCountry(detectedCountry());
     setOs(detectedOs());
     const result = searchParams.get("waitlist");
     if (result === "confirmed") {
@@ -46,9 +46,10 @@ export function WaitlistForm({ enabled = true }: { enabled?: boolean }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setState("sending");
     setMessage("");
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     const params = new URLSearchParams(window.location.search);
     try {
       const response = await fetch("/api/waitlist", {
@@ -56,7 +57,7 @@ export function WaitlistForm({ enabled = true }: { enabled?: boolean }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: form.get("email"),
-          country,
+          locale_country: localeCountry,
           os,
           intended_use: form.get("intended_use"),
           consent: form.get("consent") === "on",
@@ -78,7 +79,7 @@ export function WaitlistForm({ enabled = true }: { enabled?: boolean }) {
           ? "You’re already confirmed."
           : "Check your inbox and confirm your place. The link expires in 24 hours.",
       );
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (error) {
       setState("error");
       setMessage(error instanceof Error ? error.message : "Could not join the waitlist.");
@@ -99,33 +100,21 @@ export function WaitlistForm({ enabled = true }: { enabled?: boolean }) {
           <input name="email" type="email" autoComplete="email" required disabled={!enabled} />
         </label>
         <label>
-          Country
-          <input
-            aria-label="Country code"
-            maxLength={2}
-            pattern="[A-Za-z]{2}"
-            required
-            disabled={!enabled}
-            value={country}
-            onChange={(event) => setCountry(event.target.value.toUpperCase())}
-          />
-        </label>
-        <label>
           Computer
           <select disabled={!enabled} value={os} onChange={(event) => setOs(event.target.value)}>
-            <option value="macos">macOS</option>
-            <option value="windows">Windows</option>
-            <option value="linux">Linux</option>
-            <option value="other">Other</option>
+            <option value="macos">Apple Silicon Mac</option>
+            <option value="windows">Windows x64</option>
+            <option value="linux">Linux / Other</option>
+            <option value="other">Another computer</option>
           </select>
         </label>
       </div>
       <label>
-        What would you use GODFIN for?
+        What do you want to understand?
         <textarea
           name="intended_use"
           maxLength={500}
-          placeholder="For example: understand family spending without uploading statements to a cloud service."
+          placeholder="For example: where my money went each month, or which bills keep repeating."
           required
           disabled={!enabled}
           rows={3}

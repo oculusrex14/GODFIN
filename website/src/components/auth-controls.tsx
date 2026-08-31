@@ -20,7 +20,7 @@ export function SignInButton({ next = "/account" }: { next?: string }) {
     const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
     const { error: authError } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo },
+      options: { redirectTo, scopes: "openid email profile" },
     });
     if (authError) {
       setError(authError.message);

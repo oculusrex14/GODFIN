@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 
 import { SignInButton, SignOutButton } from "@/components/auth-controls";
+import { BetaLicenseKey } from "@/components/beta-license-key";
 import { CopyLicenseKey } from "@/components/copy-license-key";
 import { CheckoutAnalytics } from "@/components/privacy-analytics";
 import { DeviceActivations } from "@/components/device-activations";
 import { PurchaseButton } from "@/components/purchase-button";
 import { ResendLicenseButton } from "@/components/resend-license-button";
 import { commerceConfigured, serverEnv, supabasePublicConfig } from "@/lib/env";
+import { betaLicenseKeyForTester } from "@/lib/beta";
 import { licenseKeyForSession, type LicenseTier } from "@/lib/license";
 import { isProductCode, PRODUCTS } from "@/lib/products";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -41,9 +43,11 @@ export default async function AccountPage({
     id: string;
     tier: string;
     key_last4: string;
-    kind: "purchase" | "owner_test";
+    kind: "purchase" | "owner_test" | "beta_test";
     status: string;
     issued_at: string;
+    beta_tester_id: string | null;
+    expires_at: string | null;
   }> = [];
   let purchases: Array<{
     id: string;
@@ -73,7 +77,7 @@ export default async function AccountPage({
     const [licenseResult, purchaseResult, activationResult] = await Promise.all([
       supabase
         .from("licenses")
-        .select("id,tier,key_last4,kind,status,issued_at")
+        .select("id,tier,key_last4,kind,status,issued_at,beta_tester_id,expires_at")
         .order("issued_at", { ascending: false }),
       supabase
         .from("purchases")
@@ -207,6 +211,11 @@ export default async function AccountPage({
                             Owner test · no purchase
                           </span>
                         ) : null}
+                        {license.kind === "beta_test" ? (
+                          <span className="status-pill status-pill-offset">
+                            Selected beta · no purchase
+                          </span>
+                        ) : null}
                         <h3 className="text-capitalize">
                           GODFIN {license.tier}
                         </h3>
@@ -214,7 +223,15 @@ export default async function AccountPage({
                           GODFIN-{license.tier.toUpperCase()}-••••-••••-
                           {license.key_last4}
                         </p>
-                        {license.kind === "purchase" ? (
+                        {license.kind === "beta_test" && license.beta_tester_id ? (
+                          <BetaLicenseKey
+                            licenseKey={betaLicenseKeyForTester(
+                              license.beta_tester_id,
+                              serverEnv.licenseSigningSecret(),
+                            )}
+                            expiresAt={license.expires_at}
+                          />
+                        ) : license.kind === "purchase" ? (
                           <>
                             <ResendLicenseButton licenseId={license.id} />
                             {license.status === "active" && license.tier === "pro" ? (

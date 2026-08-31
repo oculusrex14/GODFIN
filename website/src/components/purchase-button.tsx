@@ -16,7 +16,7 @@ declare global {
   }
 }
 
-async function waitForCashfree(): Promise<NonNullable<Window["Cashfree"]>> {
+export async function waitForCashfree(): Promise<NonNullable<Window["Cashfree"]>> {
   if (window.Cashfree) return window.Cashfree;
   await new Promise<void>((resolve, reject) => {
     const existing = document.getElementById("cashfree-checkout-sdk") as

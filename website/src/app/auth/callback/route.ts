@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { checkRateLimit } from "@/lib/abuse-control";
+import { safeAuthNext } from "@/lib/beta";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function GET(request: Request) {
   const { origin, searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const requestedNext = searchParams.get("next") || "/account";
-  const next = requestedNext.startsWith("/") ? requestedNext : "/account";
+  const next = safeAuthNext(searchParams.get("next"), "/account");
 
   try {
     const addressLimit = await checkRateLimit(request, {

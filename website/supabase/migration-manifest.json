@@ -11,6 +11,7 @@
     "20260824032944_fix_public_rate_limit_bigint.sql": "acc3bc38a4a6695b0018b2c1e7ec032ce4b39bd615122bd9df8137b7e8953e5a",
     "20260824033128_fix_public_rate_limit_greatest_expression.sql": "5c56b1bb7c55087007d4f7edc2efc55f33992568bd5d25800ce76f97e6c993b6",
     "20260824211115_cashfree_email_delivery_claim.sql": "c26ac03af33c8cdf31e8733dad8c652decac0e26362b9dec8e1969168b1dc802",
-    "20260825021500_grant_authenticated_rls_reads.sql": "e0c088c494bc08270aedbd5b5904e200cc321ddcb9e4c13cb534bbf180ace0a7"
+    "20260825021500_grant_authenticated_rls_reads.sql": "e0c088c494bc08270aedbd5b5904e200cc321ddcb9e4c13cb534bbf180ace0a7",
+    "20260830044445_beta_waitlist_access_entitlements_feedback.sql": "8b8ac0688a86d03167748c2344dc366c2c98a31ae0db0fa872105b5dd586883b"
   }
 }

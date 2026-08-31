@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
+import { sendWaitlistConfirmedEmail } from "@/lib/email";
 import { siteUrl } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -27,36 +28,53 @@ export async function GET(request: Request) {
 
   try {
     const tokenHash = createHash("sha256").update(token).digest("hex");
+    const profileToken = randomBytes(32).toString("base64url");
+    const profileTokenHash = createHash("sha256")
+      .update(profileToken)
+      .digest("hex");
     const admin = createAdminClient();
     const { data: entry, error } = await admin
-      .from("waitlist_entries")
-      .select("id,confirmed_at,confirmation_expires_at")
-      .eq("confirmation_token_hash", tokenHash)
-      .maybeSingle();
-    if (error) throw error;
-    if (!entry) {
-      return NextResponse.redirect(`${siteUrl()}/?waitlist=invalid#waitlist`);
-    }
-    if (entry.confirmed_at) {
-      return NextResponse.redirect(`${siteUrl()}/?waitlist=confirmed#waitlist`);
-    }
-    if (new Date(entry.confirmation_expires_at).getTime() < Date.now()) {
-      return NextResponse.redirect(`${siteUrl()}/?waitlist=expired#waitlist`);
-    }
-
-    const { error: updateError } = await admin
       .from("waitlist_entries")
       .update({
         confirmed_at: new Date().toISOString(),
         confirmation_token_hash: createHash("sha256")
           .update(`used:${tokenHash}`)
           .digest("hex"),
+        profile_token_hash: profileTokenHash,
+        profile_token_expires_at: new Date(
+          Date.now() + 7 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", entry.id);
-    if (updateError) throw updateError;
+      .eq("confirmation_token_hash", tokenHash)
+      .is("confirmed_at", null)
+      .gt("confirmation_expires_at", new Date().toISOString())
+      .select("id,email")
+      .maybeSingle();
+    if (error) throw error;
+    if (!entry) {
+      return NextResponse.redirect(`${siteUrl()}/?waitlist=invalid#waitlist`);
+    }
+    try {
+      await sendWaitlistConfirmedEmail({
+        to: entry.email,
+        idempotencyKey: `waitlist-confirmed:${entry.id}`,
+      });
+    } catch (emailError) {
+      console.error("Waitlist confirmation receipt could not be sent", {
+        errorType: emailError instanceof Error ? emailError.name : "UnknownError",
+      });
+    }
 
-    return NextResponse.redirect(`${siteUrl()}/?waitlist=confirmed#waitlist`);
+    const response = NextResponse.redirect(`${siteUrl()}/waitlist/confirmed`);
+    response.cookies.set("godfin_waitlist_profile", profileToken, {
+      httpOnly: true,
+      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+      path: "/api/waitlist/profile",
+      maxAge: 7 * 24 * 60 * 60,
+    });
+    return response;
   } catch (error) {
     console.error("Waitlist confirmation failed", error);
     return NextResponse.redirect(`${siteUrl()}/?waitlist=error#waitlist`);

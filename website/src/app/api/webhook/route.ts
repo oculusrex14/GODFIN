@@ -10,6 +10,12 @@ import {
   type CashfreeOrder,
   type CashfreePayment,
 } from "@/lib/cashfree";
+import {
+  betaOrderIdFromWebhook,
+  betaPaymentIdFromWebhook,
+  betaStatusFromWebhook,
+  reviewBetaCheckout,
+} from "@/lib/beta-checkout";
 import { sendLicenseEmail, sendPlanUpgradeEmail } from "@/lib/email";
 import { serverEnv } from "@/lib/env";
 import {
@@ -401,6 +407,104 @@ async function recordCashfreeEvent({
   if (error) throw error;
 }
 
+async function processBetaCashfreeEvent({
+  event,
+  providerEventId,
+  payloadSha256,
+  orderId,
+}: {
+  event: JsonRecord;
+  providerEventId: string;
+  payloadSha256: string;
+  orderId: string;
+}) {
+  const eventType = text(event.type) || "";
+  const admin = createAdminClient();
+  const { data: attempt, error: attemptError } = await admin
+    .from("beta_checkout_attempts")
+    .select("id,beta_tester_id,user_id,status")
+    .eq("provider_order_id", orderId)
+    .maybeSingle();
+  if (attemptError) throw attemptError;
+  if (!attempt) throw new Error("Private beta checkout attempt was not found.");
+
+  let status: ReturnType<typeof betaStatusFromWebhook> | "paid" | "review" =
+    betaStatusFromWebhook(event);
+  const providerPaymentId = betaPaymentIdFromWebhook(event);
+  let completedAt: string | null = null;
+  let reviewReason: string | null = null;
+
+  if (eventType === "PAYMENT_SUCCESS_WEBHOOK") {
+    if (!providerPaymentId) {
+      throw new Error("Private beta payment webhook is missing a payment identifier.");
+    }
+    const [order, payments, accountResult] = await Promise.all([
+      getCashfreeOrder(orderId),
+      getCashfreePayments(orderId),
+      admin.auth.admin.getUserById(attempt.user_id),
+    ]);
+    const payment = payments.find(
+      (candidate) => String(candidate.cf_payment_id) === providerPaymentId,
+    );
+    if (!payment || accountResult.error || !accountResult.data.user?.email) {
+      throw accountResult.error || new Error("Private beta payment could not be revalidated.");
+    }
+    const review = reviewBetaCheckout({
+      order,
+      payment,
+      orderId,
+      testerId: attempt.beta_tester_id,
+      userId: attempt.user_id,
+      accountEmail: accountResult.data.user.email,
+    });
+    status = review.verified ? "paid" : "review";
+    reviewReason = review.reason;
+    completedAt = review.verified ? new Date().toISOString() : null;
+  }
+
+  if (!status) return;
+  const { error: updateError } = await admin
+    .from("beta_checkout_attempts")
+    .update({
+      status,
+      provider_payment_id: providerPaymentId,
+      event_payload_sha256: payloadSha256,
+      completed_at: completedAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", attempt.id);
+  if (updateError) throw updateError;
+
+  if (status === "paid") {
+    const { error: testerError } = await admin
+      .from("beta_testers")
+      .update({
+        checkout_test_completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq("id", attempt.beta_tester_id)
+      .eq("user_id", attempt.user_id);
+    if (testerError) throw testerError;
+  }
+
+  const { error: eventError } = await admin.from("beta_events").upsert(
+    {
+      beta_tester_id: attempt.beta_tester_id,
+      event_type: `checkout:${status}`,
+      actor: "cashfree:webhook",
+      reason: reviewReason,
+      metadata: {
+        amount_minor: 100,
+        currency: "inr",
+        creates_purchase: false,
+      },
+      event_key: providerEventId,
+    },
+    { onConflict: "event_key", ignoreDuplicates: true },
+  );
+  if (eventError) throw eventError;
+}
+
 export async function POST(request: Request) {
   const requestId = randomUUID();
   let rawBody: string;
@@ -474,13 +578,24 @@ export async function POST(request: Request) {
   }
 
   try {
-    await recordCashfreeEvent({
-      event,
-      providerEventId,
-      payloadSha256: createHash("sha256").update(rawBody).digest("hex"),
-    });
-    if (eventType === "PAYMENT_SUCCESS_WEBHOOK") {
-      await provisionCashfreePurchase(event);
+    const payloadSha256 = createHash("sha256").update(rawBody).digest("hex");
+    const betaOrderId = betaOrderIdFromWebhook(event);
+    if (betaOrderId) {
+      await processBetaCashfreeEvent({
+        event,
+        providerEventId,
+        payloadSha256,
+        orderId: betaOrderId,
+      });
+    } else {
+      await recordCashfreeEvent({
+        event,
+        providerEventId,
+        payloadSha256,
+      });
+      if (eventType === "PAYMENT_SUCCESS_WEBHOOK") {
+        await provisionCashfreePurchase(event);
+      }
     }
     return NextResponse.json({ received: true });
   } catch (error) {

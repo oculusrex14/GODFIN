@@ -1,0 +1,2 @@
+-- Intentionally empty. Production-like records are created only inside pgTAP
+-- transactions; local resets must never seed users, licenses, or beta access.

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
+import { cleanText, inferredCountry, normalizeEmail } from "@/lib/beta";
 import { sendWaitlistConfirmationEmail } from "@/lib/email";
 import { siteUrl, waitlistConfigured } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -9,7 +10,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 
 const CONSENT_VERSION = "waitlist-2026-07-29-v1";
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ALLOWED_OS = new Set(["macos", "windows", "linux", "other"]);
 
 function safeAttribution(value: unknown): Record<string, string> {
@@ -46,21 +46,18 @@ export async function POST(request: Request) {
     });
     if (!addressLimit.allowed) return rateLimitResponse(addressLimit);
 
-    const email =
-      typeof body.email === "string" ? body.email.trim().slice(0, 254) : "";
-    const emailNormalized = email.toLowerCase();
-    const country =
-      typeof body.country === "string" ? body.country.trim().toUpperCase() : "";
+    const email = typeof body.email === "string" ? body.email.trim().slice(0, 254) : "";
+    const emailNormalized = normalizeEmail(email);
+    const { country, source: countrySource } = inferredCountry(
+      request,
+      body.locale_country,
+    );
     const os = typeof body.os === "string" ? body.os.trim().toLowerCase() : "";
-    const intendedUse =
-      typeof body.intended_use === "string"
-        ? body.intended_use.trim().slice(0, 500)
-        : "";
+    const intendedUse = cleanText(body.intended_use, 500);
     const consented = body.consent === true;
 
     if (
-      !EMAIL_PATTERN.test(email) ||
-      !/^[A-Z]{2}$/.test(country) ||
+      !emailNormalized ||
       !ALLOWED_OS.has(os) ||
       intendedUse.length < 2 ||
       !consented
@@ -87,7 +84,11 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (lookupError) throw lookupError;
     if (existing?.confirmed_at) {
-      return NextResponse.json({ accepted: true, confirmation_required: true });
+      return NextResponse.json({
+        accepted: true,
+        confirmation_required: true,
+        already_confirmed: true,
+      });
     }
 
     const token = randomBytes(32).toString("base64url");
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
       email,
       email_normalized: emailNormalized,
       country,
+      country_source: countrySource,
       os,
       intended_use: intendedUse,
       consent_version: CONSENT_VERSION,

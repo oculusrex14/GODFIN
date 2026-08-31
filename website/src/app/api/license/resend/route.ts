@@ -47,11 +47,13 @@ export async function POST(request: Request) {
     if (!license) {
       return NextResponse.json({ message: "License not found." }, { status: 404 });
     }
-    if (license.kind === "owner_test") {
+    if (license.kind === "owner_test" || license.kind === "beta_test") {
       return NextResponse.json(
         {
           message:
-            "Owner-test licenses are installed directly and are not sent by email.",
+            license.kind === "beta_test"
+              ? "Beta keys are retrieved from the private beta portal or account."
+              : "Owner-test licenses are installed directly and are not sent by email.",
         },
         { status: 409 },
       );

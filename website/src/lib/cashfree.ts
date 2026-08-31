@@ -115,6 +115,7 @@ export async function createCashfreeOrder({
   customerEmail,
   productName,
   tags,
+  returnPath = "/account",
 }: {
   orderId: string;
   amountMinor: number;
@@ -123,6 +124,7 @@ export async function createCashfreeOrder({
   customerEmail: string;
   productName: string;
   tags: Record<string, string>;
+  returnPath?: "/account" | "/beta";
 }): Promise<CashfreeOrder> {
   return cashfreeRequest<CashfreeOrder>("/orders", {
     method: "POST",
@@ -142,7 +144,7 @@ export async function createCashfreeOrder({
         customer_phone: "9999999999",
       },
       order_meta: {
-        return_url: `${siteUrl()}/account?checkout=return&order_id=${encodeURIComponent(orderId)}`,
+        return_url: `${siteUrl()}${returnPath}?checkout=return&order_id=${encodeURIComponent(orderId)}`,
         notify_url: `${siteUrl()}/api/webhook`,
       },
       order_note: productName,
