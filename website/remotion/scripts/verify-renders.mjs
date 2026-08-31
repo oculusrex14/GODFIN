@@ -1,13 +1,12 @@
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const output = path.resolve(root, "../public/video");
-const qa = path.join(root, "qa");
-await mkdir(qa, { recursive: true });
 
 const expected = [
   { file: "godfin-beta-hero.mp4", width: 1920, height: 1080, duration: 24, codec: "h264" },
@@ -31,7 +30,7 @@ async function capture(command, args) {
   });
 }
 
-const report = { schema_version: 1, verified_at: new Date().toISOString(), files: [] };
+const report = { schema_version: 1, files: [] };
 for (const item of expected) {
   const source = path.join(output, item.file);
   const probe = JSON.parse((await capture("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", source])).toString("utf8"));
@@ -60,5 +59,13 @@ for (const base of ["godfin-beta-hero", "godfin-demo-walkthrough"]) {
   report.files.push({ file: `${base}.poster.webp`, bytes: poster.length, sha256: createHash("sha256").update(poster).digest("hex") });
 }
 
-await writeFile(path.join(output, "render-verification.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
-console.log(`Verified ${expected.length} silent media files and 2 WebP posters.`);
+const recorded = JSON.parse(
+  await readFile(path.join(output, "render-verification.json"), "utf8"),
+);
+assert.equal(recorded.schema_version, report.schema_version);
+assert.deepEqual(
+  recorded.files,
+  report.files,
+  "Committed media no longer matches its deterministic verification manifest.",
+);
+console.log(`Verified ${expected.length} silent media files and 2 WebP posters without modifying the manifest.`);
