@@ -21,6 +21,7 @@ import {
   updateReportSavingsTarget,
 } from '../api/client';
 import { websiteUrl } from '../config/website';
+import { Link } from '../router';
 import { StatCard } from '../components/StatCard';
 import { GlassButton } from '../components/GlassButton';
 import DialogSurface from '../components/DialogSurface';
@@ -384,9 +385,9 @@ export default function Reports() {
             <p className="mx-auto mt-1 max-w-xl text-ink-muted text-xs">
               GODFIN gives the AI a verified monthly summary. The AI adds explanations and suggestions; it never changes the totals.
             </p>
-            <a href="/settings" className="inline-flex mt-3 text-xs text-[#54E1D0]/80 hover:text-[#54E1D0]">
+            <Link to="/settings" className="inline-flex mt-3 text-xs text-[#54E1D0]/80 hover:text-[#54E1D0]">
               Open AI settings
-            </a>
+            </Link>
           </div>
         ) : insightsLoading || llmLoading ? (
           <div className="space-y-3">

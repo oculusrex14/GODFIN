@@ -1,37 +1,43 @@
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { bundle } from "@remotion/bundler";
-import { renderStill, selectComposition } from "@remotion/renderer";
-
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = await mkdtemp(path.join(os.tmpdir(), "godfin-remotion-smoke-"));
-const serveUrl = await bundle({
-  entryPoint: path.join(root, "src/index.ts"),
-  publicDir: path.join(root, "public"),
-});
+const cli = path.join(root, "node_modules", "@remotion", "cli", "remotion-cli.js");
 const samples = [
   { id: "GodfinBetaHero16x9", frame: 270, width: 480, height: 270 },
   { id: "GodfinDemoWalkthrough16x9", frame: 810, width: 480, height: 270 },
   { id: "GodfinBetaSocial9x16", frame: 270, width: 270, height: 480 },
 ];
 
+async function renderWithCli(sample, output) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      cli,
+      "still",
+      "src/index.ts",
+      sample.id,
+      output,
+      `--frame=${sample.frame}`,
+      "--scale=0.25",
+      "--overwrite",
+      "--log=warn",
+    ], { cwd: root, stdio: "inherit" });
+    child.on("error", reject);
+    child.on("exit", (code) => code === 0
+      ? resolve()
+      : reject(new Error(`Remotion CLI exited ${code} for ${sample.id}.`)));
+  });
+}
+
 try {
   for (const sample of samples) {
     const output = path.join(temporary, `${sample.id}.png`);
-    await renderStill({
-      composition: await selectComposition({ serveUrl, id: sample.id, inputProps: {} }),
-      serveUrl,
-      output,
-      frame: sample.frame,
-      imageFormat: "png",
-      scale: 0.25,
-      overwrite: true,
-      logLevel: "warn",
-    });
+    await renderWithCli(sample, output);
     const bytes = await readFile(output);
     if (
       bytes.length < 1024 ||

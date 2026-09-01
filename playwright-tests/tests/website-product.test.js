@@ -91,6 +91,24 @@ test('public demo uses the exact desktop interface and makes no finance-service 
   await page.getByRole('link', { name: 'Transactions', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Transactions', exact: true })).toBeVisible();
   await expect(page.getByRole('cell', { name: /^SYNTHETIC SALARY\(Salary\)$/ })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Reports', exact: true }).click();
+  await expect(page.getByText('July 2026', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('₹1,830', { exact: true }).first()).toBeVisible();
+
+  await page.getByRole('link', { name: 'Behavior Insights', exact: true }).click();
+  await expect(page.getByText('Months when income covered spending', { exact: true })).toBeVisible();
+  await expect(page.getByText('Not ready yet')).toHaveCount(0);
+  await page.getByLabel('Monthly spending limit').fill('13000');
+  await page.getByRole('button', { name: 'Save limit' }).click();
+  await expect(page.getByText(/public demo is read-only/i)).toBeVisible();
+
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: /AI Model Configuration/ }).click();
+  await expect(page.getByText('qwen3:4b', { exact: false }).first()).toBeVisible();
+  await page.getByRole('button', { name: /Accounts & Import Routing/ }).click();
+  await expect(page.getByText('HDFC · savings · ••••0000', { exact: true })).toBeVisible();
+
   await page.getByRole('link', { name: 'Upload', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Upload Statement', exact: true })).toBeVisible();
   expect(await page.locator('input[type="file"]').count()).toBeGreaterThan(0);

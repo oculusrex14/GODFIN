@@ -206,15 +206,31 @@ const demoMain = await text("src/demo-main.jsx", path.join(repoRoot, "frontend")
 assert.match(demoMain, /installDemoTransport\(\)/);
 assert.match(demoMain, /Synthetic desktop demo/);
 assert.match(demoMain, /no bank, Gmail, AI, or payment connection/);
+assert.match(demoMain, /2026-07-31T12:00:00\+05:30/);
+assert.match(demoMain, /window\.Date = DemoDate/);
 
 const demoTransport = await text("src/demo/transport.js", path.join(repoRoot, "frontend"));
 assert.match(demoTransport, /window\.fetch/);
 assert.match(demoTransport, /SYNTHETIC SALARY/);
 assert.doesNotMatch(demoTransport, /supabase|cashfree|accounts\.google/i);
+assert.match(demoTransport, /SYNTHETIC_DEMO_READ_ONLY/);
+assert.match(demoTransport, /recurring_total:\s*1830/);
+assert.match(demoTransport, /amount_inr:\s*830/);
+assert.match(demoTransport, /profile:\s*'hdfc_savings'/);
+assert.match(demoTransport, /provider:\s*'ollama_local'/);
+assert.match(demoTransport, /label:\s*'Months when income covered spending'/);
+assert.match(demoTransport, /last_run:\s*'2026-07-31T09:00:00Z'/);
+assert.match(demoTransport, /valued_at:\s*'2026-07-31'/);
+assert.doesNotMatch(demoTransport, /last_run:\s*'2026-08|valued_at:\s*'2026-08/);
+assert.doesNotMatch(demoTransport, /saved_in_demo_memory_only/);
 assert.match(
   await text("src/context/AuthContext.jsx", path.join(repoRoot, "frontend")),
   /VITE_GODFIN_DEMO_MODE/,
 );
+
+const reportsPage = await text("src/pages/Reports.jsx", path.join(repoRoot, "frontend"));
+assert.match(reportsPage, /<Link to="\/settings"/);
+assert.doesNotMatch(reportsPage, /href="\/settings"/);
 
 for (const demoAsset of [
   "public/demo-app/index.html",

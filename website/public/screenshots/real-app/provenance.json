@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "kind": "godfin-real-app-demo-capture",
-  "source_repo_sha": "98f5fcc1e05c0a10786537f0cd16557163ae26d8",
-  "source_git_sha": "98f5fcc1e05c0a10786537f0cd16557163ae26d8",
+  "source_repo_sha": "07174fb89de8efd12028d4157cc719b5007cfcc0",
+  "source_git_sha": "07174fb89de8efd12028d4157cc719b5007cfcc0",
   "canonical_golden_fixture": "backend/tests/fixtures/golden_ledger_v1.json",
   "canonical_golden_fixture_sha256": "4707a31e2aeee1e6b6c51ec0a4eec1e8c5673258be562615569d38d632964df7",
   "entrypoint": "http://127.0.0.1:5300/demo",

@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "source_repo_sha": "98f5fcc1e05c0a10786537f0cd16557163ae26d8",
+  "source_repo_sha": "07174fb89de8efd12028d4157cc719b5007cfcc0",
   "canonical_golden_fixture": "backend/tests/fixtures/golden_ledger_v1.json",
   "canonical_golden_fixture_sha256": "4707a31e2aeee1e6b6c51ec0a4eec1e8c5673258be562615569d38d632964df7",
-  "capture_provenance_sha256": "dde9ffd15ec8243e8a6063ece41435c9b83b5dd11c1f75f791e3bfb8fcb716b3",
+  "capture_provenance_sha256": "2e908cff280db6b2728577185cffa10d7dad31aef1f54717ace748a0d5c7aead",
   "source_date_epoch": 1788048000,
   "public_output": true,
   "external_network_required_at_render": false,
@@ -53,14 +53,14 @@
     },
     {
       "file": "captures/subscriptions.png",
-      "sha256": "59a382548d5d4f5bb402727e7bbc0b238b41824771e50ebffd85ce68b3eb025e",
-      "bytes": 919619,
+      "sha256": "e44fe128e2b9ef1d529e3d0f8ee618f4d75046e1702bbefec45753bcc0186e8f",
+      "bytes": 918539,
       "provenance": "captured from the actual GODFIN desktop frontend using the canonical in-memory synthetic household"
     },
     {
       "file": "captures/reports.png",
-      "sha256": "caba94d10691bef6cd1d10e04ea81028b72cbf045b6b42c08eb7e7efb5ac4acf",
-      "bytes": 855433,
+      "sha256": "f01fbb73694b31e1b0bd9ff6ef32ee79a45814c18f95e2b33c02794e1a3605bd",
+      "bytes": 840013,
       "provenance": "captured from the actual GODFIN desktop frontend using the canonical in-memory synthetic household"
     },
     {

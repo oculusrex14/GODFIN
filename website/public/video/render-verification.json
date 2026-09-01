@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "verified_at": "2026-08-31T16:10:41.679Z",
+  "verified_at": "2026-09-01T01:04:10.631Z",
   "frame_hash_format": "rawvideo:yuv420p",
   "files": [
     {
@@ -9,8 +9,8 @@
       "height": 1080,
       "duration": 24,
       "codec": "h264",
-      "bytes": 9763790,
-      "sha256": "1247fb1a571859bff886c7d76c4783071d7b476530ef8e7d6272a4e32f3dcde6",
+      "bytes": 9804090,
+      "sha256": "00d0218a4f2c65026f2bf7e03a0fbef1eb24f768e0564be04b59e09b253e866c",
       "frame_hashes": [
         {
           "percent": 0,
@@ -26,11 +26,11 @@
         },
         {
           "percent": 80,
-          "sha256": "a1080a451baa8c44b58197825c0d7f3d9058f5b912ff47f6757a1d076f262cd4"
+          "sha256": "fcd0ad4a9002272f408647acbbd9f7fd8262f6db4487613608187319872a74f4"
         },
         {
           "percent": 99,
-          "sha256": "d029211928e0c9a95255009e8b72c6784cfaa1692cd09d77ffa9912a814b0dba"
+          "sha256": "7a07044e0ba9863fd8b1f22b94b0922c5ef63fea17a5d97a703ead658d2e62ad"
         }
       ]
     },
@@ -40,8 +40,8 @@
       "height": 1080,
       "duration": 24,
       "codec": "vp9",
-      "bytes": 7994461,
-      "sha256": "37451bd71e562de5fd9a7e1b241310001c2e760b26da496ac46d726fb78dcfcd",
+      "bytes": 8044940,
+      "sha256": "1557d4dcc00d0e5c3588f31a7d12b525360094dd3051e35055fd2f32d3c9f8dc",
       "frame_hashes": [
         {
           "percent": 0,
@@ -57,11 +57,11 @@
         },
         {
           "percent": 80,
-          "sha256": "699adf441aaa84367055c3f3221961f2ef7235221876cc6cb7edf52b3f583fb2"
+          "sha256": "7394b505d6b9c5a099eb93fc99b95bc46862611f2cde409cd0baae01559efec4"
         },
         {
           "percent": 99,
-          "sha256": "8b3d07a6e20e74b243e3d9cc96a4c34b1135635b0fc3b4793296780558d7a7a9"
+          "sha256": "18fdeb87f25467980a2ce768f65011238704d6bdd3a3bbdbd1cdf60e405a8794"
         }
       ]
     },
@@ -71,8 +71,8 @@
       "height": 1080,
       "duration": 54,
       "codec": "h264",
-      "bytes": 19839038,
-      "sha256": "874d2ece4deebf764ee4c20587422ec407dfd259136e1b5f082ad2104dbb96c6",
+      "bytes": 19886184,
+      "sha256": "fdb511d5fea69b2a15e00a6925291972ed3702d0dcfaea9114a8b683033fee7a",
       "frame_hashes": [
         {
           "percent": 0,
@@ -102,8 +102,8 @@
       "height": 1080,
       "duration": 54,
       "codec": "vp9",
-      "bytes": 14735170,
-      "sha256": "0dd16ee3f952b8250a3a00b0ef8b839dbfab61fd09198f0009232fbe216c4a2e",
+      "bytes": 14816268,
+      "sha256": "f6ee25a25f92b1c12df304c8c8a182a48d222eaeace20f66bcf333370963bc59",
       "frame_hashes": [
         {
           "percent": 0,
@@ -119,7 +119,7 @@
         },
         {
           "percent": 80,
-          "sha256": "36a398d4d213181058100bf889cc37fc0101490af66c6989254e789c7ea31e00"
+          "sha256": "1edf5d6ad8dde5c6d4a51e0292a18dcf05f2d35f9bef707b5510912bd5b09af8"
         },
         {
           "percent": 99,
