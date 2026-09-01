@@ -10,6 +10,16 @@ async function text(relativePath, from = websiteRoot) {
   return readFile(path.join(from, relativePath), "utf8");
 }
 
+async function fileExists(relativePath, from = websiteRoot) {
+  try {
+    await stat(path.join(from, relativePath));
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 const generated = JSON.parse(await text("src/generated/entitlements.json"));
 const generatedPublicClaimsPolicy = JSON.parse(
   await text("src/generated/public-claims-policy.json"),
@@ -202,42 +212,97 @@ assert.match(waitlistRouteSource, /country_source:\s*countrySource/);
 const demoPage = await text("src/app/demo/page.tsx");
 assert.match(demoPage, /redirect\("\/demo-app\/index\.html"\)/);
 
-const demoMain = await text("src/demo-main.jsx", path.join(repoRoot, "frontend"));
-assert.match(demoMain, /installDemoTransport\(\)/);
-assert.match(demoMain, /Synthetic desktop demo/);
-assert.match(demoMain, /no bank, Gmail, AI, or payment connection/);
-assert.match(demoMain, /2026-07-31T12:00:00\+05:30/);
-assert.match(demoMain, /window\.Date = DemoDate/);
-
-const demoTransport = await text("src/demo/transport.js", path.join(repoRoot, "frontend"));
-assert.match(demoTransport, /window\.fetch/);
-assert.match(demoTransport, /SYNTHETIC SALARY/);
-assert.doesNotMatch(demoTransport, /supabase|cashfree|accounts\.google/i);
-assert.match(demoTransport, /SYNTHETIC_DEMO_READ_ONLY/);
-assert.match(demoTransport, /recurring_total:\s*1830/);
-assert.match(demoTransport, /amount_inr:\s*830/);
-assert.match(demoTransport, /profile:\s*'hdfc_savings'/);
-assert.match(demoTransport, /provider:\s*'ollama_local'/);
-assert.match(demoTransport, /label:\s*'Months when income covered spending'/);
-assert.match(demoTransport, /last_run:\s*'2026-07-31T09:00:00Z'/);
-assert.match(demoTransport, /valued_at:\s*'2026-07-31'/);
-assert.doesNotMatch(demoTransport, /last_run:\s*'2026-08|valued_at:\s*'2026-08/);
-assert.doesNotMatch(demoTransport, /saved_in_demo_memory_only/);
-assert.match(
-  await text("src/context/AuthContext.jsx", path.join(repoRoot, "frontend")),
-  /VITE_GODFIN_DEMO_MODE/,
-);
-
-const reportsPage = await text("src/pages/Reports.jsx", path.join(repoRoot, "frontend"));
-assert.match(reportsPage, /<Link to="\/settings"/);
-assert.doesNotMatch(reportsPage, /href="\/settings"/);
-
 for (const demoAsset of [
   "public/demo-app/index.html",
   "public/screenshots/real-app/godfin-dashboard-synthetic-2x.png",
   "public/screenshots/real-app/provenance.json",
 ]) {
   assert.ok((await stat(path.join(websiteRoot, demoAsset))).size > 0, `${demoAsset} is empty.`);
+}
+
+const frontendRoot = path.join(repoRoot, "frontend");
+const frontendSourceAvailable = await fileExists("src", frontendRoot);
+
+if (frontendSourceAvailable) {
+  const demoMain = await text("src/demo-main.jsx", frontendRoot);
+  assert.match(demoMain, /installDemoTransport\(\)/);
+  assert.match(demoMain, /Synthetic desktop demo/);
+  assert.match(demoMain, /no bank, Gmail, AI, or payment connection/);
+  assert.match(demoMain, /2026-07-31T12:00:00\+05:30/);
+  assert.match(demoMain, /window\.Date = DemoDate/);
+
+  const demoTransport = await text("src/demo/transport.js", frontendRoot);
+  assert.match(demoTransport, /window\.fetch/);
+  assert.match(demoTransport, /SYNTHETIC SALARY/);
+  assert.doesNotMatch(demoTransport, /supabase|cashfree|accounts\.google/i);
+  assert.match(demoTransport, /SYNTHETIC_DEMO_READ_ONLY/);
+  assert.match(demoTransport, /recurring_total:\s*1830/);
+  assert.match(demoTransport, /amount_inr:\s*830/);
+  assert.match(demoTransport, /profile:\s*'hdfc_savings'/);
+  assert.match(demoTransport, /provider:\s*'ollama_local'/);
+  assert.match(demoTransport, /label:\s*'Months when income covered spending'/);
+  assert.match(demoTransport, /last_run:\s*'2026-07-31T09:00:00Z'/);
+  assert.match(demoTransport, /valued_at:\s*'2026-07-31'/);
+  assert.doesNotMatch(demoTransport, /last_run:\s*'2026-08|valued_at:\s*'2026-08/);
+  assert.doesNotMatch(demoTransport, /saved_in_demo_memory_only/);
+  assert.match(
+    await text("src/context/AuthContext.jsx", frontendRoot),
+    /VITE_GODFIN_DEMO_MODE/,
+  );
+
+  const reportsPage = await text("src/pages/Reports.jsx", frontendRoot);
+  assert.match(reportsPage, /<Link to="\/settings"/);
+  assert.doesNotMatch(reportsPage, /href="\/settings"/);
+} else {
+  // Vercel's website-only project intentionally does not upload the parent
+  // frontend workspace. Validate the compiled artifact and its checked-in
+  // capture provenance instead of making a deploy depend on absent source.
+  const demoIndex = await text("public/demo-app/index.html");
+  assert.match(demoIndex, /<div id="root"><\/div>/);
+  assert.match(demoIndex, /<title>GODFIN · Synthetic desktop demo<\/title>/);
+  assert.match(demoIndex, /<meta name="robots" content="noindex, nofollow" \/>/);
+  assert.doesNotMatch(demoIndex, /https?:\/\//i);
+
+  const demoAssetUrls = [...demoIndex.matchAll(/(?:src|href)="(\/demo-app\/assets\/[^\"]+)"/g)].map(
+    ([, assetUrl]) => assetUrl,
+  );
+  assert.ok(demoAssetUrls.length >= 2, "Compiled demo must reference its JS and CSS assets.");
+  for (const assetUrl of demoAssetUrls) {
+    const assetPath = path.join(websiteRoot, "public", assetUrl.slice(1));
+    assert.ok((await stat(assetPath)).size > 0, `Compiled demo asset is missing: ${assetUrl}`);
+  }
+
+  const entrypointAssetUrl = demoAssetUrls.find((assetUrl) => assetUrl.endsWith(".js"));
+  assert.ok(entrypointAssetUrl, "Compiled demo must have a JavaScript entrypoint.");
+  const entrypointBundle = await readFile(
+    path.join(websiteRoot, "public", entrypointAssetUrl.slice(1)),
+    "utf8",
+  );
+  for (const marker of [
+    /Synthetic desktop demo/,
+    /no bank, Gmail, AI, or payment connection/,
+    /SYNTHETIC SALARY/,
+    /SYNTHETIC_DEMO_READ_ONLY/,
+    /2026-07-31/,
+  ]) {
+    assert.match(entrypointBundle, marker, `Compiled demo is missing required marker ${marker}.`);
+  }
+
+  const captureProvenance = JSON.parse(
+    await text("public/screenshots/real-app/provenance.json"),
+  );
+  assert.equal(captureProvenance.schema_version, 1);
+  assert.equal(captureProvenance.synthetic_data, true);
+  assert.equal(captureProvenance.external_network_required_at_render, false);
+  assert.equal(captureProvenance.served_demo_route, "/demo-app/index.html");
+  assert.equal(captureProvenance.deterministic_clock, "2026-07-31T12:00:00+05:30");
+  assert.equal(captureProvenance.privacy_scan?.result, "passed");
+  assert.ok(
+    captureProvenance.screenshots?.some(
+      ({ filename }) => filename === "godfin-dashboard-synthetic-2x.png",
+    ),
+    "Capture provenance must include the high-resolution synthetic dashboard.",
+  );
 }
 
 const waitlistButton = await text("src/components/waitlist-form.tsx");
