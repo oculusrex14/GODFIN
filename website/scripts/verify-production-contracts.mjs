@@ -144,6 +144,10 @@ const publicContentPaths = [
   "src/app/demo/page.tsx",
   "src/app/how-it-works/page.tsx",
   "src/app/pricing/page.tsx",
+  "src/app/about/page.tsx",
+  "src/app/roadmap/page.tsx",
+  "src/app/blog/page.tsx",
+  "src/app/contact/page.tsx",
   "src/app/docs/page.tsx",
   "src/app/download/page.tsx",
   "src/app/privacy/page.tsx",
@@ -177,10 +181,11 @@ for (const phrase of publicClaimsPolicy.prohibited_public_phrases) {
 
 const siteHeader = await text("src/components/site-header.tsx");
 for (const [href, label] of [
-  ["/demo", "Try the demo"],
-  ["/how-it-works", "How it works"],
-  ["/pricing", "Planned prices"],
-  ["/#waitlist", "Join the early testers"],
+  ["/how-it-works", "Features"],
+  ["/pricing", "Pricing"],
+  ["/roadmap", "Roadmap"],
+  ["/about", "About"],
+  ["/docs", "Docs"],
 ]) {
   assert.equal(
     siteHeader.includes(`{ href: "${href}", label: "${label}" }`),
@@ -188,13 +193,31 @@ for (const [href, label] of [
     `Primary navigation is missing ${label}.`,
   );
 }
-assert.match(siteHeader, /href="\/account">Tester sign in/);
+assert.match(siteHeader, /href="\/download">Private beta/);
+assert.match(siteHeader, /href="\/account">Sign in/);
+
+const aboutPage = await text("src/app/about/page.tsx");
+assert.match(aboutPage, /Why I built GODFIN/);
+assert.match(aboutPage, /PolyForm Noncommercial 1\.0\.0/);
+assert.doesNotMatch(aboutPage, /AGPL|open source in phases|open-core/i);
+
+const roadmapPage = await text("src/app/roadmap/page.tsx");
+assert.match(roadmapPage, /Target: January 2027/);
+assert.match(roadmapPage, /target rather than a guarantee/i);
+assert.match(roadmapPage, /There is no public mobile beta date/i);
+
+const sitemapSource = await text("src/app/sitemap.ts");
+assert.match(sitemapSource, /"\/about"/);
+assert.match(sitemapSource, /"\/roadmap"/);
+assert.match(sitemapSource, /"\/contact"/);
+assert.doesNotMatch(sitemapSource, /"\/(account|download)"/);
 
 const pricingPage = await text("src/app/pricing/page.tsx");
 assert.match(pricingPage, /public checkout is closed/i);
 assert.match(pricingPage, /₹4,999/);
 assert.match(pricingPage, /₹9,999/);
 assert.match(pricingPage, /No bundled AI usage/);
+assert.match(pricingPage, /Pay once\. Keep it forever\./);
 assert.doesNotMatch(pricingPage, /PurchaseButton|INR 1|₹1|PPP|purchasing power/i);
 
 const waitlistForm = await text("src/components/waitlist-form.tsx");
@@ -642,6 +665,8 @@ assert.doesNotMatch(nextConfig, /unsafe-inline/);
 assert.match(nextConfig, /default-src 'none'/);
 assert.match(rootLayout, /dynamic = "force-dynamic"/);
 assert.match(rootLayout, /<PrivacyAnalytics nonce=\{nonce\}/);
+assert.match(rootLayout, /godfin-beta-hero\.poster\.webp/);
+assert.match(rootLayout, /openGraph:\s*\{/);
 assert.doesNotMatch(
   rootLayout,
   /sdk\.cashfree\.com/,

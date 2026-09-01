@@ -10,24 +10,32 @@ export function SiteFooter() {
           <div>
             <Link className="brand" href="/"><GodfinLogo tagline /></Link>
             <p className="footer-copy">
-              A desktop-first way to understand everyday money while keeping ordinary
-              finance records on your own computer.
+              A local-first personal finance app for people who want to understand
+              their money without trading away their bank history.
             </p>
             <a className="footer-email" href="mailto:hello@godfin.dev">hello@godfin.dev</a>
           </div>
           <div className="footer-col">
             <strong>Explore</strong>
-            <Link href="/demo">Try the demo</Link>
-            <Link href="/how-it-works">How it works</Link>
-            <Link href="/pricing">Planned prices</Link>
+            <Link href="/how-it-works">Features</Link>
+            <Link href="/demo">Try the real app</Link>
+            <Link href="/pricing">Pricing</Link>
+            <Link href="/roadmap">Roadmap</Link>
+          </div>
+          <div className="footer-col">
+            <strong>Story</strong>
+            <Link href="/about">About</Link>
+            <Link href="/blog">Blog</Link>
+            <Link href="/contact">Contact</Link>
+            <Link href="/changelog">Changelog</Link>
             <Link href="/#waitlist">Join the early testers</Link>
           </div>
           <div className="footer-col">
             <strong>Help</strong>
-            <Link href="/docs">Setup and support</Link>
+            <Link href="/docs">Docs and support</Link>
+            <Link href="/download">Private beta builds</Link>
             <Link href="/account">Account</Link>
             <Link href="/beta">Tester portal</Link>
-            <Link href="/changelog">Changelog</Link>
           </div>
           <div className="footer-col">
             <strong>Trust</strong>
@@ -36,8 +44,9 @@ export function SiteFooter() {
           </div>
         </div>
         <div className="footer-bottom">
-          © {new Date().getFullYear()} GODFIN · PolyForm Noncommercial 1.0.0 ·
-          planned lifetime licenses, no software subscription
+          <span>Built independently in India. © {new Date().getFullYear()} GODFIN.</span>
+          <span>For information only—not financial, investment, tax, or legal advice.</span>
+          <span>PolyForm Noncommercial 1.0.0 · planned lifetime licenses</span>
         </div>
       </div>
     </footer>

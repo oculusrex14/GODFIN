@@ -80,6 +80,33 @@ export default async function DownloadPage() {
           )}
         </div>
       </section>
+      <section className="section beta-onboarding-section">
+        <div className="shell">
+          <div className="section-head">
+            <div className="eyebrow eyebrow-accent">What happens after an invite</div>
+            <h2>Three careful steps to your first month.</h2>
+            <p>The beta is small on purpose. Expect rough edges—and a clear way to report them.</p>
+          </div>
+          <div className="beta-onboarding-grid">
+            <article><span>01</span><h3>Download the build for your computer</h3><p>Use only the private link tied to your tester account. Compare the supplied checksum before opening it.</p></article>
+            <article><span>02</span><h3>Set a local PIN and make a backup</h3><p>Your PIN protects the app on this computer. The beginner setup explains backups before you bring in a real statement.</p></article>
+            <article><span>03</span><h3>Preview one supported statement</h3><p>Start with a copy, inspect the recognized account and dates, then reconcile only when the preview looks right.</p></article>
+          </div>
+          <div className="beta-expectations">
+            <h3>What beta testing means</h3>
+            <ul>
+              <li>Keep a separate copy of every original statement and important export.</li>
+              <li>Do not treat a beta report as the only record for tax, legal, or financial decisions.</li>
+              <li>Tell us what went wrong without emailing a raw statement, account number, PIN, key, or balance.</li>
+              <li>Updates can change during the beta; public installers and automatic updates are not open yet.</li>
+            </ul>
+            <div className="inline-actions">
+              <Link className="button-secondary" href="/docs">Read the beginner setup guide</Link>
+              <Link className="text-link" href="/roadmap">See what is still being tested →</Link>
+            </div>
+          </div>
+        </div>
+      </section>
     </>
   );
 }

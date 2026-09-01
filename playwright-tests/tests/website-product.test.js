@@ -20,12 +20,14 @@ test('homepage presents an honest beta path and accessible media', async ({ page
 
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: 'See your month. Keep the statement on your laptop.' }),
+    page.getByRole('heading', { name: 'Finally see where your money actually goes.' }),
   ).toBeVisible();
-  for (const link of ['Try the demo', 'How it works', 'Planned prices', 'Join the early testers']) {
+  for (const link of ['Features', 'Pricing', 'Roadmap', 'About', 'Docs']) {
     await expect(page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: link })).toBeVisible();
   }
-  await expect(page.getByRole('link', { name: 'Tester sign in' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Private beta', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Try the real app' }).first()).toBeVisible();
   await expect(page.getByText('Actual GODFIN desktop interface · synthetic data · not connected to a bank')).toBeVisible();
   await expect(page.getByAltText(/real GODFIN desktop dashboard/i)).toBeVisible();
   const support = page.getByLabel('Current beta focus');
@@ -140,33 +142,52 @@ test('uninvited download and setup help both lead to the early testers', async (
 
 test('how-it-works states current support and non-goals plainly', async ({ page }) => {
   await page.goto('/how-it-works');
-  await expect(page.getByRole('heading', { name: 'A monthly routine without the spreadsheet maze.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'From a bank statement to a month that makes sense.' })).toBeVisible();
   for (const heading of [
-    'Preview the statement',
-    'Review the month',
-    'Notice what repeats',
-    'Move a goal forward',
-    'Read the report',
+    'Check the file before it becomes your record',
+    'Fix it once. GODFIN remembers next time',
+    'Give a savings goal a history that adds up',
+    'Notice regular payments without filling the list with guesses',
+    'Answer normal questions about the month',
   ]) {
     await expect(page.getByRole('heading', { name: heading })).toBeVisible();
   }
+  await expect(page.getByAltText(/real GODFIN upload screen/i)).toBeVisible();
+  await expect(page.getByText(/Real GODFIN app · sample data/).first()).toBeVisible();
   await expect(page.getByText(/Intel Mac and Linux distribution remain later work/)).toBeVisible();
-  await expect(page.getByText(/do not replace a CA or file a return/)).toBeVisible();
+  await expect(page.getByText(/do not replace a CA/)).toBeVisible();
 });
 
 test('pricing is planned, lifetime-only, and has no public checkout', async ({ page }) => {
   await page.goto('/pricing');
-  await expect(page.getByRole('heading', { name: 'Software you can own, not another monthly bill.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Pay once. Keep it forever.' })).toBeVisible();
   await expect(page.getByText('₹4,999', { exact: true })).toBeVisible();
   await expect(page.getByText('₹9,999', { exact: true })).toBeVisible();
   await expect(page.getByText(/public checkout is closed/i)).toBeVisible();
   await expect(page.getByText('No bundled AI usage')).toBeVisible();
   await expect(page.getByRole('button', { name: /buy|purchase|checkout/i })).toHaveCount(0);
-  await expect(page.getByText(/INR 1|₹1|purchasing power|PPP/i)).toHaveCount(0);
+  await expect(page.locator('main').getByText(/^(INR 1|₹1|purchasing power|PPP)$/i)).toHaveCount(0);
+});
+
+test('founder story and roadmap are candid about product boundaries', async ({ page }) => {
+  await page.goto('/about');
+  await expect(page.getByRole('heading', { name: 'Why I built GODFIN' })).toBeVisible();
+  await expect(page.getByText('Built independently in India', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/PolyForm Noncommercial 1\.0\.0/).first()).toBeVisible();
+
+  await page.goto('/roadmap');
+  await expect(page.getByRole('heading', { name: 'The road ahead' })).toBeVisible();
+  await expect(page.getByText('Target: January 2027', { exact: true })).toBeVisible();
+  await expect(page.getByText(/target rather than a guarantee/)).toBeVisible();
+  await expect(page.getByText(/There is no public mobile beta date/)).toBeVisible();
+
+  await page.goto('/contact');
+  await expect(page.getByRole('heading', { name: /Tell us what went wrong/ })).toBeVisible();
+  await expect(page.getByText(/Never email a raw statement/)).toBeVisible();
 });
 
 test('representative public pages have no serious accessibility violations', async ({ page }) => {
-  for (const route of ['/', '/demo', '/how-it-works', '/pricing']) {
+  for (const route of ['/', '/demo', '/how-it-works', '/pricing', '/about', '/roadmap']) {
     await page.goto(route);
     await expectNoSeriousAxeViolations(page);
   }

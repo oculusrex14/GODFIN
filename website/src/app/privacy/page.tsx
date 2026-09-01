@@ -17,7 +17,7 @@ export default function PrivacyPage() {
           <div className="eyebrow eyebrow-accent">
             Effective 29 July 2026
           </div>
-          <h1>Privacy policy</h1>
+          <h1>Your records are local. Optional services are separate.</h1>
           <p>
             The short version: statements and everyday money records stay on your
             computer. During the beta, the website stores only waitlist, sign-in,
@@ -57,7 +57,16 @@ export default function PrivacyPage() {
             <li>Resend delivers transactional license and account email.</li>
           </ul>
 
-          <h2>3. Google sign-in and Gmail are different</h2>
+          <h2>3. Why each website service needs data</h2>
+          <ul>
+            <li>Waitlist details are used to confirm interest, choose suitable beta computers, and contact invited testers.</li>
+            <li>Website sign-in identifies your tester or customer account.</li>
+            <li>Purchase and license records provide access, invoices, fraud review, and device management.</li>
+            <li>Support messages are used to answer the request you send.</li>
+          </ul>
+          <p>These purposes do not authorize GODFIN to upload the ordinary finance record stored by the desktop app.</p>
+
+          <h2>4. Google sign-in and Gmail are different</h2>
           <p>
             Google sign-in on the website is used to authenticate your GODFIN
             website account. Optional Gmail access in the desktop app is a
@@ -73,7 +82,7 @@ export default function PrivacyPage() {
             encrypted on your device.
           </p>
 
-          <h2>4. Optional cloud AI</h2>
+          <h2>5. Optional cloud AI</h2>
           <p>
             If you choose a supported cloud AI provider using your own key,
             GODFIN asks for separate consent before sending a prompt. A
@@ -93,7 +102,18 @@ export default function PrivacyPage() {
             GODFIN does not operate a hosted-credit AI service.
           </p>
 
-          <h2>5. License verification</h2>
+          <h2>6. Limited network activity from the desktop app</h2>
+          <p>
+            Most money work remains local, but “local-first” does not mean the app
+            can never use the internet. It can check for updates and refresh a paid
+            license. If you enable them, Gmail ingestion, cloud AI, reference rates,
+            or market quotes can contact the service described at the point of use.
+            The app&apos;s network-access setting controls whether another device on your
+            local network can reach the local helper; it does not turn these optional
+            internet services into a GODFIN transaction cloud.
+          </p>
+
+          <h2>7. License verification</h2>
           <p>
             The app can send a license key, a random installation identifier,
             generic operating-system/architecture label, app version, and
@@ -103,7 +123,7 @@ export default function PrivacyPage() {
             Financial records are not part of this request.
           </p>
 
-          <h2>6. Logs and security</h2>
+          <h2>8. Logs and security</h2>
           <p>
             Hosting and infrastructure providers may retain limited security,
             request, and error logs. We minimize application logging and do not
@@ -111,7 +131,7 @@ export default function PrivacyPage() {
             financial data in logs.
           </p>
 
-          <h2>7. Optional website analytics</h2>
+          <h2>9. Optional website analytics</h2>
           <p>
             Google Analytics is disabled until you explicitly allow it. When
             enabled, it can receive page URLs, page titles, device/browser
@@ -124,7 +144,7 @@ export default function PrivacyPage() {
           </p>
           <AnalyticsPreferences />
 
-          <h2>8. Waitlist</h2>
+          <h2>10. Waitlist</h2>
           <p>
             The waitlist stores email, country, operating system, intended use,
             consent version, and campaign attribution. A confirmation email is
@@ -133,7 +153,7 @@ export default function PrivacyPage() {
             program.
           </p>
 
-          <h2>9. Retention and deletion</h2>
+          <h2>11. Retention, access, correction, and deletion</h2>
           <p>
             Purchase and license records are retained as needed to provide your
             lifetime license, prevent fraud, and satisfy tax or legal duties.
@@ -141,15 +161,20 @@ export default function PrivacyPage() {
             we must retain. Deleting the website account does not delete your
             local app database.
           </p>
+          <p>
+            You may ask what optional website data is associated with your account,
+            correct inaccurate contact details, withdraw optional consent, or request
+            deletion where a legal or fraud-prevention duty does not require retention.
+          </p>
 
-          <h2>10. Your choices</h2>
+          <h2>12. Your choices</h2>
           <p>
             Core requires no website account. Gmail, AI providers, embeddings,
             network access, and managed services are optional. You can export or
             delete local app data from the app.
           </p>
 
-          <h2>11. Contact</h2>
+          <h2>13. Contact</h2>
           {privacyEmail ? (
             <p>
               Privacy requests can be sent to

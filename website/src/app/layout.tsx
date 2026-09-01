@@ -16,21 +16,30 @@ export const metadata: Metadata = {
     apple: "/godfin-vault-dial.png",
   },
   title: {
-    default: "GODFIN — See your month. Keep it on your laptop.",
+    default: "GODFIN — Finally see where your money actually goes.",
     template: "%s · GODFIN",
   },
   description:
-    "Local-first personal finance for Indian banks. Your statements and financial data stay on your laptop.",
+    "A local-first personal finance app for understanding Indian bank statements without moving ordinary finance records to a GODFIN cloud.",
   openGraph: {
-    title: "GODFIN — See your month. Keep it on your laptop.",
+    title: "GODFIN — Finally see where your money actually goes.",
     description:
-      "Parse Indian bank statements, classify spending, and build reports without uploading your bank history.",
+      "Import a supported statement, understand the month, and keep ordinary finance records on your own computer.",
+    images: [
+      {
+        url: "/video/godfin-beta-hero.poster.webp",
+        width: 1920,
+        height: 1080,
+        alt: "The real GODFIN desktop app using made-up sample data",
+      },
+    ],
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "GODFIN — Local-first personal finance",
-    description: "Your bank data stays on your laptop.",
+    title: "GODFIN — Finally see where your money actually goes.",
+    description: "Local-first personal finance built around Indian statements.",
+    images: ["/video/godfin-beta-hero.poster.webp"],
   },
 };
 

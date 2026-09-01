@@ -25,12 +25,27 @@ export default function TermsPage() {
       </section>
       <section className="page-content legal">
         <article className="shell narrow prose">
+          <div className="plain-language-box">
+            <h2>The short version</h2>
+            <ul>
+              <li>GODFIN helps you organize and understand information; it does not make financial decisions for you.</li>
+              <li>Core is free. Planned Pro and Max licenses are one-time product licenses with no bundled hosted AI usage.</li>
+              <li>Keep your original statements, check important classifications, and use official records for tax or legal work.</li>
+              <li>Use the software fairly, protect your account and key, and do not resell or publish access.</li>
+            </ul>
+          </div>
           <h2>1. The product</h2>
           <p>
             GODFIN is personal finance software, not a bank, payment adviser,
             chartered accountant, investment adviser, or tax professional. Its
             classifications and reports can contain mistakes. You are
             responsible for reviewing financial decisions and official filings.
+          </p>
+          <p>
+            GODFIN provides information and organizational tools only. Nothing in
+            the app or website is financial, investment, tax, accounting, or legal
+            advice. GODFIN is not a SEBI-registered investment adviser and does not
+            recommend a security, loan, insurance product, tax position, or return.
           </p>
 
           <h2>2. License</h2>
@@ -103,7 +118,23 @@ export default function TermsPage() {
             care but do not promise uninterrupted service.
           </p>
 
-          <h2>8. Warranty and liability</h2>
+          <h2>8. Accuracy and your source of truth</h2>
+          <p>
+            Statement formats, descriptions, and classifications can be incomplete
+            or wrong. Keep original statements and compare important figures with
+            bank records, tax records, contracts, and professional advice where
+            appropriate. Do not rely on GODFIN as the only copy of essential data.
+          </p>
+
+          <h2>9. Fair use</h2>
+          <p>
+            Do not probe or overload website services, bypass access controls, use a
+            private beta link without permission, automate abusive requests, upload
+            another person&apos;s information without authority, or use GODFIN to break
+            applicable law or third-party rights.
+          </p>
+
+          <h2>10. Warranty and liability</h2>
           <p>
             To the extent permitted by law, GODFIN is provided without implied
             warranties and is not liable for indirect or consequential loss.
@@ -111,7 +142,7 @@ export default function TermsPage() {
             paid for that product, except where law does not allow that limit.
           </p>
 
-          <h2>9. Changes and contact</h2>
+          <h2>11. Changes and contact</h2>
           {supportEmail ? (
             <p>
               Material changes will be dated on this page. Product and billing

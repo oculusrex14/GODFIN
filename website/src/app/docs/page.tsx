@@ -27,8 +27,14 @@ export default function DocsPage() {
             <a href="#install">Install</a>
             <a href="#first-run">First run</a>
             <a href="#statements">Statements</a>
+            <a href="#review">Review and memory</a>
+            <a href="#planning">Budgets and goals</a>
+            <a href="#reports">Reports</a>
             <a href="#gmail">Gmail</a>
+            <a href="#ai">Optional AI</a>
             <a href="#backup">Backups</a>
+            <a href="#your-data">Your data</a>
+            <a href="#technical">Technically curious</a>
             <a href="#licenses">Licenses</a>
             <a href="#faq">FAQ</a>
           </nav>
@@ -56,6 +62,11 @@ export default function DocsPage() {
               <li>Review unfamiliar merchants and confirm their categories.</li>
               <li>Create a backup before making larger changes.</li>
             </ol>
+            <p>
+              <strong>Learn GODFIN</strong> is a readable guide you can open at any
+              time. The separate in-app tutorial moves through real screens, can be
+              skipped or paused, and can be restarted later from Settings.
+            </p>
 
             <h2 id="statements">Bank statements</h2>
             <h3>HDFC</h3>
@@ -72,6 +83,45 @@ export default function DocsPage() {
               format instead of inventing transactions.
             </p>
 
+            <h2 id="review">Review and category memory</h2>
+            <p>
+              The Review queue is for transactions that need a human choice. Correct
+              a category only when you recognize the payment. GODFIN can remember a
+              confirmed merchant for later matches and shows the reason it used.
+            </p>
+            <p>
+              Finalised months do not change silently. You can inspect, undo, export,
+              or reset learned category memory from the app. Automatic sorting is a
+              helper, not a substitute for checking important records.
+            </p>
+
+            <h2 id="planning">Budgets, goals, and regular payments</h2>
+            <p>
+              Budgets compare planned limits with classified spending. Goals start
+              with an optional amount already saved, then keep a dated history of
+              deposits and withdrawals. A projection is only an estimate and shows
+              its assumptions and available data.
+            </p>
+            <p>
+              Regular-payment detection looks for repeated merchant, amount, and
+              timing evidence. Review every suggestion. GODFIN does not cancel a
+              subscription or move money into an FD, RD, or goal for you.
+            </p>
+
+            <h2 id="reports">Reports and explanations</h2>
+            <p>
+              Standard reports use verified local calculations for money in,
+              spending, savings, budgets, goals, and regular payments. Information
+              bubbles explain unfamiliar ratios in plain language and show the
+              period and inputs behind them.
+            </p>
+            <p>
+              Optional AI can help describe those verified figures. It does not
+              produce the authoritative totals. The CA tax pack is a review aid, not
+              a completed income-tax return and not a replacement for AIS, TIS,
+              Form 26AS, Form 16, official records, or professional advice.
+            </p>
+
             <h2 id="gmail">Gmail</h2>
             <p>
               Gmail is optional and separate from signing in on this website. If you
@@ -83,11 +133,35 @@ export default function DocsPage() {
               are protected on your computer, and the website account is not involved.
             </p>
 
+            <h2 id="ai">Optional AI</h2>
+            <p>
+              You can continue without AI, use a supported local model through
+              Ollama, or connect a supported provider with your own key. GODFIN shows
+              the model size and expected computer requirements before a local model
+              download; it should never begin a model download merely because a
+              setting was switched on.
+            </p>
+            <p>
+              Cloud AI requires separate consent. GODFIN removes exact amounts,
+              dates, payment addresses, phone numbers, account fragments, references,
+              and long number sequences before sending the remaining prompt. This
+              reduces exposure but does not make the prompt anonymous.
+            </p>
+
             <h2 id="backup">Backups</h2>
             <p>
               Settings → Backup creates a local safety copy. GODFIN keeps the latest
               seven daily and four weekly copies. Store another copy on an external
               drive if losing the records would matter to you.
+            </p>
+
+            <h2 id="your-data">Exporting or removing your data</h2>
+            <p>
+              The desktop app keeps ordinary statements, transactions, categories,
+              budgets, goals, reports, settings, and backups on your computer. Use
+              the app&apos;s export tools before resetting data. A reset cannot remove
+              an original statement stored elsewhere on your computer, and deleting
+              a website account does not delete the local app record.
             </p>
 
             <h2 id="licenses">Activate Pro or Max</h2>
@@ -106,6 +180,29 @@ export default function DocsPage() {
               merchant history.
             </p>
 
+            <h2 id="technical">For the technically curious</h2>
+            <p>
+              GODFIN&apos;s ordinary finance record is stored in a local SQLite database,
+              with schema changes applied through additive, restart-safe migrations.
+              Before a migration, the app creates a local safety backup. The desktop
+              helper listens on <code>127.0.0.1</code> by default.
+            </p>
+            <p>
+              The classification engine starts with deterministic rules and confirmed
+              merchant memory. Embeddings and AI are optional helpers, never the source
+              of authoritative totals. The desktop app does not send product analytics.
+            </p>
+            <p>
+              OpenDataLoader remains a benchmark-only PDF adapter. It is not bundled
+              into live statement uploads unless a lawful redacted test set proves that
+              the accuracy gain justifies adding its Java runtime.
+            </p>
+            <p>
+              The source is governed by PolyForm Noncommercial 1.0.0. The repository
+              remains private during the beta; commercial use and commercial forks
+              require written approval.
+            </p>
+
             <h2 id="faq">FAQ</h2>
             <h3>Is GODFIN cloud software?</h3>
             <p>
@@ -122,6 +219,10 @@ export default function DocsPage() {
               Yes. A supported provider key is encrypted on your device. You
               can also use a supported local model or continue without AI.
             </p>
+            <h3>Does GODFIN connect directly to my bank?</h3>
+            <p>No. The current workflow uses statement files you choose and optional supported bank-alert email. It does not ask for internet-banking credentials.</p>
+            <h3>Can a report tell me which tax return to file?</h3>
+            <p>No. Transaction data alone is incomplete. Use official tax records and, where needed, a qualified CA or tax professional.</p>
           </article>
         </div>
       </section>

@@ -7,10 +7,11 @@ import { useState } from "react";
 import { GodfinLogo } from "./godfin-logo";
 
 const links = [
-  { href: "/demo", label: "Try the demo" },
-  { href: "/how-it-works", label: "How it works" },
-  { href: "/pricing", label: "Planned prices" },
-  { href: "/#waitlist", label: "Join the early testers" },
+  { href: "/how-it-works", label: "Features" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "/roadmap", label: "Roadmap" },
+  { href: "/about", label: "About" },
+  { href: "/docs", label: "Docs" },
 ];
 
 export function SiteHeader() {
@@ -42,7 +43,8 @@ export function SiteHeader() {
             </Link>
           ))}
         </nav>
-        <Link className="account-link" href="/account">Tester sign in</Link>
+        <Link className="nav-beta-link" href="/download">Private beta</Link>
+        <Link className="account-link" href="/account">Sign in</Link>
       </div>
     </header>
   );
