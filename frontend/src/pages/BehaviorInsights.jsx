@@ -155,7 +155,7 @@ export default function BehaviorInsights() {
               min="1"
               step="any"
               value={budget}
-              onChange={event => setBudget(event.target.value)}
+              onInput={event => setBudget(event.currentTarget.value)}
               placeholder={data?.monthly_budget ? `Current monthly limit: ${data.monthly_budget}` : 'Set monthly spending limit'}
               className="min-w-0 flex-1 rounded-[12px] border border-white/[0.12] bg-white/[0.05] px-3 py-2 text-sm text-ink-secondary placeholder:text-ink-muted focus:outline-none"
             />
