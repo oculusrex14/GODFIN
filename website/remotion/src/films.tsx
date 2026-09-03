@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import {
   AbsoluteFill,
+  Audio,
   Img,
   Sequence,
   interpolate,
@@ -139,6 +140,7 @@ function CopyScene({ duration, line, accent, social = false }: { duration: numbe
 export function HeroFilm() {
   return (
     <AbsoluteFill>
+      <Audio src={staticFile("assets/audio/godfin-beta-hero-narration.wav")} volume={0.94} />
       <Sequence from={0} durationInFrames={90}><IntroScene duration={90} /></Sequence>
       <Sequence from={90} durationInFrames={120}><AppScene duration={120} image="upload.png" label="Upload" title="Preview before you reconcile." body="The real statement-import page shows what GODFIN found before rows enter the local ledger." /></Sequence>
       <Sequence from={210} durationInFrames={150}><AppScene duration={150} image="dashboard.png" label="Dashboard" title="See the month in one place." body="₹44,000 in, ₹11,000 spent, and a 75% savings rate—from synthetic data." /></Sequence>

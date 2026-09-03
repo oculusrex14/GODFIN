@@ -20,7 +20,7 @@ test('homepage presents an honest beta path and accessible media', async ({ page
 
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: 'Finally see where your money actually goes.' }),
+    page.getByRole('heading', { name: 'An AI-powered personal finance app for better money habits and decisions.' }),
   ).toBeVisible();
   for (const link of ['Features', 'Pricing', 'Roadmap', 'About', 'Docs']) {
     await expect(page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: link })).toBeVisible();
@@ -34,7 +34,7 @@ test('homepage presents an honest beta path and accessible media', async ({ page
   await expect(support.getByText('Mac with Apple chip', { exact: true })).toBeVisible();
   await expect(support.getByText('Windows PC', { exact: true })).toBeVisible();
 
-  const video = page.getByLabel('Silent GODFIN product walkthrough using one made-up household');
+  const video = page.getByLabel('Narrated GODFIN product walkthrough using synthetic data');
   await video.scrollIntoViewIfNeeded();
   await expect(video).toBeVisible();
   await expect(video).toHaveAttribute('poster', '/video/godfin-beta-hero.poster.webp');
@@ -45,9 +45,18 @@ test('homepage presents an honest beta path and accessible media', async ({ page
   await expect(page.getByText('Read the 24-second video transcript')).toBeVisible();
 
   await expect(page.locator('input[name="country"]')).toHaveCount(0);
+  await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Email', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Computer')).toBeVisible();
-  await expect(page.getByLabel('What do you want to understand?')).toBeVisible();
+  await expect(page.getByLabel('System')).toBeVisible();
+  await expect(page.getByLabel(/Occupation/)).toBeVisible();
+  await expect(page.getByLabel(/How many banks do you use/)).toBeVisible();
+  await expect(page.getByLabel(/Which banks do you use/)).toBeVisible();
+  await expect(page.getByLabel(/Tell us about yourself/)).toBeVisible();
+  await expect(page.getByText(/Optional details help us choose testers/)).toBeVisible();
+  await expect(page.getByText(/complimentary lifetime Max license/)).toBeVisible();
+  expect(await page.locator('#waitlist').evaluate((element) =>
+    Boolean(element.nextElementSibling?.classList.contains('founder-note-section')),
+  )).toBe(true);
   expect(pageErrors).toEqual([]);
 });
 
@@ -58,7 +67,7 @@ test('reduced motion keeps a poster and user-controlled playback', async ({ brow
   });
   const page = await context.newPage();
   await page.goto(`${baseURL}/`);
-  const video = page.getByLabel('Silent GODFIN product walkthrough using one made-up household');
+  const video = page.getByLabel('Narrated GODFIN product walkthrough using synthetic data');
   await video.scrollIntoViewIfNeeded();
   await expect(video).toBeVisible();
   await expect(video).not.toHaveAttribute('autoplay', '');

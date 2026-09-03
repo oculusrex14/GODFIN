@@ -137,7 +137,7 @@ export default function HowItWorksPage() {
                   </ul>
                 </div>
                 <figure className="product-demo">
-                  <Image alt={chapter.alt} height={716} sizes="(max-width: 900px) 100vw, 60vw" src={chapter.image} width={1244} />
+                  <Image alt={chapter.alt} height={1080} sizes="(max-width: 900px) 100vw, 72vw" src={chapter.image} width={1920} />
                   <figcaption>Real GODFIN app · sample data · nothing here is connected to a bank</figcaption>
                 </figure>
               </article>

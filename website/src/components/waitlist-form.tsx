@@ -56,9 +56,13 @@ export function WaitlistForm({ enabled = true }: { enabled?: boolean }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          name: form.get("name"),
           email: form.get("email"),
           locale_country: localeCountry,
           os,
+          occupation: form.get("occupation"),
+          bank_count: form.get("bank_count"),
+          banks: form.get("banks"),
           intended_use: form.get("intended_use"),
           consent: form.get("consent") === "on",
           company: form.get("company"),
@@ -94,14 +98,38 @@ export function WaitlistForm({ enabled = true }: { enabled?: boolean }) {
           soon as the private launch mailbox is verified.
         </p>
       ) : null}
-      <div className="waitlist-grid">
-        <label>
-          Email
-          <input name="email" type="email" autoComplete="email" required disabled={!enabled} />
+      <div className="waitlist-grid waitlist-grid-primary">
+        <label htmlFor="waitlist-name">
+          Name
+          <input
+            autoComplete="name"
+            disabled={!enabled}
+            id="waitlist-name"
+            maxLength={100}
+            name="name"
+            required
+          />
         </label>
-        <label>
-          Computer
-          <select disabled={!enabled} value={os} onChange={(event) => setOs(event.target.value)}>
+        <label htmlFor="waitlist-email">
+          Email
+          <input
+            autoComplete="email"
+            disabled={!enabled}
+            id="waitlist-email"
+            name="email"
+            required
+            type="email"
+          />
+        </label>
+        <label htmlFor="waitlist-computer">
+          System
+          <select
+            disabled={!enabled}
+            id="waitlist-computer"
+            name="os"
+            value={os}
+            onChange={(event) => setOs(event.target.value)}
+          >
             <option value="macos">Apple Silicon Mac</option>
             <option value="windows">Windows x64</option>
             <option value="linux">Linux / Other</option>
@@ -109,17 +137,61 @@ export function WaitlistForm({ enabled = true }: { enabled?: boolean }) {
           </select>
         </label>
       </div>
-      <label>
-        What do you want to understand?
-        <textarea
-          name="intended_use"
-          maxLength={500}
-          placeholder="For example: where my money went each month, or which bills keep repeating."
-          required
+      <div className="waitlist-grid waitlist-grid-secondary">
+        <label htmlFor="waitlist-occupation">
+          Occupation <span className="optional-label">Optional</span>
+          <input
+            autoComplete="organization-title"
+            disabled={!enabled}
+            id="waitlist-occupation"
+            maxLength={120}
+            name="occupation"
+            placeholder="For example: student, designer, teacher"
+          />
+        </label>
+        <label htmlFor="waitlist-bank-count">
+          How many banks do you use? <span className="optional-label">Optional</span>
+          <input
+            disabled={!enabled}
+            id="waitlist-bank-count"
+            inputMode="numeric"
+            max={25}
+            min={0}
+            name="bank_count"
+            placeholder="For example: 2"
+            type="number"
+          />
+        </label>
+      </div>
+      <label htmlFor="waitlist-banks">
+        Which banks do you use? <span className="optional-label">Optional</span>
+        <input
+          aria-describedby="waitlist-sensitive-note"
           disabled={!enabled}
-          rows={3}
+          id="waitlist-banks"
+          maxLength={600}
+          name="banks"
+          placeholder="For example: HDFC Bank, SBI"
         />
       </label>
+      <label htmlFor="waitlist-context">
+        Tell us about yourself and what you want help with <span className="optional-label">Optional</span>
+        <textarea
+          aria-describedby="waitlist-selection-note waitlist-sensitive-note"
+          id="waitlist-context"
+          name="intended_use"
+          maxLength={1000}
+          placeholder="Share your money-management struggles, what you hope GODFIN can help with, or how you would like to help test the project."
+          disabled={!enabled}
+          rows={4}
+        />
+      </label>
+      <p className="waitlist-selection-note" id="waitlist-selection-note">
+        Optional details help us choose testers whose needs match the current beta and show genuine interest in participating.
+      </p>
+      <p className="waitlist-sensitive-note" id="waitlist-sensitive-note">
+        Bank names only. Never share account numbers, statements, balances, UPI addresses, PINs, passwords, keys, or Gmail content.
+      </p>
       <label className="honeypot" aria-hidden="true">
         Company
         <input name="company" tabIndex={-1} autoComplete="off" />

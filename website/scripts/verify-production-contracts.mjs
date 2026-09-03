@@ -229,8 +229,33 @@ assert.doesNotMatch(
 const waitlistRouteSource = await text("src/app/api/waitlist/route.ts");
 const betaLibrary = await text("src/lib/beta.ts");
 assert.match(betaLibrary, /x-vercel-ip-country/);
+assert.match(betaLibrary, /containsSensitiveWaitlistProfile/);
 assert.match(waitlistRouteSource, /inferredCountry\(/);
 assert.match(waitlistRouteSource, /country_source:\s*countrySource/);
+for (const requestedField of [
+  /name="name"/,
+  /name="email"/,
+  /name="os"/,
+  /name="occupation"/,
+  /name="bank_count"/,
+  /name="banks"/,
+  /name="intended_use"/,
+]) {
+  assert.match(waitlistForm, requestedField);
+}
+assert.match(waitlistForm, /Optional details help us choose testers/);
+assert.match(waitlistForm, /Bank names only\. Never share account numbers/);
+assert.match(waitlistRouteSource, /display_name:\s*displayName/);
+assert.match(waitlistRouteSource, /normalizeBankNames\(body\.banks\)/);
+assert.match(waitlistRouteSource, /containsSensitiveWaitlistProfile/);
+
+const homepage = await text("src/app/page.tsx");
+assert.match(homepage, /An AI-powered personal finance app for better money habits and decisions\./);
+assert.match(homepage, /Classify transactions from Gmail alerts or bank statements/);
+assert.match(homepage, /Core features remain free\. Paid users help fund the project\./);
+assert.match(homepage, /complimentary lifetime Max license/);
+assert.doesNotMatch(homepage, /24 seconds, one sample month|The video is silent/);
+assert.doesNotMatch(homepage, /beta-boundary-section/);
 
 const demoPage = await text("src/app/demo/page.tsx");
 assert.match(demoPage, /redirect\("\/demo-app\/index\.html"\)/);
@@ -331,6 +356,10 @@ if (frontendSourceAvailable) {
 const waitlistButton = await text("src/components/waitlist-form.tsx");
 assert.match(waitlistButton, /Join the early testers/);
 
+const rootLayoutSource = await text("src/app/layout.tsx");
+assert.match(rootLayoutSource, /GODFIN — Better money habits and decisions\./);
+assert.match(rootLayoutSource, /supported Gmail alerts or bank statements/);
+
 const demoFixture = JSON.parse(await text("public/demo/demo-data.json"));
 assert.equal(
   demoFixture.disclosure,
@@ -348,10 +377,18 @@ assert.match(productDemoVideo, /poster="\/video\/godfin-beta-hero\.poster\.webp"
 assert.match(productDemoVideo, /godfin-beta-hero\.webm/);
 assert.match(productDemoVideo, /godfin-beta-hero\.mp4/);
 assert.match(productDemoVideo, /kind="captions"/);
+assert.match(productDemoVideo, /English narration and scene text/);
+assert.match(productDemoVideo, /Narrated GODFIN product walkthrough using synthetic data/);
 assert.match(productDemoVideo, /Read the 24-second video transcript/);
 assert.match(productDemoVideo, /controls/);
 assert.match(productDemoVideo, /muted/);
 assert.match(productDemoVideo, /playsInline/);
+
+const remotionFilmSource = await text("remotion/src/films.tsx");
+const remotionAssetSource = await text("remotion/scripts/prepare-assets.mjs");
+assert.match(remotionFilmSource, /<Audio src=\{staticFile\("assets\/audio\/godfin-beta-hero-narration\.wav"\)\}/);
+assert.match(remotionAssetSource, /Qwen\/Qwen3-TTS-12Hz-0\.6B-CustomVoice/);
+assert.match(remotionAssetSource, /Apache-2\.0/);
 
 for (const mediaPath of [
   "public/video/godfin-beta-hero.mp4",
@@ -478,6 +515,20 @@ for (const requiredSql of [
   /grant execute on function public\.verify_license[\s\S]*?to service_role/,
 ]) {
   assert.match(betaMigration, requiredSql);
+}
+
+const expandedWaitlistMigration = await text(
+  "supabase/migrations/20260903181552_expand_waitlist_registration_profile.sql",
+);
+for (const requiredSql of [
+  /add column if not exists display_name text/,
+  /add column if not exists occupation text/,
+  /add column if not exists bank_count smallint/,
+  /add column if not exists banks text\[\]/,
+  /char_length\(intended_use\) <= 1000/,
+  /bank_count between 0 and 25/,
+]) {
+  assert.match(expandedWaitlistMigration, requiredSql);
 }
 for (const betaTable of [
   "beta_candidate_profiles",

@@ -9,8 +9,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const output = path.resolve(root, "../public/video");
 
 const expected = [
-  { file: "godfin-beta-hero.mp4", width: 1920, height: 1080, duration: 24, codec: "h264" },
-  { file: "godfin-beta-hero.webm", width: 1920, height: 1080, duration: 24, codec: "vp9" },
+  { file: "godfin-beta-hero.mp4", width: 1920, height: 1080, duration: 24, codec: "h264", audioCodec: "aac" },
+  { file: "godfin-beta-hero.webm", width: 1920, height: 1080, duration: 24, codec: "vp9", audioCodec: "opus" },
   { file: "godfin-demo-walkthrough.mp4", width: 1920, height: 1080, duration: 54, codec: "h264" },
   { file: "godfin-demo-walkthrough.webm", width: 1920, height: 1080, duration: 54, codec: "vp9" },
   { file: "godfin-beta-social.mp4", width: 1080, height: 1920, duration: 18, codec: "h264" },
@@ -32,7 +32,7 @@ async function capture(command, args) {
 
 const updateManifest = process.argv.includes("--update-manifest");
 const report = {
-  schema_version: 2,
+  schema_version: 3,
   frame_hash_format: "rawvideo:yuv420p",
   files: [],
 };
@@ -41,7 +41,11 @@ for (const item of expected) {
   const probe = JSON.parse((await capture("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", source])).toString("utf8"));
   const video = probe.streams.find((stream) => stream.codec_type === "video");
   const audio = probe.streams.find((stream) => stream.codec_type === "audio");
-  if (!video || audio) throw new Error(`${item.file} must contain one video stream and no audio stream.`);
+  if (!video) throw new Error(`${item.file} must contain a video stream.`);
+  if (item.audioCodec && audio?.codec_name !== item.audioCodec) {
+    throw new Error(`${item.file} must contain a ${item.audioCodec} narration stream.`);
+  }
+  if (!item.audioCodec && audio) throw new Error(`${item.file} must not contain an audio stream.`);
   if (video.width !== item.width || video.height !== item.height) throw new Error(`${item.file} dimensions are wrong.`);
   if (video.codec_name !== item.codec || video.pix_fmt !== "yuv420p") throw new Error(`${item.file} codec or pixel format is wrong.`);
   if (video.sample_aspect_ratio && video.sample_aspect_ratio !== "1:1") throw new Error(`${item.file} sample aspect ratio is wrong.`);
@@ -104,6 +108,6 @@ if (updateManifest) {
 }
 console.log(
   updateManifest
-    ? `Verified ${expected.length} silent media files and 2 WebP posters; updated the manifest explicitly.`
-    : `Verified ${expected.length} silent media files and 2 WebP posters without modifying the manifest.`,
+    ? `Verified ${expected.length} media files, the narrated hero audio, and 2 WebP posters; updated the manifest explicitly.`
+    : `Verified ${expected.length} media files, the narrated hero audio, and 2 WebP posters without modifying the manifest.`,
 );

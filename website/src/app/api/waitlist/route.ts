@@ -2,14 +2,20 @@ import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { checkRateLimit, rateLimitResponse } from "@/lib/abuse-control";
-import { cleanText, inferredCountry, normalizeEmail } from "@/lib/beta";
+import {
+  cleanText,
+  containsSensitiveWaitlistProfile,
+  inferredCountry,
+  normalizeBankNames,
+  normalizeEmail,
+} from "@/lib/beta";
 import { sendWaitlistConfirmationEmail } from "@/lib/email";
 import { siteUrl, waitlistConfigured } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
-const CONSENT_VERSION = "waitlist-2026-07-29-v1";
+const CONSENT_VERSION = "waitlist-2026-09-03-v2";
 const ALLOWED_OS = new Set(["macos", "windows", "linux", "other"]);
 
 function safeAttribution(value: unknown): Record<string, string> {
@@ -53,17 +59,33 @@ export async function POST(request: Request) {
       body.locale_country,
     );
     const os = typeof body.os === "string" ? body.os.trim().toLowerCase() : "";
-    const intendedUse = cleanText(body.intended_use, 500);
+    const displayName = cleanText(body.name, 100);
+    const occupation = cleanText(body.occupation, 120);
+    const banks = normalizeBankNames(body.banks);
+    const intendedUse = cleanText(body.intended_use, 1000);
+    const rawBankCount = body.bank_count;
+    const bankCount = rawBankCount === "" || rawBankCount === null || rawBankCount === undefined
+      ? null
+      : Number(rawBankCount);
     const consented = body.consent === true;
+    const profileText = [occupation, banks.join(", "), intendedUse].join("\n");
 
     if (
       !emailNormalized ||
+      displayName.length < 2 ||
       !ALLOWED_OS.has(os) ||
-      intendedUse.length < 2 ||
+      (occupation.length === 1) ||
+      (bankCount !== null && (!Number.isInteger(bankCount) || bankCount < 0 || bankCount > 25)) ||
+      containsSensitiveWaitlistProfile(profileText) ||
       !consented
     ) {
       return NextResponse.json(
-        { message: "Complete every field and confirm waitlist consent." },
+        {
+          message:
+            containsSensitiveWaitlistProfile(profileText)
+              ? "Remove account numbers, UPI addresses, PINs, passwords, license keys, or other private financial details."
+              : "Add your name, email, computer, and consent. Check any optional details you entered.",
+        },
         { status: 400 },
       );
     }
@@ -84,6 +106,19 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (lookupError) throw lookupError;
     if (existing?.confirmed_at) {
+      const { error: updateError } = await admin
+        .from("waitlist_entries")
+        .update({
+          display_name: displayName,
+          occupation: occupation || null,
+          bank_count: bankCount,
+          banks,
+          intended_use: intendedUse,
+          os,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+      if (updateError) throw updateError;
       return NextResponse.json({
         accepted: true,
         confirmation_required: true,
@@ -100,6 +135,10 @@ export async function POST(request: Request) {
       country,
       country_source: countrySource,
       os,
+      display_name: displayName,
+      occupation: occupation || null,
+      bank_count: bankCount,
+      banks,
       intended_use: intendedUse,
       consent_version: CONSENT_VERSION,
       attribution: safeAttribution(body.attribution),

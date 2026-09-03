@@ -52,6 +52,31 @@ export function cleanText(value: unknown, maximum: number): string {
     .slice(0, maximum);
 }
 
+export function normalizeBankNames(value: unknown): string[] {
+  const source = Array.isArray(value) ? value.join(",") : cleanText(value, 600);
+  if (typeof source !== "string") return [];
+  const unique = new Map<string, string>();
+  for (const item of source.split(/[,;\n]/)) {
+    const bank = cleanText(item, 80).replace(/\s+/g, " ");
+    if (!bank) continue;
+    const key = bank.toLocaleLowerCase("en-IN");
+    if (!unique.has(key)) unique.set(key, bank);
+    if (unique.size === 12) break;
+  }
+  return [...unique.values()];
+}
+
+export function containsSensitiveWaitlistProfile(value: string): boolean {
+  return [
+    /GODFIN-(?:PRO|MAX|BETA)-[A-Z0-9-]{12,}/i,
+    /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/,
+    /\b\d{6,19}\b/,
+    /\b[A-Z]{4}0[A-Z0-9]{6}\b/,
+    /\b[a-z0-9._-]{2,}@[a-z]{2,}\b/i,
+    /\b(?:pin|password|passcode|cvv)\b\s*[:#=-]?\s*\d{3,}/i,
+  ].some((pattern) => pattern.test(value));
+}
+
 export function safeAuthNext(value: unknown, fallback = "/account"): string {
   if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) {
     return fallback;

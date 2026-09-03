@@ -16,15 +16,15 @@ export const metadata: Metadata = {
     apple: "/godfin-vault-dial.png",
   },
   title: {
-    default: "GODFIN — Finally see where your money actually goes.",
+    default: "GODFIN — Better money habits and decisions.",
     template: "%s · GODFIN",
   },
   description:
-    "A local-first personal finance app for understanding Indian bank statements without moving ordinary finance records to a GODFIN cloud.",
+    "An AI-powered, local-first personal finance app for tracking expenses, understanding money habits, and making clearer decisions.",
   openGraph: {
-    title: "GODFIN — Finally see where your money actually goes.",
+    title: "GODFIN — Better money habits and decisions.",
     description:
-      "Import a supported statement, understand the month, and keep ordinary finance records on your own computer.",
+      "Bring in supported Gmail alerts or bank statements, understand the month, and keep ordinary finance records on your own computer.",
     images: [
       {
         url: "/video/godfin-beta-hero.poster.webp",
@@ -37,8 +37,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "GODFIN — Finally see where your money actually goes.",
-    description: "Local-first personal finance built around Indian statements.",
+    title: "GODFIN — Better money habits and decisions.",
+    description: "AI-powered, local-first personal finance for clearer money habits and decisions.",
     images: ["/video/godfin-beta-hero.poster.webp"],
   },
 };

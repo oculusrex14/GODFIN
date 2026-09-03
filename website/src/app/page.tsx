@@ -44,11 +44,11 @@ export default function HomePage() {
         <div className="shell beta-hero-grid">
           <div className="beta-hero-copy">
             <div className="eyebrow eyebrow-accent">Local-first desktop beta</div>
-            <h1>Finally see where your money actually goes.</h1>
+            <h1>An AI-powered personal finance app for better money habits and decisions.</h1>
             <p>
-              Bring a supported bank statement into GODFIN and it turns the month
-              into something you can understand—without placing the ordinary
-              finance record in a GODFIN cloud.
+              Track expenses, understand your choices, and build financial discipline
+              with reliable local calculations and optional AI explanations. Core
+              money tools continue to work without AI.
             </p>
             <div className="hero-actions">
               <Link className="button" href="/demo">Try the real app <ArrowRight size={17} /></Link>
@@ -77,6 +77,31 @@ export default function HomePage() {
             />
             <figcaption>Actual GODFIN desktop interface · synthetic data · not connected to a bank</figcaption>
           </figure>
+        </div>
+      </section>
+
+      <section className="section waitlist-section waitlist-section-priority" id="waitlist">
+        <div className="shell waitlist-shell">
+          <div className="section-head">
+            <div className="eyebrow eyebrow-accent">Join the early testers</div>
+            <h2>Help shape GODFIN before its first public release.</h2>
+            <p>
+              Tell us about your computer and what you want help understanding.
+              We will confirm your email, then invite a focused group whose needs
+              match the current beta.
+            </p>
+            <div className="beta-reward-card">
+              <strong>A thank-you worth ₹9,999 at launch</strong>
+              <span>
+                Accepted testers who complete the feedback programme receive a
+                complimentary lifetime Max license when GODFIN reaches its first
+                public release. It is a license, not a subscription.
+              </span>
+            </div>
+          </div>
+          <Suspense fallback={<p className="lead">Loading the early-testers form…</p>}>
+            <WaitlistForm enabled={waitlistEnabled} />
+          </Suspense>
         </div>
       </section>
 
@@ -111,7 +136,7 @@ export default function HomePage() {
           <div className="benefit-grid">
             <article><LockKeyhole /><h3>Your records stay on your computer</h3><p>Statements, transactions, budgets, goals, and reports live in the desktop app—not a GODFIN transaction cloud.</p></article>
             <article><RefreshCw /><h3>It remembers your corrections</h3><p>Fix a category, inspect why it was chosen, and let confirmed merchant memory help next time.</p></article>
-            <article><FileCheck2 /><h3>Statements first, no bank login</h3><p>Preview selected HDFC, SBI, and Kotak formats before any row becomes part of your month.</p></article>
+            <article><FileCheck2 /><h3>Classify transactions from Gmail alerts or bank statements</h3><p>Bring in supported Gmail transaction alerts or preview selected HDFC, SBI, and Kotak statement formats before any row becomes part of your month.</p></article>
             <article><WalletCards /><h3>Quick adds fill the gaps</h3><p>Add cash or a recent payment manually, then reconcile it when the official statement arrives.</p></article>
             <article><ChartPie /><h3>Reports answer normal questions</h3><p>See money in, spending, regular payments, goals, and category pressure without building a pivot table.</p></article>
             <article><BookOpen /><h3>Learn while you look</h3><p>Plain-language explanations sit beside calculations, while Max adds evidence-backed money-behaviour reflections.</p></article>
@@ -122,9 +147,7 @@ export default function HomePage() {
       <section className="section story-video-section">
         <div className="shell">
           <div className="section-head center">
-            <div className="eyebrow eyebrow-accent">24 seconds, one sample month</div>
             <h2>See what GODFIN does before you join.</h2>
-            <p>The video is silent and uses the same made-up household as the demo.</p>
           </div>
           <ProductDemoVideo />
         </div>
@@ -168,43 +191,10 @@ export default function HomePage() {
 
       <TrustStrip />
 
-      <section className="section beta-boundary-section">
-        <div className="shell beta-boundary-grid">
-          <div className="boundary-mark"><LockKeyhole size={34} /><span>Local-first</span></div>
-          <div>
-            <div className="eyebrow">What stays private</div>
-            <h2>Your statements and money records stay on your computer.</h2>
-            <p>
-              The desktop app keeps ordinary statements, transactions, categories,
-              goals, and reports locally. The website handles the waitlist, selected
-              beta access, licenses, and feedback only when you use those services.
-            </p>
-            <Link className="button-ghost" href="/privacy">Read the plain-language privacy page</Link>
-          </div>
-        </div>
-      </section>
-
       <section className="section pricing-teaser">
         <div className="shell pricing-teaser-row">
-          <div><div className="eyebrow eyebrow-accent">Planned launch pricing</div><h2>Free to begin. Pay once if you want more.</h2><p>Core remains free. Pro is planned at ₹4,999 once and Max at ₹9,999 once in India. Neither license bundles recurring hosted AI usage.</p></div>
+          <div><div className="eyebrow eyebrow-accent">Built to stay independent</div><h2>Core features remain free. Paid users help fund the project.</h2><p>For people who want more, Pro is planned at ₹4,999 once and Max at ₹9,999 once in India. Neither lifetime license bundles recurring hosted AI usage.</p></div>
           <Link className="button-secondary" href="/pricing">Compare the plans <ArrowRight size={16} /></Link>
-        </div>
-      </section>
-
-      <section className="section waitlist-section" id="waitlist">
-        <div className="shell waitlist-shell">
-          <div className="section-head">
-            <div className="eyebrow eyebrow-accent">Join the early testers</div>
-            <h2>Help make the first public release clearer.</h2>
-            <p>
-              Tell us which computer you use and what you hope to understand better.
-              We will confirm your email, then invite a small group. Never send
-              a statement, account number, balance, PIN, key, or Gmail content.
-            </p>
-          </div>
-          <Suspense fallback={<p className="lead">Loading the early-testers form…</p>}>
-            <WaitlistForm enabled={waitlistEnabled} />
-          </Suspense>
         </div>
       </section>
     </>

@@ -1258,16 +1258,20 @@ body:has(.demo-fullscreen-route) main,
 
 .beta-hero {
   overflow: hidden;
-  padding: 96px 0 84px;
+  padding: 82px 0 76px;
   background:
     radial-gradient(circle at 84% 20%, rgba(126, 191, 163, 0.27), transparent 28%),
     #f2eee5;
 }
 
+.beta-hero .shell {
+  width: min(1580px, calc(100% - clamp(40px, 6vw, 112px)));
+}
+
 .beta-hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(460px, 1.1fr);
-  gap: clamp(46px, 8vw, 100px);
+  grid-template-columns: minmax(340px, 0.72fr) minmax(0, 1.28fr);
+  gap: clamp(34px, 4vw, 68px);
   align-items: center;
 }
 
@@ -1279,6 +1283,12 @@ body:has(.demo-fullscreen-route) main,
   font-size: clamp(52px, 7.4vw, 92px);
   line-height: 0.93;
   letter-spacing: -0.072em;
+}
+
+.beta-hero-copy h1 {
+  max-width: 650px;
+  font-size: clamp(46px, 5.2vw, 76px);
+  line-height: 0.96;
 }
 
 .beta-hero-copy > p,
@@ -1310,7 +1320,7 @@ body:has(.demo-fullscreen-route) main,
   background: #0b1d33;
   color: white;
   box-shadow: 0 38px 90px rgba(20, 55, 63, 0.22);
-  transform: rotate(1.3deg);
+  transform: rotate(0.6deg);
 }
 
 .real-app-window-bar { display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px; border-bottom: 1px solid rgba(255,255,255,.09); background: #071523; }
@@ -1368,9 +1378,30 @@ body:has(.demo-fullscreen-route) main,
 .pricing-teaser { background: #f2eee5; }
 .pricing-teaser-row { display: flex; justify-content: space-between; gap: 60px; align-items: flex-end; }
 .pricing-teaser-row > div { max-width: 760px; }
-.waitlist-section { border-top: 1px solid #ded8cc; background: #e7e0d3; }
+.waitlist-section { scroll-margin-top: 88px; border-top: 1px solid #ded8cc; background: #e7e0d3; }
 .waitlist-section .section-head p,
 .waitlist-section .lead { color: #465866; }
+
+.waitlist-section-priority {
+  border-top: 0;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(201, 243, 107, 0.22), transparent 28%),
+    #e7e0d3;
+}
+
+.beta-reward-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 28px;
+  padding: 20px 22px;
+  border: 1px solid rgba(6, 112, 100, 0.22);
+  border-left: 4px solid var(--teal-dark);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.beta-reward-card strong { font-size: 18px; }
+.beta-reward-card span { color: #465866; font-size: 14px; line-height: 1.6; }
 
 .pricing-editorial-hero { padding: 88px 0 66px; border-bottom: 1px solid #ded8cc; background: #f2eee5; }
 .pricing-editorial-hero h1 { max-width: 940px; }
@@ -1656,9 +1687,11 @@ body:has(.demo-fullscreen-route) main,
 
 .waitlist-grid {
   display: grid;
-  grid-template-columns: 1.4fr 0.55fr 0.8fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
+
+.waitlist-grid-secondary { grid-template-columns: 1.25fr 0.75fr; }
 
 .waitlist-form label {
   display: grid;
@@ -1684,6 +1717,30 @@ body:has(.demo-fullscreen-route) main,
 
 .waitlist-form textarea {
   resize: vertical;
+}
+
+.optional-label {
+  color: var(--teal-dark);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.waitlist-selection-note,
+.waitlist-sensitive-note {
+  margin: -2px 0 15px;
+  color: #52625c;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.waitlist-selection-note {
+  padding: 12px 14px;
+  border-radius: 11px;
+  background: rgba(201, 243, 107, 0.2);
+  color: #304b3a;
+  font-weight: 700;
 }
 
 .waitlist-form input:focus,
@@ -1797,6 +1854,8 @@ body:has(.demo-fullscreen-route) main,
   margin-bottom: 76px;
 }
 
+.product-tour .shell { width: min(1500px, calc(100% - 40px)); }
+
 .product-chapters {
   display: grid;
   gap: clamp(74px, 11vw, 142px);
@@ -1804,8 +1863,8 @@ body:has(.demo-fullscreen-route) main,
 
 .product-chapter {
   display: grid;
-  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
-  gap: clamp(34px, 6vw, 82px);
+  grid-template-columns: minmax(270px, 0.55fr) minmax(0, 1.45fr);
+  gap: clamp(30px, 4vw, 68px);
   align-items: center;
 }
 
@@ -1890,8 +1949,8 @@ body:has(.demo-fullscreen-route) main,
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 1244 / 716;
-  object-fit: cover;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
 }
 
 .product-demo figcaption {

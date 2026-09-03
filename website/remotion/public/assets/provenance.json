@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_repo_sha": "07174fb89de8efd12028d4157cc719b5007cfcc0",
   "canonical_golden_fixture": "backend/tests/fixtures/golden_ledger_v1.json",
   "canonical_golden_fixture_sha256": "4707a31e2aeee1e6b6c51ec0a4eec1e8c5673258be562615569d38d632964df7",
@@ -7,7 +7,15 @@
   "source_date_epoch": 1788048000,
   "public_output": true,
   "external_network_required_at_render": false,
-  "audio": "none",
+  "audio": {
+    "file": "audio/godfin-beta-hero-narration.wav",
+    "model": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "model_revision": "85e237c12c027371202489a0ec509ded67b5e4b5",
+    "model_license": "Apache-2.0",
+    "model_license_url": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "speaker": "Aiden",
+    "voice_source": "model-provided synthetic preset"
+  },
   "sources": [
     {
       "file": "godfin-vault-dial.png",
@@ -20,6 +28,12 @@
       "sha256": "1b5ebfb3a01a97343ac96873e6d59a8cb285c66012b6a1ac509cb2765e995ba8",
       "bytes": 28356,
       "provenance": "font distributed in the pinned Next.js dependency"
+    },
+    {
+      "file": "audio/godfin-beta-hero-narration.wav",
+      "sha256": "c4c27e2789c0d562df3da7900ea967b2723a46f9334056fa0609e0cd96fc5d14",
+      "bytes": 1144364,
+      "provenance": "generated on the private DGX Spark with the Apache-2.0 Qwen3-TTS 0.6B CustomVoice model and built-in Aiden voice; no voice cloning or personal reference audio"
     },
     {
       "file": "captures/dashboard.png",

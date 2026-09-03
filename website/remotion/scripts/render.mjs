@@ -30,7 +30,7 @@ async function run(command, args) {
   });
 }
 
-async function renderVideo({ id, name, codec, crf }) {
+async function renderVideo({ id, name, codec, crf, hasAudio = false }) {
   const selected = await composition(id);
   const extension = codec === "vp9" ? "webm" : "mp4";
   const raw = path.join(temporary, `${name}.raw.${extension}`);
@@ -43,8 +43,12 @@ async function renderVideo({ id, name, codec, crf }) {
     crf,
     outputLocation: raw,
     overwrite: true,
-    muted: true,
-    enforceAudioTrack: false,
+    muted: !hasAudio,
+    enforceAudioTrack: hasAudio,
+    ...(hasAudio ? {
+      audioBitrate: "192K",
+      audioCodec: codec === "vp9" ? "opus" : "aac",
+    } : {}),
     pixelFormat: "yuv420p",
     colorSpace: "bt709",
     x264Preset: codec === "h264" ? "medium" : null,
@@ -62,6 +66,8 @@ async function renderVideo({ id, name, codec, crf }) {
   });
   const metadataArgs = [
     "-y", "-i", raw,
+    "-map", "0:v:0",
+    ...(hasAudio ? ["-map", "0:a:0"] : []),
     "-map_metadata", "-1",
     "-fflags", "+bitexact",
     "-flags:v", "+bitexact",
@@ -69,6 +75,7 @@ async function renderVideo({ id, name, codec, crf }) {
     "-metadata", "comment=",
     "-metadata:s:v:0", "encoder=",
     "-metadata:s:v:0", "handler_name=",
+    ...(hasAudio ? ["-metadata:s:a:0", "encoder=", "-metadata:s:a:0", "handler_name="] : []),
     "-c", "copy",
   ];
   if (codec === "h264") metadataArgs.push("-movflags", "+faststart");
@@ -89,8 +96,8 @@ async function poster({ id, name, frame }) {
   });
 }
 
-await renderVideo({ id: "GodfinBetaHero16x9", name: "godfin-beta-hero", codec: "h264", crf: 18 });
-await renderVideo({ id: "GodfinBetaHero16x9", name: "godfin-beta-hero", codec: "vp9", crf: 28 });
+await renderVideo({ id: "GodfinBetaHero16x9", name: "godfin-beta-hero", codec: "h264", crf: 18, hasAudio: true });
+await renderVideo({ id: "GodfinBetaHero16x9", name: "godfin-beta-hero", codec: "vp9", crf: 28, hasAudio: true });
 await poster({ id: "GodfinBetaHero16x9", name: "godfin-beta-hero", frame: 270 });
 await renderVideo({ id: "GodfinDemoWalkthrough16x9", name: "godfin-demo-walkthrough", codec: "h264", crf: 18 });
 await renderVideo({ id: "GodfinDemoWalkthrough16x9", name: "godfin-demo-walkthrough", codec: "vp9", crf: 28 });

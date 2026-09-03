@@ -6,7 +6,9 @@ import {
   betaLicenseKeyForTester,
   cleanText,
   containsSensitiveFeedback,
+  containsSensitiveWaitlistProfile,
   inferredCountry,
+  normalizeBankNames,
   normalizeEmail,
   safeAuthNext,
 } from "@/lib/beta";
@@ -72,4 +74,24 @@ test("feedback text is bounded and obvious secrets are rejected", () => {
   assert.equal(containsSensitiveFeedback("GODFIN-BETA-AAAA-BBBB-CCCC-DDDD"), true);
   assert.equal(containsSensitiveFeedback("My account is 1234567890123456"), true);
   assert.equal(containsSensitiveFeedback("The button stayed disabled after I clicked it."), false);
+});
+
+test("waitlist profile fields normalize bank names and reject financial identifiers", () => {
+  assert.deepEqual(
+    normalizeBankNames("HDFC Bank, SBI; hdfc bank\nKotak Mahindra Bank"),
+    ["HDFC Bank", "SBI", "Kotak Mahindra Bank"],
+  );
+  assert.deepEqual(normalizeBankNames(" , \n "), []);
+  assert.equal(
+    containsSensitiveWaitlistProfile("I want help understanding irregular spending."),
+    false,
+  );
+  assert.equal(
+    containsSensitiveWaitlistProfile("My account number is 123456789012"),
+    true,
+  );
+  assert.equal(
+    containsSensitiveWaitlistProfile("My UPI address is person@oksbi"),
+    true,
+  );
 });

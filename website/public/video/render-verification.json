@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "verified_at": "2026-09-01T01:04:10.631Z",
+  "schema_version": 3,
+  "verified_at": "2026-09-03T18:40:03.502Z",
   "frame_hash_format": "rawvideo:yuv420p",
   "files": [
     {
@@ -9,8 +9,9 @@
       "height": 1080,
       "duration": 24,
       "codec": "h264",
-      "bytes": 9804090,
-      "sha256": "00d0218a4f2c65026f2bf7e03a0fbef1eb24f768e0564be04b59e09b253e866c",
+      "audioCodec": "aac",
+      "bytes": 10391432,
+      "sha256": "1c645aaf43f076d2f1bee3d2e5188fb3b6b83c34e7209b1b36493f2d3b73517f",
       "frame_hashes": [
         {
           "percent": 0,
@@ -40,8 +41,9 @@
       "height": 1080,
       "duration": 24,
       "codec": "vp9",
-      "bytes": 8044940,
-      "sha256": "1557d4dcc00d0e5c3588f31a7d12b525360094dd3051e35055fd2f32d3c9f8dc",
+      "audioCodec": "opus",
+      "bytes": 8565384,
+      "sha256": "616260d13c1b9bf66d1508926fac8b8ce0bb7f96f3f295b780269451d447667e",
       "frame_hashes": [
         {
           "percent": 0,
