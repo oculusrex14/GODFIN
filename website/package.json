@@ -21,22 +21,22 @@
     "beta:ops": "tsx scripts/beta-ops.ts"
   },
   "dependencies": {
-    "@supabase/ssr": "0.12.3",
-    "@supabase/supabase-js": "2.110.9",
-    "lucide-react": "0.468.0",
-    "next": "15.5.22",
-    "react": "19.1.9",
-    "react-dom": "19.1.9",
-    "resend": "6.18.1"
+    "@supabase/ssr": "0.12.6",
+    "@supabase/supabase-js": "2.115.0",
+    "lucide-react": "1.41.0",
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "resend": "6.26.0"
   },
   "devDependencies": {
-    "@types/node": "22.10.2",
-    "@types/react": "19.1.17",
-    "@types/react-dom": "19.1.11",
-    "eslint": "8.57.1",
-    "eslint-config-next": "15.5.22",
-    "tsx": "4.23.12",
-    "typescript": "5.7.2"
+    "@types/node": "26.4.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "eslint": "10.10.0",
+    "eslint-config-next": "16.3.4",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
   },
   "engines": {
     "node": ">=22.0.0"
